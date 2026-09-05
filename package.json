@@ -2,25 +2,18 @@
   "name": "devpulse",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "projects/code-editor/frontend",
+    "projects/code-editor/backend"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.3",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "dev:editor": "npm run dev --workspace=projects/code-editor/frontend & npm run dev --workspace=projects/code-editor/backend",
+    "dev:frontend": "npm run dev --workspace=projects/code-editor/frontend",
+    "dev:backend": "npm run dev --workspace=projects/code-editor/backend",
+    "build": "npm run build --workspaces --if-present"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.3",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5.0.0"
   }
 }
