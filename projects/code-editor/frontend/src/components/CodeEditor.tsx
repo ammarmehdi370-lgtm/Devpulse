@@ -46,7 +46,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
         language={activeTab.language}
         value={activeTab.content}
         theme="vs-dark"
-        onChange={(val) => onChange(val || '')}
+        onChange={(val: string | undefined) => onChange(val || '')}
         onMount={handleEditorMount}
         options={{
           fontSize: 14,
