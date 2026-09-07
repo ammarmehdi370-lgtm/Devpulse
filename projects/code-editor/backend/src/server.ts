@@ -11,6 +11,15 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+app.get('/', (_req: Request, res: Response) => {
+  res.json({
+    service: 'DevPulse Code Editor Backend',
+    status: 'ok',
+    frontend: 'http://localhost:5173',
+    health: '/api/health',
+  });
+});
+
 const WORKSPACE_DIR = path.resolve(__dirname, '../demo_workspace');
 
 // Ensure workspace directory exists
