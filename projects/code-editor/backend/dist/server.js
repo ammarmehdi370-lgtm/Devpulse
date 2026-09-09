@@ -3,11 +3,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const child_process_1 = require("child_process");
+const database_1 = require("./database");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
 app.use((0, cors_1.default)());
@@ -76,8 +78,13 @@ function getSanitizedPath(relPath) {
 }
 // Routes
 // Health check
-app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.get('/api/health', async (_req, res) => {
+    try {
+        res.json({ status: 'ok', timestamp: new Date().toISOString(), database: await (0, database_1.getDatabaseStatus)() });
+    }
+    catch (err) {
+        res.status(503).json({ status: 'error', timestamp: new Date().toISOString(), database: { connected: false }, error: err.message });
+    }
 });
 // Get file tree
 app.get('/api/files', (_req, res) => {
@@ -262,7 +269,17 @@ app.post('/api/execute', (req, res) => {
         });
     });
 });
-app.listen(PORT, () => {
-    console.log(`🚀 Code Editor Backend running on http://localhost:${PORT}`);
-    console.log(`📁 Workspace directory: ${WORKSPACE_DIR}`);
-});
+async function startServer() {
+    try {
+        await (0, database_1.initializeDatabase)();
+        app.listen(PORT, () => {
+            console.log(`🚀 Code Editor Backend running on http://localhost:${PORT}`);
+            console.log(`📁 Workspace directory: ${WORKSPACE_DIR}`);
+        });
+    }
+    catch (err) {
+        console.error('Unable to connect to PostgreSQL. Set DATABASE_URL and ensure PostgreSQL is running.', err);
+        process.exitCode = 1;
+    }
+}
+startServer();

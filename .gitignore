@@ -3,6 +3,7 @@
 # dependencies
 /node_modules
 **/node_modules/
+/projects/code-editor/backend/data/
 /.pnp
 .pnp.*
 .yarn/*

@@ -8,13 +8,14 @@
     "projects/code-editor/backend"
   ],
   "scripts": {
-    "dev:editor": "npm run dev --workspace=projects/code-editor/frontend & npm run dev --workspace=projects/code-editor/backend",
+    "dev:editor": "concurrently --kill-others-on-fail \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "npm run dev --workspace=projects/code-editor/frontend",
     "dev:backend": "npm run dev --workspace=projects/code-editor/backend",
     "build": "npm run build --workspaces --if-present"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "concurrently": "^10.0.5",
     "typescript": "^5.0.0"
   }
 }
