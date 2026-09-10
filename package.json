@@ -3,19 +3,37 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/*",
-    "projects/code-editor/frontend",
-    "projects/code-editor/backend"
+    "packages/*"
   ],
   "scripts": {
     "dev:editor": "concurrently --kill-others-on-fail \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "dev:frontend": "npm run dev --workspace=projects/code-editor/frontend",
-    "dev:backend": "npm run dev --workspace=projects/code-editor/backend",
+    "dev:frontend": "next dev -p 5173",
+    "dev:backend": "tsx src/server/index.ts",
     "build": "npm run build --workspaces --if-present"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "concurrently": "^10.0.5",
+    "tsx": "^4.19.4",
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.124.0",
+    "@monaco-editor/react": "^4.7.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "next": "^16.3.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "zod": "^4.6.1"
   }
 }

@@ -355,7 +355,7 @@ GOOGLE_CALLBACK_URL=http://localhost:5000/api/auth/google/callback
 
 # Anthropic
 ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-sonnet-4-6
 
 # Email verification
 SMTP_HOST=
