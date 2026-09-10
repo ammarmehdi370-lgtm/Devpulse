@@ -57,6 +57,22 @@ $env:DATABASE_URL = "postgresql://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432
 
 The backend creates its application tables automatically when it starts. For persistent local setup, copy `.env.example` to `.env` and replace the password in `DATABASE_URL`.
 
+## Authentication and email verification
+
+Copy `.env.example` to `.env`, set a long random `JWT_SECRET`, and configure SMTP for real email delivery. Without SMTP settings, registration still works in development and the backend prints the verification link in its terminal.
+
+Authentication endpoints:
+
+```text
+POST /api/auth/register       { "email": "you@example.com", "password": "at-least-8-chars" }
+GET  /api/auth/verify-email?token=...
+POST /api/auth/resend-verification { "email": "you@example.com" }
+POST /api/auth/login          { "email": "you@example.com", "password": "..." }
+GET  /api/auth/me             Authorization: Bearer <jwt>
+```
+
+Passwords are stored as bcrypt hashes. Verification tokens are stored only as SHA-256 hashes and expire after 24 hours. Login is blocked until the email address is verified.
+
 ## Run locally
 
 Start both services with one command:

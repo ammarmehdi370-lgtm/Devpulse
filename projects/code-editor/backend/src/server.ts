@@ -4,6 +4,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
+import authRouter from './auth';
 import { getDatabaseStatus, initializeDatabase } from './database';
 import { FileNode, ExecutionRequest, ExecutionResponse, SaveFileRequest, CreateFileRequest } from '@devpulse/shared-types';
 
@@ -12,6 +13,7 @@ const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use('/api/auth', authRouter);
 
 app.get('/', (_req: Request, res: Response) => {
   res.json({
@@ -87,7 +89,12 @@ function getSanitizedPath(relPath: string): string | null {
 // Health check
 app.get('/api/health', async (_req: Request, res: Response) => {
   try {
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), database: await getDatabaseStatus() });
+    res.json({
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      database: await getDatabaseStatus(),
+      email: { smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) },
+    });
   } catch (err: any) {
     res.status(503).json({ status: 'error', timestamp: new Date().toISOString(), database: { connected: false }, error: err.message });
   }

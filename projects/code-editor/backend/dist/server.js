@@ -9,11 +9,13 @@ const cors_1 = __importDefault(require("cors"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const child_process_1 = require("child_process");
+const auth_1 = __importDefault(require("./auth"));
 const database_1 = require("./database");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT || 5000;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json({ limit: '10mb' }));
+app.use('/api/auth', auth_1.default);
 app.get('/', (_req, res) => {
     res.json({
         service: 'DevPulse Code Editor Backend',
@@ -80,7 +82,12 @@ function getSanitizedPath(relPath) {
 // Health check
 app.get('/api/health', async (_req, res) => {
     try {
-        res.json({ status: 'ok', timestamp: new Date().toISOString(), database: await (0, database_1.getDatabaseStatus)() });
+        res.json({
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            database: await (0, database_1.getDatabaseStatus)(),
+            email: { smtpConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD) },
+        });
     }
     catch (err) {
         res.status(503).json({ status: 'error', timestamp: new Date().toISOString(), database: { connected: false }, error: err.message });

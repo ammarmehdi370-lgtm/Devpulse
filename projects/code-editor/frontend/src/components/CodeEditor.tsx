@@ -15,20 +15,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({
 }) => {
   if (!activeTab) {
     return (
-      <div
-        className="monaco-wrapper"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--text-muted)',
-          fontSize: '14px',
-        }}
-      >
-        <div style={{ marginBottom: '8px', opacity: 0.5 }}>⚡ DevPulse Code Studio</div>
-        <div>Select a file from the explorer on the left or create a new file.</div>
-      </div>
+      <div className="monaco-wrapper empty-editor" aria-label="No file selected" />
     );
   }
 
