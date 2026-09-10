@@ -41,3 +41,5 @@ export interface SaveFileRequest {
   path: string;
   content: string;
 }
+
+export * from "./chat";
