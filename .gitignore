@@ -1,0 +1,16 @@
+node_modules
+.pnpm-store
+.turbo
+dist
+build
+coverage
+.next
+expo-env.d.ts
+*.log
+.env
+.env.*
+!.env.example
+!.env.test
+*.tsbuildinfo
+prisma/*.db
+prisma/*.db-journal

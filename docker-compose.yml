@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-devpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-devpulse}
+    ports: ['5432:5432']
+    volumes: [devpulse-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-devpulse} -d ${POSTGRES_DB:-devpulse}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+    volumes: [devpulse-redis:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: ${S3_MINIO_ROOT_USER:-devpulse}
+      MINIO_ROOT_PASSWORD: ${S3_MINIO_ROOT_PASSWORD:-devpulse-local-password}
+    ports: ['9000:9000', '9001:9001']
+    volumes: [devpulse-minio:/data]
+
+  web:
+    image: node:20-bookworm
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/web dev"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_SOCKET_URL: http://localhost:4001
+    ports: ['3000:3000']
+    volumes: ['.:/workspace', 'web-node-modules:/workspace/node_modules']
+    depends_on: [api, socket]
+
+  api:
+    image: node:20-bookworm
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/database db:generate && pnpm --filter @devpulse/api dev"
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      APP_URL: http://localhost:3000
+      DATABASE_URL: postgresql://devpulse:devpulse@postgres:5432/devpulse?schema=public
+      DIRECT_DATABASE_URL: postgresql://devpulse:devpulse@postgres:5432/devpulse?schema=public
+      REDIS_URL: redis://redis:6379
+    ports: ['4000:4000']
+    volumes: ['.:/workspace', 'api-node-modules:/workspace/node_modules']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  socket:
+    image: node:20-bookworm
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/socket dev"
+    environment:
+      NODE_ENV: development
+      SOCKET_PORT: 4001
+      APP_URL: http://localhost:3000
+      REDIS_URL: redis://redis:6379
+    ports: ['4001:4001']
+    volumes: ['.:/workspace', 'socket-node-modules:/workspace/node_modules']
+    depends_on: [redis]
+
+  ai:
+    image: node:20-bookworm
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/ai dev"
+    environment:
+      NODE_ENV: development
+      AI_PORT: 4002
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-5-sonnet-latest}
+    ports: ['4002:4002']
+    volumes: ['.:/workspace', 'ai-node-modules:/workspace/node_modules']
+
+  mobile:
+    image: node:20-bookworm
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/mobile dev -- --lan"
+    environment:
+      EXPO_PUBLIC_API_URL: http://localhost:4000
+      EXPO_PUBLIC_SOCKET_URL: http://localhost:4001
+    ports: ['8081:8081', '19000:19000', '19001:19001', '19002:19002']
+    volumes: ['.:/workspace', 'mobile-node-modules:/workspace/node_modules']
+    depends_on: [api]
+
+volumes:
+  devpulse-postgres:
+  devpulse-redis:
+  devpulse-minio:
+  web-node-modules:
+  api-node-modules:
+  socket-node-modules:
+  ai-node-modules:
+  mobile-node-modules:

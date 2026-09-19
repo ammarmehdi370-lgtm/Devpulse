@@ -1,0 +1,12 @@
+{
+  "name": "@devpulse/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": { "build": "tsup src/index.ts --format esm --dts", "db:migrate": "prisma migrate dev", "db:generate": "prisma generate", "db:seed": "tsx prisma/seed.ts", "db:studio": "prisma studio", "lint": "eslint .", "typecheck": "tsc --noEmit", "test": "vitest run --passWithNoTests" },
+  "dependencies": { "@prisma/client": "^6.1.0" },
+  "devDependencies": { "@devpulse/config": "workspace:*", "@types/node": "^22.10.2", "eslint": "^9.16.0", "prisma": "^6.1.0", "tsx": "^4.19.2", "tsup": "^8.3.5", "typescript": "^5.7.2", "vitest": "^2.1.8" },
+  "prisma": { "seed": "tsx prisma/seed.ts" }
+}

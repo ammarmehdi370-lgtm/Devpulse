@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "Devpulse",
+    "slug": "devpulse",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": { "backgroundColor": "#0A0A0F" },
+    "ios": { "supportsTablet": true },
+    "android": { "adaptiveIcon": { "backgroundColor": "#0A0A0F" } }
+  }
+}

@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+enum ChannelType {
+  PUBLIC
+  PRIVATE
+  DIRECT
+}
+
+model User {
+  id           String            @id @default(cuid())
+  email        String            @unique
+  name         String?
+  avatarUrl    String?
+  passwordHash String?
+  memberships  WorkspaceMember[]
+  ownedSpaces  Workspace[]       @relation("WorkspaceOwner")
+  messages     Message[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+}
+
+model Workspace {
+  id          String            @id @default(cuid())
+  name        String
+  slug        String            @unique
+  plan        Plan              @default(FREE)
+  ownerId     String
+  owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  memberships WorkspaceMember[]
+  projects    Project[]
+  channels    Channel[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  @@index([ownerId])
+}
+
+model WorkspaceMember {
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt    DateTime      @default(now())
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+model Project {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  name          String
+  defaultBranch String        @default("main")
+  workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  files         File[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  @@index([workspaceId])
+}
+
+model File {
+  id         String        @id @default(cuid())
+  projectId  String
+  path       String
+  content    String        @default("")
+  language   String?
+  version    Int           @default(1)
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revisions  FileRevision[]
+  updatedAt  DateTime      @updatedAt
+  @@unique([projectId, path])
+  @@index([projectId])
+}
+
+model FileRevision {
+  id        String   @id @default(cuid())
+  fileId    String
+  version   Int
+  content   String
+  authorId  String?
+  file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([fileId, version])
+}
+
+model Channel {
+  id          String      @id @default(cuid())
+  workspaceId String
+  name        String
+  type        ChannelType @default(PUBLIC)
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages    Message[]
+  createdAt   DateTime    @default(now())
+  @@index([workspaceId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  channelId String
+  authorId  String
+  body      String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+  editedAt  DateTime?
+  deletedAt DateTime?
+  @@index([channelId, createdAt])
+}

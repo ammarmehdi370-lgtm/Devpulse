@@ -1,0 +1,11 @@
+{
+  "name": "@devpulse/config",
+  "version": "0.1.0",
+  "private": true,
+  "exports": { "./tsconfig.base.json": "./tsconfig.base.json", "./eslint": "./eslint/index.js", "./tailwind": "./tailwind.config.js" },
+  "files": ["tsconfig.base.json", "eslint", "tailwind.config.js"],
+  "dependencies": {
+    "@eslint/js": "^9.16.0",
+    "typescript-eslint": "^8.18.0"
+  }
+}
