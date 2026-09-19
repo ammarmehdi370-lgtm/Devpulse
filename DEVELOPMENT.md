@@ -12,6 +12,16 @@ Enable pnpm through Corepack if needed:
 corepack enable
 ```
 
+If PowerShell reports that `pnpm` is not recognized, or Corepack cannot write to
+`C:\Program Files\nodejs`, use the Corepack-prefixed command instead. It does
+not require administrator permissions:
+
+```powershell
+corepack pnpm install
+```
+
+Use `corepack pnpm` in place of `pnpm` for the remaining commands in this file.
+
 ## First-time setup
 
 From the repository root:
