@@ -5,8 +5,9 @@
   "packageManager": "pnpm@9.15.0",
   "engines": { "node": ">=20.10.0" },
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
+    "dev": "npm --prefix apps/web run dev",
+    "dev:turbo": "turbo dev",
+    "build": "npm --prefix apps/web run build",
     "test": "turbo test",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
