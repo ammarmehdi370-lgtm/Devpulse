@@ -1,93 +1,133 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
-import { 
-  Layers, 
-  Mic, 
-  MicOff, 
-  Video, 
-  VideoOff, 
-  Lock, 
-  Unlock, 
-  Terminal, 
-  MessageSquare, 
-  Radio, 
-  Check, 
-  X, 
-  Wifi, 
-  Share2, 
-  Monitor, 
-  Clock, 
-  Users, 
+import React, { useState, useEffect } from "react";
+import { useApp } from "../context/AppContext";
+import { io, Socket } from "socket.io-client";
+import {
+  Layers,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff,
+  Lock,
+  Unlock,
+  Terminal,
+  MessageSquare,
+  Radio,
+  Check,
+  X,
+  Wifi,
+  Share2,
+  Monitor,
+  Clock,
+  Users,
   Activity,
-  Maximize2
-} from 'lucide-react';
+  Maximize2,
+} from "lucide-react";
 
 export const RemoteControlPage: React.FC = () => {
-  const { 
-    theme, 
-    setPage, 
-    remoteCode, 
-    updateRemoteCode, 
-    isRemoteControlling, 
+  const {
+    theme,
+    setPage,
+    remoteCode,
+    updateRemoteCode,
+    isRemoteControlling,
     setIsRemoteControlling,
     isRemoteMuted,
     setIsRemoteMuted,
     isRemoteCameraOn,
-    setIsRemoteCameraOn
+    setIsRemoteCameraOn,
   } = useApp();
 
-  const [seconds, setSeconds] = useState(872); // 00:14:32
+  const [seconds, setSeconds] = useState(0);
   const [latency, setLatency] = useState(18);
   const [ahmedTyping, setAhmedTyping] = useState(true);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
+  const [remoteSelection, setRemoteSelection] = useState({ start: 0, end: 0 });
+  const workspaceId = "demo";
 
-  // Timer simulation
   useEffect(() => {
-    const timer = setInterval(() => {
-      setSeconds(s => s + 1);
-    }, 1000);
-    return () => clearInterval(timer);
+    const client = io(
+      process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4001",
+      { transports: ["websocket"] },
+    );
+    setSocket(client);
+    client.emit("workspace:join", workspaceId);
+    client.emit("presence:update", { workspaceId, status: "controlling" });
+    client.on("session:state", (payload: { startedAt: number }) =>
+      setSessionStartedAt(payload.startedAt),
+    );
+    client.on("code:changed", (payload: { code: string }) =>
+      updateRemoteCode(payload.code),
+    );
+    client.on("cursor:changed", (payload: { start: number; end: number }) =>
+      setRemoteSelection({ start: payload.start, end: payload.end }),
+    );
+    client.on("typing:changed", (payload: { typing: boolean }) =>
+      setAhmedTyping(payload.typing),
+    );
+    return () => {
+      client.emit("workspace:leave", workspaceId);
+      client.disconnect();
+      setSocket(null);
+    };
   }, []);
 
-  // Latency pulse
+  useEffect(() => {
+    if (!sessionStartedAt) return;
+    const updateTimer = () =>
+      setSeconds(
+        Math.max(0, Math.floor((Date.now() - sessionStartedAt) / 1000)),
+      );
+    updateTimer();
+    const timer = setInterval(updateTimer, 1000);
+    return () => clearInterval(timer);
+  }, [sessionStartedAt]);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setLatency(17 + Math.floor(Math.random() * 3));
-      setAhmedTyping(Math.random() > 0.3);
     }, 2400);
     return () => clearInterval(interval);
   }, []);
+
+  const handleRemoteCodeChange = (code: string, start: number, end: number) => {
+    updateRemoteCode(code);
+    socket?.emit("code:change", { workspaceId, code, revision: Date.now() });
+    socket?.emit("cursor:update", { workspaceId, start, end });
+    socket?.emit("typing:update", { workspaceId, typing: true });
+  };
 
   const formatTime = (totalSeconds: number) => {
     const hrs = Math.floor(totalSeconds / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
     const secs = totalSeconds % 60;
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
   const handleStopSession = () => {
-    if (confirm('Stop collaborative remote programming session?')) {
-      setPage('editor');
+    if (confirm("Stop collaborative remote programming session?")) {
+      setPage("editor");
     }
   };
 
   return (
     <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-[#07070c] text-white overflow-hidden font-sans select-none">
-      
       {/* Top Remote Control Status Bar (Pixel-Perfect to Screenshot 2) */}
       <div className="h-12 bg-[#0c0c14] border-b border-[#1c1c2b] px-4 flex items-center justify-between shrink-0 font-mono text-xs z-30">
-        
         {/* Left: Brand + Controlling Info */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div 
+            <div
               className="w-6 h-6 rounded-lg flex items-center justify-center text-[#09090e] font-bold text-xs"
               style={{ backgroundColor: theme.primary }}
             >
               <Layers className="w-3.5 h-3.5" />
             </div>
-            <span className="font-bold text-white hidden sm:inline">Codeplane</span>
+            <span className="font-bold text-white hidden sm:inline">
+              Devpulse
+            </span>
           </div>
 
           <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#f43f5e]/15 border border-[#f43f5e]/30 text-[#f43f5e] text-[10px] font-bold">
@@ -96,7 +136,8 @@ export const RemoteControlPage: React.FC = () => {
           </div>
 
           <div className="text-[#a4a4c6] font-medium hidden md:inline">
-            Controlling: <strong className="text-white">Ahmed&apos;s Workspace</strong>
+            Controlling:{" "}
+            <strong className="text-white">Ahmed&apos;s Workspace</strong>
           </div>
 
           <div className="flex items-center gap-1.5 text-[11px] text-[#0DF5C4]">
@@ -151,7 +192,6 @@ export const RemoteControlPage: React.FC = () => {
 
       {/* Dual Split-Screen Collaborative Workspace (Pixel-Perfect to Screenshot 2) */}
       <div className="flex-1 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[#1c1c2b] overflow-hidden">
-        
         {/* Left Pane: YOUR VIEW (Alex) */}
         <div className="flex flex-col bg-[#09090f] overflow-hidden">
           {/* Sub-Header */}
@@ -187,8 +227,11 @@ export const RemoteControlPage: React.FC = () => {
           <div className="flex-1 flex overflow-hidden font-mono text-xs relative">
             {/* Line Numbers */}
             <div className="w-10 bg-[#09090f] py-4 pr-2 text-right text-[#45455c] select-none border-r border-[#171722] shrink-0 space-y-1">
-              {remoteCode.split('\n').map((_, i) => (
-                <div key={i} className={`h-5 text-[11px] ${i + 1 === 16 ? 'text-[#0DF5C4] font-bold' : ''}`}>
+              {remoteCode.split("\n").map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-5 text-[11px] ${i + 1 === 16 ? "text-[#0DF5C4] font-bold" : ""}`}
+                >
                   {i + 1}
                 </div>
               ))}
@@ -198,7 +241,13 @@ export const RemoteControlPage: React.FC = () => {
             <div className="flex-1 relative overflow-auto p-4 bg-[#09090f]">
               <textarea
                 value={remoteCode}
-                onChange={(e) => updateRemoteCode(e.target.value)}
+                onChange={(e) =>
+                  handleRemoteCodeChange(
+                    e.target.value,
+                    e.target.selectionStart,
+                    e.target.selectionEnd,
+                  )
+                }
                 spellCheck={false}
                 className="w-full h-full bg-transparent text-[#d8d8e8] font-mono text-xs leading-5 resize-none focus:outline-none selection:bg-[#6C63FF]/30 select-text"
               />
@@ -246,8 +295,11 @@ export const RemoteControlPage: React.FC = () => {
           <div className="flex-1 flex overflow-hidden font-mono text-xs relative opacity-95">
             {/* Line Numbers */}
             <div className="w-10 bg-[#09090f] py-4 pr-2 text-right text-[#45455c] select-none border-r border-[#171722] shrink-0 space-y-1">
-              {remoteCode.split('\n').map((_, i) => (
-                <div key={i} className={`h-5 text-[11px] ${i + 1 === 16 ? 'text-[#FF9E64] font-bold' : ''}`}>
+              {remoteCode.split("\n").map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-5 text-[11px] ${i + 1 === 16 ? "text-[#FF9E64] font-bold" : ""}`}
+                >
                   {i + 1}
                 </div>
               ))}
@@ -266,66 +318,86 @@ export const RemoteControlPage: React.FC = () => {
             </div>
           </div>
         </div>
-
       </div>
 
       {/* Bottom Collaboration Toolbar (Pixel-Perfect to Screenshot 2) */}
       <div className="h-12 bg-[#0c0c14] border-t border-[#1c1c2b] px-4 flex items-center justify-between shrink-0 font-mono text-xs z-30">
-        
         {/* Left Controls: Mic, Camera, Release Control */}
         <div className="flex items-center gap-2 sm:gap-3">
           <button
-            onClick={() => setIsRemoteMuted(prev => !prev)}
+            onClick={() => setIsRemoteMuted((prev) => !prev)}
             className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition-colors ${
-              isRemoteMuted ? 'bg-[#181824] border-[#252536] text-[#8e8ea6]' : 'bg-[#0DF5C4]/15 border-[#0DF5C4]/40 text-[#0DF5C4]'
+              isRemoteMuted
+                ? "bg-[#181824] border-[#252536] text-[#8e8ea6]"
+                : "bg-[#0DF5C4]/15 border-[#0DF5C4]/40 text-[#0DF5C4]"
             }`}
           >
-            {isRemoteMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-            <span>{isRemoteMuted ? 'Mute' : 'Unmuted'}</span>
+            {isRemoteMuted ? (
+              <MicOff className="w-3.5 h-3.5" />
+            ) : (
+              <Mic className="w-3.5 h-3.5" />
+            )}
+            <span>{isRemoteMuted ? "Mute" : "Unmuted"}</span>
           </button>
 
           <button
-            onClick={() => setIsRemoteCameraOn(prev => !prev)}
+            onClick={() => setIsRemoteCameraOn((prev) => !prev)}
             className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition-colors ${
-              isRemoteCameraOn ? 'bg-[#181824] border-[#252536] text-[#c4c4dc]' : 'bg-[#181824] border-[#252536] text-[#6b6b85]'
+              isRemoteCameraOn
+                ? "bg-[#181824] border-[#252536] text-[#c4c4dc]"
+                : "bg-[#181824] border-[#252536] text-[#6b6b85]"
             }`}
           >
-            {isRemoteCameraOn ? <Video className="w-3.5 h-3.5 text-[#0DF5C4]" /> : <VideoOff className="w-3.5 h-3.5" />}
+            {isRemoteCameraOn ? (
+              <Video className="w-3.5 h-3.5 text-[#0DF5C4]" />
+            ) : (
+              <VideoOff className="w-3.5 h-3.5" />
+            )}
             <span>Camera On</span>
           </button>
 
           <button
-            onClick={() => setIsRemoteControlling(prev => !prev)}
+            onClick={() => setIsRemoteControlling((prev) => !prev)}
             className="px-4 py-1.5 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-1.5 shadow transition-all hover:brightness-110"
             style={{ backgroundColor: theme.primary }}
           >
             <Lock className="w-3.5 h-3.5 text-[#09090e]" />
-            <span>{isRemoteControlling ? 'Release Control' : 'Request Control'}</span>
+            <span>
+              {isRemoteControlling ? "Release Control" : "Request Control"}
+            </span>
           </button>
 
           <label className="hidden lg:flex items-center gap-1.5 text-xs text-[#8c8ca5] cursor-pointer ml-2">
-            <input type="checkbox" defaultChecked className="rounded accent-[#6C63FF]" />
+            <input
+              type="checkbox"
+              defaultChecked
+              className="rounded accent-[#6C63FF]"
+            />
             <span>Follow Ahmed&apos;s Scroll</span>
           </label>
         </div>
 
         {/* Right Controls: Share Terminal, Chat, Stream Quality */}
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => alert('Terminal sharing enabled. Port 8080 forwarded.')}
+          <button
+            onClick={() =>
+              alert("Terminal sharing enabled. Port 8080 forwarded.")
+            }
             className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141420] hover:bg-[#1c1c2a] border border-[#232336] text-[#a4a4c6] hover:text-white transition-colors"
           >
             <Terminal className="w-3.5 h-3.5" />
             <span>Share Terminal</span>
           </button>
 
-          <button 
-            onClick={() => setPage('chat')}
+          <button
+            onClick={() => setPage("chat")}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141420] hover:bg-[#1c1c2a] border border-[#232336] text-white transition-colors"
           >
             <MessageSquare className="w-3.5 h-3.5 text-[#6C63FF]" />
             <span>Chat</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-[#6C63FF] text-[10px] text-white font-bold">2</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-[#6C63FF] text-[10px] text-white font-bold">
+              2
+            </span>
           </button>
 
           <div className="hidden xl:flex items-center gap-3 text-[11px] text-[#71718c] pl-2 border-l border-[#1f1f2e]">
@@ -333,9 +405,7 @@ export const RemoteControlPage: React.FC = () => {
             <span className="text-[#0DF5C4]">📶 Loss: 0.0% · 18.4 Mbps</span>
           </div>
         </div>
-
       </div>
-
     </div>
   );
 };

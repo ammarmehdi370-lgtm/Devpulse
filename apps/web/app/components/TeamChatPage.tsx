@@ -1,23 +1,23 @@
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import { useApp } from '../context/AppContext';
-import { 
-  Hash, 
-  Send, 
-  Paperclip, 
-  Smile, 
-  Users, 
-  Pin, 
-  FileText, 
-  Download, 
-  Code2, 
-  Heart, 
-  ThumbsUp, 
+import React, { useState } from "react";
+import { useApp } from "../context/AppContext";
+import {
+  Hash,
+  Send,
+  Paperclip,
+  Smile,
+  Users,
+  Pin,
+  FileText,
+  Download,
+  Code2,
+  Heart,
+  ThumbsUp,
   Plus,
   Search,
-  Bot
-} from 'lucide-react';
+  Bot,
+} from "lucide-react";
 
 interface ChatMessage {
   id: number;
@@ -40,19 +40,20 @@ interface ChatMessage {
 
 export const TeamChatPage: React.FC = () => {
   const { theme, user } = useApp();
-  const [activeChannel, setActiveChannel] = useState('frontend');
-  const [messageInput, setMessageInput] = useState('');
+  const [activeChannel, setActiveChannel] = useState("frontend");
+  const [messageInput, setMessageInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
-      sender: 'Sarah Lin',
-      role: 'Staff UI Engineer',
-      roleColor: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=faces',
-      time: '10:24 AM',
+      sender: "Sarah Lin",
+      role: "Staff UI Engineer",
+      roleColor: "bg-violet-500/20 text-violet-300 border-violet-500/30",
+      avatar:
+        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=faces",
+      time: "10:24 AM",
       text: "Hey team, pushed the new optimistic updates look for the cloud terminal. Can someone review before we merge into staging? Here's the core diff:",
       hasCode: true,
-      codeFilename: 'packages/hooks/useOptimisticMutation.ts',
+      codeFilename: "packages/hooks/useOptimisticMutation.ts",
       codeSnippet: `export function useOptimisticMutation<TData, TVariables>(
   mutationFn: (variables: TVariables) => Promise<TData>,
   options?: OptimisticOptions<TData>
@@ -67,23 +68,27 @@ export const TeamChatPage: React.FC = () => {
 
   return { trigger, state };
 }`,
-      reactions: [{ emoji: '🔥', count: 3 }, { emoji: '❤️', count: 2 }]
+      reactions: [
+        { emoji: "🔥", count: 3 },
+        { emoji: "❤️", count: 2 },
+      ],
     },
     {
       id: 2,
-      sender: 'Marcus Vance',
-      role: 'DevOps',
-      roleColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces',
-      time: '10:31 AM',
+      sender: "Marcus Vance",
+      role: "DevOps",
+      roleColor: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+      avatar:
+        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces",
+      time: "10:31 AM",
       text: "Looks super clean @Sarah! Verified the edge cache invalidation latency. Also attaching the benchmark profile from the us-east cluster run:",
       attachment: {
-        name: 'edge-benchmarks-v2.4.json',
-        size: '142 KB',
-        sub: 'p99 latency: 14.2ms'
+        name: "edge-benchmarks-v2.4.json",
+        size: "142 KB",
+        sub: "p99 latency: 14.2ms",
       },
-      reactions: [{ emoji: '🙌', count: 1 }]
-    }
+      reactions: [{ emoji: "🙌", count: 1 }],
+    },
   ]);
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -94,20 +99,19 @@ export const TeamChatPage: React.FC = () => {
       id: Date.now(),
       sender: user.name,
       role: user.role,
-      roleColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+      roleColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
       avatar: user.avatar,
-      time: 'Just now',
+      time: "Just now",
       text: messageInput.trim(),
-      reactions: []
+      reactions: [],
     };
 
     setMessages([...messages, newMsg]);
-    setMessageInput('');
+    setMessageInput("");
   };
 
   return (
     <div className="h-[calc(100vh-3.5rem)] flex flex-col md:flex-row overflow-hidden font-sans">
-      
       {/* Column 1: Channels & DMs (Matching Screenshot 5 Left Pane) */}
       <div className="w-64 bg-[#0d0d16] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 p-3">
         <div className="space-y-6">
@@ -118,8 +122,12 @@ export const TeamChatPage: React.FC = () => {
                 M
               </div>
               <div>
-                <div className="text-xs font-bold text-white leading-tight">MyStartup</div>
-                <div className="text-[10px] text-[#0DF5C4] font-mono">● PRO Tier · 14 Devs</div>
+                <div className="text-xs font-bold text-white leading-tight">
+                  MyStartup
+                </div>
+                <div className="text-[10px] text-[#0DF5C4] font-mono">
+                  ● PRO Tier · 14 Devs
+                </div>
               </div>
             </div>
             <span className="text-[#6d6d88] text-xs">▼</span>
@@ -132,14 +140,14 @@ export const TeamChatPage: React.FC = () => {
               <Plus className="w-3 h-3 text-[#7a7a98] cursor-pointer hover:text-white" />
             </div>
             <div className="space-y-0.5">
-              {['general', 'frontend', 'bugs', 'random'].map((ch) => (
+              {["general", "frontend", "bugs", "random"].map((ch) => (
                 <button
                   key={ch}
                   onClick={() => setActiveChannel(ch)}
                   className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
                     activeChannel === ch
-                      ? 'bg-[#1a1a2a] text-white font-medium'
-                      : 'text-[#85859e] hover:bg-[#141420] hover:text-[#c4c4dc]'
+                      ? "bg-[#1a1a2a] text-white font-medium"
+                      : "text-[#85859e] hover:bg-[#141420] hover:text-[#c4c4dc]"
                   }`}
                 >
                   <Hash className="w-3.5 h-3.5 text-[#6c6c88]" />
@@ -157,10 +165,10 @@ export const TeamChatPage: React.FC = () => {
             </div>
             <div className="space-y-0.5 text-xs">
               {[
-                { name: 'Sarah Lin', status: 'online' },
-                { name: 'Marcus Vance', status: 'online' },
-                { name: 'Elena Rostova', status: 'online' },
-                { name: 'Codeplane Bot', isBot: true }
+                { name: "Sarah Lin", status: "online" },
+                { name: "Marcus Vance", status: "online" },
+                { name: "Elena Rostova", status: "online" },
+                { name: "Devpulse Bot", isBot: true },
               ].map((dm) => (
                 <div
                   key={dm.name}
@@ -188,7 +196,9 @@ export const TeamChatPage: React.FC = () => {
           <div className="flex items-center gap-2 font-mono text-xs">
             <Hash className="w-4 h-4 text-[#8c8ca5]" />
             <strong className="text-white font-bold">{activeChannel}</strong>
-            <span className="text-[#62627e] hidden sm:inline">| Client-side architecture & review</span>
+            <span className="text-[#62627e] hidden sm:inline">
+              | Client-side architecture & review
+            </span>
           </div>
           <div className="flex items-center gap-3 text-xs text-[#7e7e9a]">
             <div className="flex items-center gap-1">
@@ -216,7 +226,9 @@ export const TeamChatPage: React.FC = () => {
               <div className="flex-1 space-y-1">
                 <div className="flex items-center gap-2 text-xs font-mono">
                   <span className="font-bold text-white">{msg.sender}</span>
-                  <span className={`px-2 py-0.5 rounded text-[10px] border ${msg.roleColor}`}>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] border ${msg.roleColor}`}
+                  >
                     {msg.role}
                   </span>
                   <span className="text-[#656580] text-[11px]">{msg.time}</span>
@@ -234,7 +246,9 @@ export const TeamChatPage: React.FC = () => {
                         <Code2 className="w-3.5 h-3.5 text-[#0DF5C4]" />
                         <span>{msg.codeFilename}</span>
                       </div>
-                      <span className="text-[10px] text-[#6b6b85]">TypeScript</span>
+                      <span className="text-[10px] text-[#6b6b85]">
+                        TypeScript
+                      </span>
                     </div>
                     <pre className="p-4 text-[#c4c4dc] overflow-x-auto text-[11px] leading-relaxed">
                       <code>{msg.codeSnippet}</code>
@@ -250,8 +264,12 @@ export const TeamChatPage: React.FC = () => {
                         <FileText className="w-4 h-4" />
                       </div>
                       <div className="font-mono text-xs">
-                        <div className="text-white font-medium">{msg.attachment.name}</div>
-                        <div className="text-[10px] text-[#71718c]">{msg.attachment.size} · {msg.attachment.sub}</div>
+                        <div className="text-white font-medium">
+                          {msg.attachment.name}
+                        </div>
+                        <div className="text-[10px] text-[#71718c]">
+                          {msg.attachment.size} · {msg.attachment.sub}
+                        </div>
                       </div>
                     </div>
                     <Download className="w-4 h-4 text-[#7e7e9a] hover:text-white" />
@@ -317,15 +335,25 @@ export const TeamChatPage: React.FC = () => {
             </div>
             <div className="space-y-2 text-xs">
               {[
-                { name: 'Sarah Lin', role: 'Staff Frontend', status: 'online' },
-                { name: 'Marcus Vance', role: 'Infrastructure', status: 'online' },
-                { name: 'Elena Rostova', role: 'Systems & Kernels', status: 'idle' },
-                { name: 'DevAIX', role: 'Platform Copilot', status: 'bot' },
-                { name: 'Codeplane Bot', role: 'Automation CI', status: 'bot' },
+                { name: "Sarah Lin", role: "Staff Frontend", status: "online" },
+                {
+                  name: "Marcus Vance",
+                  role: "Infrastructure",
+                  status: "online",
+                },
+                {
+                  name: "Elena Rostova",
+                  role: "Systems & Kernels",
+                  status: "idle",
+                },
+                { name: "DevAIX", role: "Platform Copilot", status: "bot" },
+                { name: "Devpulse Bot", role: "Automation CI", status: "bot" },
               ].map((m) => (
                 <div key={m.name} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${m.status === 'online' ? 'bg-[#0DF5C4]' : m.status === 'bot' ? 'bg-[#6C63FF]' : 'bg-[#FF9E64]'}`} />
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${m.status === "online" ? "bg-[#0DF5C4]" : m.status === "bot" ? "bg-[#6C63FF]" : "bg-[#FF9E64]"}`}
+                    />
                     <span className="text-white font-medium">{m.name}</span>
                   </div>
                   <span className="text-[10px] text-[#6c6c88]">{m.role}</span>
@@ -341,12 +369,20 @@ export const TeamChatPage: React.FC = () => {
             </div>
             <div className="space-y-2 text-[11px]">
               <div className="p-2.5 rounded-lg bg-[#141420] border border-[#222232] space-y-1">
-                <div className="text-[#757592] text-[10px]">Sarah Lin · 1d ago</div>
-                <div className="text-[#cfcfdf] font-medium">Frontend deployment guidelines & PR checklist</div>
+                <div className="text-[#757592] text-[10px]">
+                  Sarah Lin · 1d ago
+                </div>
+                <div className="text-[#cfcfdf] font-medium">
+                  Frontend deployment guidelines & PR checklist
+                </div>
               </div>
               <div className="p-2.5 rounded-lg bg-[#141420] border border-[#222232] space-y-1">
-                <div className="text-[#757592] text-[10px]">Marcus Vance · 3d ago</div>
-                <div className="text-[#cfcfdf] font-medium">Figma design system release reference</div>
+                <div className="text-[#757592] text-[10px]">
+                  Marcus Vance · 3d ago
+                </div>
+                <div className="text-[#cfcfdf] font-medium">
+                  Figma design system release reference
+                </div>
               </div>
             </div>
           </div>
@@ -382,7 +418,6 @@ export const TeamChatPage: React.FC = () => {
           </div>
         </div>
       </div>
-
     </div>
   );
 };

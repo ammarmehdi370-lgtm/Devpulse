@@ -5,20 +5,24 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-devpulse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpulse}
       POSTGRES_DB: ${POSTGRES_DB:-devpulse}
-    ports: ['5432:5432']
+    ports: ["5432:5432"]
     volumes: [devpulse-postgres:/var/lib/postgresql/data]
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-devpulse} -d ${POSTGRES_DB:-devpulse}']
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-devpulse} -d ${POSTGRES_DB:-devpulse}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    ports: ['6379:6379']
+    ports: ["6379:6379"]
     volumes: [devpulse-redis:/data]
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -29,7 +33,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${S3_MINIO_ROOT_USER:-devpulse}
       MINIO_ROOT_PASSWORD: ${S3_MINIO_ROOT_PASSWORD:-devpulse-local-password}
-    ports: ['9000:9000', '9001:9001']
+    ports: ["9000:9000", "9001:9001"]
     volumes: [devpulse-minio:/data]
 
   web:
@@ -39,8 +43,9 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4000
       NEXT_PUBLIC_SOCKET_URL: http://localhost:4001
-    ports: ['3000:3000']
-    volumes: ['.:/workspace', 'web-node-modules:/workspace/node_modules']
+      NEXT_PUBLIC_AI_URL: http://localhost:4002
+    ports: ["3000:3000"]
+    volumes: [".:/workspace", "web-node-modules:/workspace/node_modules"]
     depends_on: [api, socket]
 
   api:
@@ -54,11 +59,21 @@ services:
       DATABASE_URL: postgresql://devpulse:devpulse@postgres:5432/devpulse?schema=public
       DIRECT_DATABASE_URL: postgresql://devpulse:devpulse@postgres:5432/devpulse?schema=public
       REDIS_URL: redis://redis:6379
-    ports: ['4000:4000']
-    volumes: ['.:/workspace', 'api-node-modules:/workspace/node_modules']
+      AWS_S3_ENDPOINT: http://minio:9000
+      AWS_S3_BUCKET: devpulse-local
+      AWS_ACCESS_KEY_ID: devpulse
+      AWS_SECRET_ACCESS_KEY: devpulse-local-password
+      JWT_SECRET: ${JWT_SECRET:-devpulse-development-secret}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID:-}
+      GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET:-}
+    ports: ["4000:4000"]
+    volumes: [".:/workspace", "api-node-modules:/workspace/node_modules"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_started }
 
   socket:
     image: node:20-bookworm
@@ -69,8 +84,8 @@ services:
       SOCKET_PORT: 4001
       APP_URL: http://localhost:3000
       REDIS_URL: redis://redis:6379
-    ports: ['4001:4001']
-    volumes: ['.:/workspace', 'socket-node-modules:/workspace/node_modules']
+    ports: ["4001:4001"]
+    volumes: [".:/workspace", "socket-node-modules:/workspace/node_modules"]
     depends_on: [redis]
 
   ai:
@@ -82,8 +97,8 @@ services:
       AI_PORT: 4002
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-5-sonnet-latest}
-    ports: ['4002:4002']
-    volumes: ['.:/workspace', 'ai-node-modules:/workspace/node_modules']
+    ports: ["4002:4002"]
+    volumes: [".:/workspace", "ai-node-modules:/workspace/node_modules"]
 
   mobile:
     image: node:20-bookworm
@@ -92,8 +107,8 @@ services:
     environment:
       EXPO_PUBLIC_API_URL: http://localhost:4000
       EXPO_PUBLIC_SOCKET_URL: http://localhost:4001
-    ports: ['8081:8081', '19000:19000', '19001:19001', '19002:19002']
-    volumes: ['.:/workspace', 'mobile-node-modules:/workspace/node_modules']
+    ports: ["8081:8081", "19000:19000", "19001:19001", "19002:19002"]
+    volumes: [".:/workspace", "mobile-node-modules:/workspace/node_modules"]
     depends_on: [api]
 
 volumes:

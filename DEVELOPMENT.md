@@ -39,6 +39,12 @@ cp .env.example .env
 
 Update `.env` with real credentials before using Anthropic, Stripe, OAuth, email, or AWS features.
 
+For local authentication, configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
+`GITLAB_CLIENT_ID`, and `GITLAB_CLIENT_SECRET` with callbacks pointing to the API
+at `/v1/auth/github/callback` or `/v1/auth/gitlab/callback`. The development magic-link
+flow returns a verification token in the API response; production email delivery still
+requires an email provider integration.
+
 ## Database and infrastructure
 
 Start PostgreSQL, Redis, and MinIO:
@@ -117,19 +123,19 @@ make dev
 
 The local services use these URLs:
 
-| Service | URL |
-| --- | --- |
-| Web frontend | http://localhost:3000 |
-| API | http://localhost:4000 |
-| API health | http://localhost:4000/health |
-| Socket server | http://localhost:4001 |
+| Service       | URL                          |
+| ------------- | ---------------------------- |
+| Web frontend  | http://localhost:3000        |
+| API           | http://localhost:4000        |
+| API health    | http://localhost:4000/health |
+| Socket server | http://localhost:4001        |
 | Socket health | http://localhost:4001/health |
-| AI service | http://localhost:4002 |
-| AI health | http://localhost:4002/health |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
-| MinIO API | http://localhost:9000 |
-| MinIO console | http://localhost:9001 |
+| AI service    | http://localhost:4002        |
+| AI health     | http://localhost:4002/health |
+| PostgreSQL    | localhost:5432               |
+| Redis         | localhost:6379               |
+| MinIO API     | http://localhost:9000        |
+| MinIO console | http://localhost:9001        |
 
 ## Run the frontend only
 

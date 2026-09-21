@@ -127,24 +127,24 @@ interface AppContextType {
       Repository,
       "id" | "stars" | "forks" | "updatedAt" | "isStarred"
     >,
-  ) => void;
-  deleteRepository: (id: string) => void;
-  toggleStarRepo: (id: string) => void;
+  ) => Promise<void>;
+  deleteRepository: (id: string) => Promise<void>;
+  toggleStarRepo: (id: string) => Promise<void>;
   workspaces: WorkspaceDevbox[];
   spinUpDevbox: (
     name: string,
     template: string,
     repoUrl?: string,
     specs?: { vCpu?: number; ram?: string; storage?: string },
-  ) => void;
-  toggleWorkspaceStatus: (id: string) => void;
-  deleteWorkspace: (id: string) => void;
+  ) => Promise<void>;
+  toggleWorkspaceStatus: (id: string) => Promise<void>;
+  deleteWorkspace: (id: string) => Promise<void>;
   deployments: Deployment[];
-  triggerNewRelease: (customMessage?: string) => void;
-  rerunPipeline: (id?: string) => void;
+  triggerNewRelease: (customMessage?: string) => Promise<void>;
+  rerunPipeline: (id?: string) => Promise<void>;
   envVars: EnvVariable[];
-  addEnvVar: (key: string, value: string, scope: string) => void;
-  deleteEnvVar: (id: string) => void;
+  addEnvVar: (key: string, value: string, scope: string) => Promise<void>;
+  deleteEnvVar: (id: string) => Promise<void>;
   toggleRevealEnvVar: (id: string) => void;
   revealAllEnvVars: boolean;
   toggleRevealAllEnvVars: () => void;
@@ -159,6 +159,10 @@ interface AppContextType {
   setIsCommandPaletteOpen: (open: boolean) => void;
   isEditorProjectOpen: boolean;
   setIsEditorProjectOpen: (open: boolean) => void;
+  editorProjectId: string;
+  isEditorLoading: boolean;
+  editorError: string;
+  loadEditorProject: () => Promise<void>;
   loadedProjectName: string;
   setLoadedProjectName: (name: string) => void;
   treeFiles: EditorFile[];
@@ -167,20 +171,25 @@ interface AppContextType {
   setActiveFileId: (id: string) => void;
   fileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
+  saveFileContent: (fileId: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
   closeFileFromEditor: (fileId: string) => void;
-  createNewFile: (name: string, path?: string, initialContent?: string) => void;
-  deleteFile: (fileId: string) => void;
+  createNewFile: (
+    name: string,
+    path?: string,
+    initialContent?: string,
+  ) => Promise<void>;
+  deleteFile: (fileId: string) => Promise<void>;
   loadUserLocalFiles: (
     folderName: string,
     files: { name: string; path: string; content: string }[],
-  ) => void;
-  loadSingleLocalFile: (name: string, content: string) => void;
+  ) => Promise<void>;
+  loadSingleLocalFile: (name: string, content: string) => Promise<void>;
   isFileTreeOpen: boolean;
   setIsFileTreeOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isAiDrawerOpen: boolean;
   setIsAiDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  applyDiffToActiveFile: (snippet: string) => void;
+  applyDiffToActiveFile: (snippet: string) => Promise<void>;
   remoteCode: string;
   updateRemoteCode: (code: string) => void;
   isRemoteControlling: boolean;
@@ -211,11 +220,12 @@ const EMPTY_WORKSPACES: WorkspaceDevbox[] = [];
 const EMPTY_DEPLOYMENTS: Deployment[] = [];
 const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 const INITIAL_REPOSITORIES: Repository[] = [
   {
     id: "repo-1",
-    name: "codeplane-core",
+    name: "devpulse-core",
     description:
       "Hyper-optimized microVM runtime, ephemeral orchestration layer, and LSP bridge.",
     language: "TypeScript",
@@ -282,8 +292,8 @@ const INITIAL_REPOSITORIES: Repository[] = [
 const INITIAL_WORKSPACES: WorkspaceDevbox[] = [
   {
     id: "ws-1",
-    name: "codeplane-core-staging",
-    repo: "codeplane-core",
+    name: "devpulse-core-staging",
+    repo: "devpulse-core",
     branch: "staging",
     template: "Next.js 15 (Turbopack)",
     status: "Running",
@@ -292,7 +302,7 @@ const INITIAL_WORKSPACES: WorkspaceDevbox[] = [
     ram: "32 GB ECC",
     storage: "100 GB NVMe",
     port: 3000,
-    url: "https://ws-alpha-71.codeplane.dev",
+    url: "https://ws-alpha-71.devpulse.dev",
   },
   {
     id: "ws-2",
@@ -306,14 +316,14 @@ const INITIAL_WORKSPACES: WorkspaceDevbox[] = [
     ram: "32 GB ECC",
     storage: "100 GB NVMe",
     port: 8000,
-    url: "https://ws-agent-04.codeplane.dev",
+    url: "https://ws-agent-04.devpulse.dev",
   },
 ];
 
 const INITIAL_DEPLOYMENTS: Deployment[] = [
   {
     id: "dep-1",
-    target: "codeplane-core-preview-pr162.cpnv.app",
+    target: "devpulse-core-preview-pr162.cpnv.app",
     domain: "staging-edge-v4-vector",
     status: "Ready",
     branch: "feat:hooks",
@@ -325,7 +335,7 @@ const INITIAL_DEPLOYMENTS: Deployment[] = [
   },
   {
     id: "dep-2",
-    target: "codeplane-core-production.edge",
+    target: "devpulse-core-production.edge",
     domain: "global-sub10ms-ingress",
     status: "Ready",
     branch: "main",
@@ -337,7 +347,7 @@ const INITIAL_DEPLOYMENTS: Deployment[] = [
   },
   {
     id: "dep-3",
-    target: "codeplane-core-qa-pr164.app",
+    target: "devpulse-core-qa-pr164.app",
     domain: "ephemeral-mesh-network-3",
     status: "Building",
     branch: "fix(auth)-tokens",
@@ -353,7 +363,7 @@ const INITIAL_ENV_VARS: EnvVariable[] = [
   {
     id: "env-1",
     key: "DATABASE_CLUSTER_URL",
-    value: "postgres://admin:x99aK3fL90zqP1@db-us-east.internal:5432/codeplane",
+    value: "postgres://admin:REDACTED@db-us-east.internal:5432/devpulse",
     scope: "Production, Staging",
     updatedAt: "2d ago",
     isRevealed: false,
@@ -390,7 +400,7 @@ const INITIAL_LOGS: LogLine[] = [
     time: "[11:42:01]",
     tag: "[PIPELINE]",
     color: "text-violet-400",
-    text: "Initializing automated edge manifest for repository: codeplane-core",
+    text: "Initializing automated edge manifest for repository: devpulse-core",
   },
   {
     id: "2",
@@ -404,7 +414,7 @@ const INITIAL_LOGS: LogLine[] = [
     time: "[11:42:08]",
     tag: "[BUILD]",
     color: "text-amber-400",
-    text: "Restored 486MB layers from Codeplane Turbo Layer Cache [cache key: pnpm-modules-v2]",
+    text: "Restored 486MB layers from Devpulse Turbo Layer Cache [cache key: pnpm-modules-v2]",
   },
   {
     id: "4",
@@ -432,7 +442,7 @@ const INITIAL_LOGS: LogLine[] = [
     time: "[11:42:34]",
     tag: "[NETWORK]",
     color: "text-pink-400",
-    text: "Provisioning mesh proxy listener on unix:/var/run/codeplane.sock",
+    text: "Provisioning mesh proxy listener on unix:/var/run/devpulse.sock",
   },
   {
     id: "8",
@@ -453,7 +463,7 @@ const INITIAL_LOGS: LogLine[] = [
     time: "[11:42:37]",
     tag: "[SUCCESS]",
     color: "text-emerald-300 font-bold",
-    text: "✓ Deployment available at https://codeplane-core-preview-pr162.cpnv.app",
+    text: "✓ Deployment available at https://devpulse-core-preview-pr162.cpnv.app",
   },
 ];
 
@@ -464,7 +474,7 @@ import { processQueue } from './workers/telemetry.js';
 const PORT = process.env.PORT || 8080;
 
 export async function handleConnection(req, res) {
-  const sessionToken = req.headers['x-codeplane-auth'];
+  const sessionToken = req.headers['x-devpulse-auth'];
 
   if (!sessionToken) {
     return res.writeHead(401).end(JSON.stringify({ error: 'Unauthorized' }));
@@ -488,7 +498,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [theme, setThemeState] = useState<ThemeConfig>(THEME_PRESETS[0]!);
   const [user, setUser] = useState<UserProfile>({
     name: "Alex",
-    email: "alex@codeplane.dev",
+    email: "alex@devpulse.dev",
     handle: "alex",
     role: "Staff Platform Engineer",
     avatar:
@@ -516,6 +526,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Editor State: starts with empty project until user selects file/folder
   const [isEditorProjectOpen, setIsEditorProjectOpen] = useState(false);
+  const [editorProjectId, setEditorProjectId] = useState("");
+  const [isEditorLoading, setIsEditorLoading] = useState(false);
+  const [editorError, setEditorError] = useState("");
   const [loadedProjectName, setLoadedProjectName] = useState("");
   const [treeFiles, setTreeFiles] = useState<EditorFile[]>([]);
   const [openFiles, setOpenFiles] = useState<EditorFile[]>([]);
@@ -556,6 +569,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setTheme(THEME_PRESETS[0]!);
   }, []);
 
+  useEffect(() => {
+    void fetch(`${API_BASE}/v1/me`, { credentials: "include" })
+      .then(async (response) =>
+        response.ok
+          ? (response.json() as Promise<{
+              email: string;
+              name?: string;
+              avatarUrl?: string;
+            }>)
+          : null,
+      )
+      .then((currentUser) => {
+        if (!currentUser) return;
+        setUser((previous) => ({
+          ...previous,
+          email: currentUser.email,
+          name: currentUser.name || "Devpulse User",
+          avatar: currentUser.avatarUrl || previous.avatar,
+          isAuthenticated: true,
+        }));
+        setPage("theme");
+      })
+      .catch(() => undefined);
+  }, []);
+
   // Listen for keyboard shortcut Ctrl+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -571,7 +609,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const login = (email?: string, name?: string) => {
     setUser((prev) => ({
       ...prev,
-      email: email || "alex@codeplane.dev",
+      email: email || "alex@devpulse.dev",
       name: name || "Alex",
       isAuthenticated: true,
     }));
@@ -579,16 +617,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const logout = () => {
+    void fetch(`${API_BASE}/v1/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
     setUser((prev) => ({ ...prev, isAuthenticated: false }));
     setPage("login");
   };
 
-  const addRepository = (
+  const addRepository = async (
     repoData: Omit<
       Repository,
       "id" | "stars" | "forks" | "updatedAt" | "isStarred"
     >,
   ) => {
+    try {
+      const repository = await apiJson<{
+        id: string;
+        name: string;
+        description: string;
+        language: string;
+        stars: number;
+        forks: number;
+        isStarred: boolean;
+        defaultBranch: string;
+        deployStatus: string;
+        devboxReady: boolean;
+        updatedAt: string;
+      }>("/v1/repositories", {
+        method: "POST",
+        body: JSON.stringify({
+          name: repoData.name,
+          description: repoData.description,
+          language: repoData.language,
+          branch: repoData.branch,
+        }),
+      });
+      setRepositories((previous) => [
+        {
+          ...repoData,
+          id: repository.id,
+          stars: repository.stars,
+          forks: repository.forks,
+          updatedAt: repository.updatedAt,
+          isStarred: repository.isStarred,
+          branch: repository.defaultBranch,
+          deployStatus: repository.deployStatus as Repository["deployStatus"],
+          devboxReady: repository.devboxReady,
+        },
+        ...previous,
+      ]);
+      return;
+    } catch {
+      // Keep the prototype usable when the API is unavailable.
+    }
     const newRepo: Repository = {
       ...repoData,
       id: `repo-${Date.now()}`,
@@ -598,14 +680,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       isStarred: false,
       devboxReady: true,
     };
-    setRepositories([newRepo, ...repositories]);
+    setRepositories((previous) => [newRepo, ...previous]);
   };
 
-  const deleteRepository = (id: string) => {
+  const deleteRepository = async (id: string) => {
+    try {
+      await apiJson(`/v1/repositories/${id}`, { method: "DELETE" });
+    } catch {
+      /* local fallback */
+    }
     setRepositories((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const toggleStarRepo = (id: string) => {
+  const toggleStarRepo = async (id: string) => {
+    const current = repositories.find((repository) => repository.id === id);
+    try {
+      await apiJson(`/v1/repositories/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isStarred: !current?.isStarred }),
+      });
+    } catch {
+      /* local fallback */
+    }
     setRepositories((prev) =>
       prev.map((r) =>
         r.id === id
@@ -619,18 +715,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  const spinUpDevbox = (
+  const spinUpDevbox = async (
     name: string,
     template: string,
     repoUrl?: string,
     specs?: { vCpu?: number; ram?: string; storage?: string },
   ) => {
+    try {
+      const response = await apiJson<WorkspaceDevbox>("/v1/devboxes", {
+        method: "POST",
+        body: JSON.stringify({
+          name: name || `devbox-${Math.floor(Math.random() * 900) + 100}`,
+          template,
+          repo: repoUrl
+            ? repoUrl.split("/").pop()?.replace(".git", "")
+            : "devpulse-core",
+          vCpu: specs?.vCpu || 8,
+          ram: specs?.ram || "32 GB ECC",
+          storage: specs?.storage || "100 GB NVMe",
+        }),
+      });
+      setWorkspaces((previous) => [response, ...previous]);
+      return;
+    } catch {
+      // Keep the prototype usable when the API is unavailable.
+    }
     const newWs: WorkspaceDevbox = {
       id: `ws-${Date.now()}`,
       name: name || `devbox-${Math.floor(Math.random() * 900) + 100}`,
       repo: repoUrl
         ? repoUrl.split("/").pop()?.replace(".git", "") || "custom-repo"
-        : "codeplane-core",
+        : "devpulse-core",
       branch: "main",
       template,
       status: "Running",
@@ -639,12 +754,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       ram: specs?.ram || "32 GB ECC",
       storage: specs?.storage || "100 GB NVMe",
       port: 3000 + Math.floor(Math.random() * 5000),
-      url: `https://ws-boot-${Math.floor(Math.random() * 9000) + 1000}.codeplane.dev`,
+      url: `https://ws-boot-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`,
     };
-    setWorkspaces([newWs, ...workspaces]);
+    setWorkspaces((previous) => [newWs, ...previous]);
   };
 
-  const toggleWorkspaceStatus = (id: string) => {
+  const toggleWorkspaceStatus = async (id: string) => {
+    const workspace = workspaces.find((item) => item.id === id);
+    const status = workspace?.status === "Running" ? "Stopped" : "Running";
+    try {
+      await apiJson(`/v1/devboxes/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+    } catch {
+      /* local fallback */
+    }
     setWorkspaces((prev) =>
       prev.map((ws) =>
         ws.id === id
@@ -657,7 +782,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
-  const deleteWorkspace = (id: string) => {
+  const deleteWorkspace = async (id: string) => {
+    try {
+      await apiJson(`/v1/devboxes/${id}`, { method: "DELETE" });
+    } catch {
+      /* local fallback */
+    }
     setWorkspaces((prev) => prev.filter((ws) => ws.id !== id));
   };
 
@@ -678,13 +808,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setLogs([]);
   };
 
-  const triggerNewRelease = (customMessage?: string) => {
+  const triggerNewRelease = async (customMessage?: string) => {
+    try {
+      const deployment = await apiJson<Deployment>("/v1/deployments", {
+        method: "POST",
+        body: JSON.stringify({
+          commitMessage: customMessage,
+          author: user.handle,
+        }),
+      });
+      setDeployments((previous) => [deployment, ...previous]);
+      addLog(
+        "[PIPELINE]",
+        "text-violet-400",
+        `Triggered release pipeline for target ${deployment.target}`,
+      );
+      return;
+    } catch {
+      // Keep the prototype usable when the API is unavailable.
+    }
     const commitHashes = ["7fe32b1", "9c8821a", "e09a32c", "33fa89b"];
     const randomHash =
       commitHashes[Math.floor(Math.random() * commitHashes.length)];
     const newDep: Deployment = {
       id: `dep-${Date.now()}`,
-      target: `codeplane-core-prod-release-${Math.floor(Math.random() * 900) + 100}.cpnv.app`,
+      target: `devpulse-core-prod-release-${Math.floor(Math.random() * 900) + 100}.cpnv.app`,
       domain: "global-sub10ms-ingress",
       status: "Building",
       branch: "main",
@@ -745,7 +893,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 3800);
   };
 
-  const rerunPipeline = (id?: string) => {
+  const rerunPipeline = async (id?: string) => {
+    if (id) {
+      try {
+        await apiJson(`/v1/deployments/${id}/rerun`, { method: "POST" });
+      } catch {
+        /* local fallback */
+      }
+    }
     addLog(
       "[PIPELINE]",
       "text-violet-400",
@@ -760,7 +915,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 1500);
   };
 
-  const addEnvVar = (key: string, value: string, scope: string) => {
+  const addEnvVar = async (key: string, value: string, scope: string) => {
+    try {
+      const variable = await apiJson<EnvVariable>("/v1/environment-variables", {
+        method: "POST",
+        body: JSON.stringify({ key, value, scope }),
+      });
+      setEnvVars((previous) => [variable, ...previous]);
+      return;
+    } catch {
+      // Keep the prototype usable when the API is unavailable.
+    }
     const newVar: EnvVariable = {
       id: `env-${Date.now()}`,
       key: key.toUpperCase().trim(),
@@ -769,10 +934,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       updatedAt: "Just now",
       isRevealed: false,
     };
-    setEnvVars([newVar, ...envVars]);
+    setEnvVars((previous) => [newVar, ...previous]);
   };
 
-  const deleteEnvVar = (id: string) => {
+  const deleteEnvVar = async (id: string) => {
+    try {
+      await apiJson(`/v1/environment-variables/${id}`, { method: "DELETE" });
+    } catch {
+      /* local fallback */
+    }
     setEnvVars((prev) => prev.filter((v) => v.id !== id));
   };
 
@@ -804,10 +974,168 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     return "txt";
   };
 
+  const apiJson = async <T,>(
+    path: string,
+    options?: RequestInit,
+  ): Promise<T> => {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options?.headers || {}),
+      },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        body.error || `Request failed with status ${response.status}`,
+      );
+    }
+    return response.status === 204 ? (undefined as T) : response.json();
+  };
+
+  useEffect(() => {
+    void Promise.all([
+      apiJson<{
+        repositories: Array<{
+          id: string;
+          name: string;
+          description: string;
+          language: string;
+          stars: number;
+          forks: number;
+          isStarred: boolean;
+          defaultBranch: string;
+          deployStatus: string;
+          devboxReady: boolean;
+          updatedAt: string;
+        }>;
+      }>("/v1/repositories"),
+      apiJson<{ devboxes: WorkspaceDevbox[] }>("/v1/devboxes"),
+      apiJson<{ deployments: Deployment[] }>("/v1/deployments"),
+      apiJson<{ variables: EnvVariable[] }>("/v1/environment-variables"),
+    ])
+      .then(
+        ([
+          repositoryResponse,
+          devboxResponse,
+          deploymentResponse,
+          variableResponse,
+        ]) => {
+          if (repositoryResponse.repositories.length > 0)
+            setRepositories(
+              repositoryResponse.repositories.map((repository) => ({
+                id: repository.id,
+                name: repository.name,
+                description: repository.description,
+                language: repository.language,
+                languageColor: "#3178c6",
+                stars: repository.stars,
+                forks: repository.forks,
+                branch: repository.defaultBranch,
+                lastCommit: "Persisted project",
+                updatedAt: new Date(repository.updatedAt).toLocaleString(),
+                isStarred: repository.isStarred,
+                deployStatus:
+                  repository.deployStatus as Repository["deployStatus"],
+                devboxReady: repository.devboxReady,
+              })),
+            );
+          if (devboxResponse.devboxes.length > 0)
+            setWorkspaces(devboxResponse.devboxes);
+          if (deploymentResponse.deployments.length > 0)
+            setDeployments(deploymentResponse.deployments);
+          if (variableResponse.variables.length > 0)
+            setEnvVars(variableResponse.variables);
+        },
+      )
+      .catch(() => undefined);
+  }, []);
+
+  const editorFileFromApi = (file: {
+    id: string;
+    path: string;
+    language?: string | null;
+  }): EditorFile => ({
+    id: file.id,
+    name: file.path.split("/").pop() || file.path,
+    path: file.path,
+    language: file.language || "plaintext",
+    iconType: getIconType(file.path),
+  });
+
+  const loadEditorProject = async () => {
+    setIsEditorLoading(true);
+    setEditorError("");
+    try {
+      const projectResponse = await apiJson<{
+        projects: { id: string; name: string }[];
+      }>("/v1/projects");
+      let project = projectResponse.projects[0];
+      if (!project) {
+        project = await apiJson<{ id: string; name: string }>("/v1/projects", {
+          method: "POST",
+          body: JSON.stringify({ name: "Devpulse Workspace" }),
+        });
+      }
+      const fileResponse = await apiJson<{
+        project: { id: string; name: string };
+        files: { id: string; path: string; language?: string | null }[];
+      }>(`/v1/projects/${project.id}/files`);
+      const filesWithContent = await Promise.all(
+        fileResponse.files.map(async (file) => {
+          const detail = await apiJson<{ content: string }>(
+            `/v1/projects/${project.id}/files/${file.id}`,
+          );
+          return { file: editorFileFromApi(file), content: detail.content };
+        }),
+      );
+      const nextFiles = filesWithContent.map(({ file }) => file);
+      const nextContents = Object.fromEntries(
+        filesWithContent.map(({ file, content }) => [file.id, content]),
+      );
+      setEditorProjectId(project.id);
+      setLoadedProjectName(fileResponse.project.name);
+      setTreeFiles(nextFiles);
+      setFileContents(nextContents);
+      if (nextFiles.length > 0) {
+        setOpenFiles([nextFiles[0]!]);
+        setActiveFileId(nextFiles[0]!.id);
+      }
+      setIsEditorProjectOpen(true);
+    } catch (error) {
+      setEditorError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load the editor project",
+      );
+    } finally {
+      setIsEditorLoading(false);
+    }
+  };
+
   const updateFileContent = (fileId: string, content: string) => {
     setFileContents((prev) => ({ ...prev, [fileId]: content }));
     setOpenFiles((prev) =>
       prev.map((f) => (f.id === fileId ? { ...f, isDirty: true } : f)),
+    );
+  };
+
+  const saveFileContent = async (fileId: string) => {
+    const content = fileContents[fileId] ?? "";
+    const saved = await apiJson<{ id: string }>(`/v1/files/${fileId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    });
+    setOpenFiles((prev) =>
+      prev.map((file) =>
+        file.id === saved.id ? { ...file, isDirty: false } : file,
+      ),
+    );
+    setTreeFiles((prev) =>
+      prev.map((file) =>
+        file.id === saved.id ? { ...file, isDirty: false } : file,
+      ),
     );
   };
 
@@ -827,29 +1155,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  const createNewFile = (
+  const createNewFile = async (
     name: string,
     path?: string,
     initialContent?: string,
   ) => {
-    const fileId = `f-${Date.now()}`;
-    const newFile: EditorFile = {
-      id: fileId,
-      name,
-      path: path || name,
-      language: name.endsWith(".py")
-        ? "python"
-        : name.endsWith(".json")
-          ? "json"
-          : "typescript",
-      iconType: getIconType(name),
-    };
+    const created = await apiJson<{
+      id: string;
+      path: string;
+      language?: string | null;
+    }>(`/v1/projects/${editorProjectId}/files`, {
+      method: "POST",
+      body: JSON.stringify({
+        path: path || name,
+        content: initialContent || "",
+        language: name.endsWith(".py")
+          ? "python"
+          : name.endsWith(".json")
+            ? "json"
+            : "typescript",
+      }),
+    });
+    const newFile = editorFileFromApi(created);
     setTreeFiles((prev) => [...prev, newFile]);
-    setFileContents((prev) => ({ ...prev, [fileId]: initialContent || "" }));
+    setFileContents((prev) => ({
+      ...prev,
+      [newFile.id]: initialContent || "",
+    }));
     openFileInEditor(newFile);
   };
 
-  const deleteFile = (fileId: string) => {
+  const deleteFile = async (fileId: string) => {
+    await apiJson<void>(`/v1/files/${fileId}`, { method: "DELETE" });
     setTreeFiles((prev) => prev.filter((f) => f.id !== fileId));
     closeFileFromEditor(fileId);
     setFileContents((prev) => {
@@ -860,50 +1197,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   // Real native local file loader
-  const loadSingleLocalFile = (name: string, content: string) => {
-    const fileId = `f-${Date.now()}`;
-    const newFile: EditorFile = {
-      id: fileId,
-      name,
-      path: name,
-      language: name.endsWith(".py")
-        ? "python"
-        : name.endsWith(".json")
-          ? "json"
-          : "typescript",
-      iconType: getIconType(name),
-    };
+  const loadSingleLocalFile = async (name: string, content: string) => {
+    if (!editorProjectId) await loadEditorProject();
+    const projectId =
+      editorProjectId ||
+      (await apiJson<{ projects: { id: string }[] }>("/v1/projects"))
+        .projects[0]?.id;
+    if (!projectId) throw new Error("No editor project is available");
+    const newFileData = await apiJson<{
+      id: string;
+      path: string;
+      language?: string | null;
+    }>(`/v1/projects/${projectId}/files`, {
+      method: "POST",
+      body: JSON.stringify({
+        path: name,
+        content,
+        language: name.endsWith(".py") ? "python" : "typescript",
+      }),
+    });
+    const newFile = editorFileFromApi(newFileData);
     setTreeFiles([newFile]);
-    setFileContents({ [fileId]: content });
+    setFileContents({ [newFile.id]: content });
     setOpenFiles([newFile]);
-    setActiveFileId(fileId);
+    setActiveFileId(newFile.id);
     setLoadedProjectName(name.split(".")[0] || "local-file");
     setIsEditorProjectOpen(true);
   };
 
   // Real native local folder loader
-  const loadUserLocalFiles = (
+  const loadUserLocalFiles = async (
     folderName: string,
     files: { name: string; path: string; content: string }[],
   ) => {
-    const newTree: EditorFile[] = [];
-    const newContents: Record<string, string> = {};
-
-    files.forEach((f, idx) => {
-      const fileId = `f-local-${idx}-${Date.now()}`;
-      newTree.push({
-        id: fileId,
-        name: f.name,
-        path: f.path,
-        language: f.name.endsWith(".py")
-          ? "python"
-          : f.name.endsWith(".json")
-            ? "json"
-            : "typescript",
-        iconType: getIconType(f.name),
-      });
-      newContents[fileId] = f.content;
-    });
+    if (!editorProjectId) await loadEditorProject();
+    const projectId =
+      editorProjectId ||
+      (await apiJson<{ projects: { id: string }[] }>("/v1/projects"))
+        .projects[0]?.id;
+    if (!projectId) throw new Error("No editor project is available");
+    const imported = await Promise.all(
+      files.map(async (file) => {
+        const created = await apiJson<{
+          id: string;
+          path: string;
+          language?: string | null;
+        }>(`/v1/projects/${projectId}/files`, {
+          method: "POST",
+          body: JSON.stringify({
+            path: file.path,
+            content: file.content,
+            language: file.name.endsWith(".py")
+              ? "python"
+              : file.name.endsWith(".json")
+                ? "json"
+                : "typescript",
+          }),
+        });
+        return { file: editorFileFromApi(created), content: file.content };
+      }),
+    );
+    const newTree = imported.map(({ file }) => file);
+    const newContents = Object.fromEntries(
+      imported.map(({ file, content }) => [file.id, content]),
+    );
 
     setLoadedProjectName(folderName);
     setTreeFiles(newTree);
@@ -915,17 +1272,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsEditorProjectOpen(true);
   };
 
-  const applyDiffToActiveFile = (newSnippet: string) => {
+  const applyDiffToActiveFile = async (newSnippet: string) => {
     if (!activeFileId) return;
-    setFileContents((prev) => {
-      const current = prev[activeFileId] || "";
-      return {
-        ...prev,
-        [activeFileId]: newSnippet
-          ? `${current}\n\n// Added by AI Assistant:\n${newSnippet}`
-          : current,
-      };
+    const current = fileContents[activeFileId] || "";
+    const nextContent = newSnippet
+      ? `${current}\n\n// Added by AI Assistant:\n${newSnippet}`
+      : current;
+    setFileContents((prev) => ({ ...prev, [activeFileId]: nextContent }));
+    await apiJson(`/v1/files/${activeFileId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content: nextContent }),
     });
+    setOpenFiles((prev) =>
+      prev.map((file) =>
+        file.id === activeFileId ? { ...file, isDirty: false } : file,
+      ),
+    );
+    setTreeFiles((prev) =>
+      prev.map((file) =>
+        file.id === activeFileId ? { ...file, isDirty: false } : file,
+      ),
+    );
   };
 
   const updateRemoteCode = (code: string) => {
@@ -975,6 +1342,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setIsCommandPaletteOpen,
         isEditorProjectOpen,
         setIsEditorProjectOpen,
+        editorProjectId,
+        isEditorLoading,
+        editorError,
+        loadEditorProject,
         loadedProjectName,
         setLoadedProjectName,
         treeFiles,
@@ -983,6 +1354,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setActiveFileId,
         fileContents,
         updateFileContent,
+        saveFileContent,
         openFileInEditor,
         closeFileFromEditor,
         createNewFile,

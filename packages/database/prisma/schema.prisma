@@ -49,6 +49,7 @@ model Workspace {
   owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
   memberships WorkspaceMember[]
   projects    Project[]
+  devboxes    Devbox[]
   channels    Channel[]
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
@@ -71,11 +72,75 @@ model Project {
   workspaceId   String
   name          String
   defaultBranch String        @default("main")
+  description   String        @default("")
+  language      String        @default("TypeScript")
+  stars         Int           @default(0)
+  forks         Int           @default(0)
+  isStarred     Boolean       @default(false)
+  deployStatus  String        @default("none")
+  devboxReady   Boolean       @default(true)
   workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   files         File[]
+  devboxes      Devbox[]
+  deployments   Deployment[]
+  environmentVariables EnvironmentVariable[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   @@index([workspaceId])
+}
+
+model Devbox {
+  id        String   @id @default(cuid())
+  workspaceId String
+  projectId String?
+  name      String
+  repo      String
+  branch    String   @default("main")
+  template  String
+  status    String   @default("Running")
+  uptime    String   @default("1m")
+  vCpu      Int      @default(8)
+  ram       String   @default("32 GB ECC")
+  storage   String   @default("100 GB NVMe")
+  port      Int      @default(3000)
+  url       String
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([workspaceId])
+  @@index([projectId])
+}
+
+model Deployment {
+  id           String   @id @default(cuid())
+  projectId    String
+  target       String
+  domain       String
+  status       String   @default("Building")
+  branch       String   @default("main")
+  commitHash   String
+  commitMessage String
+  author       String
+  timestamp    String
+  duration     String
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@index([projectId])
+}
+
+model EnvironmentVariable {
+  id        String   @id @default(cuid())
+  projectId String
+  key       String
+  value     String
+  scope     String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([projectId, key])
+  @@index([projectId])
 }
 
 model File {

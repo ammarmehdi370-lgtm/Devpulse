@@ -1,47 +1,116 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useApp } from '../context/AppContext';
-import { 
-  Terminal, 
-  Zap, 
-  ShieldCheck, 
-  Lock, 
-  KeyRound, 
-  Mail, 
-  ArrowRight, 
-  CheckCircle2, 
-  Layers
-} from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { useApp } from "../context/AppContext";
+import {
+  Terminal,
+  Zap,
+  ShieldCheck,
+  Lock,
+  KeyRound,
+  Mail,
+  ArrowRight,
+  CheckCircle2,
+  Layers,
+} from "lucide-react";
 
 export const LoginPage: React.FC = () => {
   const { login } = useApp();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState("");
   const [latency, setLatency] = useState(14);
   const [instances, setInstances] = useState(1482);
   const [isLoading, setIsLoading] = useState(false);
-  const [loginMethod, setLoginMethod] = useState('');
+  const [loginMethod, setLoginMethod] = useState("");
+  const [authError, setAuthError] = useState("");
+
+  useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get("auth_error");
+    if (error) {
+      setAuthError(error);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   // Live telemetry pulse
   useEffect(() => {
     const interval = setInterval(() => {
-      setLatency(prev => {
+      setLatency((prev) => {
         const delta = Math.floor(Math.random() * 5) - 2;
         return Math.max(9, Math.min(22, prev + delta));
       });
       if (Math.random() > 0.6) {
-        setInstances(prev => prev + (Math.random() > 0.5 ? 1 : -1));
+        setInstances((prev) => prev + (Math.random() > 0.5 ? 1 : -1));
       }
     }, 1800);
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = (provider: string) => {
+  const handleLogin = async (provider: string) => {
     setIsLoading(true);
     setLoginMethod(provider);
-    setTimeout(() => {
-      login(email || 'alex@codeplane.dev', 'Alex');
-    }, 600);
+    setAuthError("");
+
+    if (provider === "github" || provider === "gitlab" || provider === "sso") {
+      // ── DEV BYPASS ────────────────────────────────────────────────────────
+      // In development, skip the real OAuth redirect and log in immediately
+      // with a mock dev user so you can test the full app flow locally.
+      if (process.env.NODE_ENV === "development") {
+        const providerLabels: Record<string, string> = {
+          github: "GitHub Dev",
+          gitlab: "GitLab Dev",
+          sso: "SSO Dev",
+        };
+        const devName = providerLabels[provider] ?? "Dev User";
+        const devEmail = `dev-${provider}@localhost.dev`;
+        login(devEmail, devName);
+        return;
+      }
+      // ── END DEV BYPASS ────────────────────────────────────────────────────
+      window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/auth/${provider}/start`;
+      return;
+    }
+
+    if (provider === "email") {
+      try {
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/auth/magic-link`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ email: email || "alex@devpulse.dev" }),
+          },
+        );
+        const result = (await response.json()) as {
+          verificationToken?: string;
+          error?: string;
+        };
+        if (!response.ok)
+          throw new Error(result.error || "Unable to request magic link");
+        if (!result.verificationToken) return;
+        const verifyResponse = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/auth/magic-link/verify`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ token: result.verificationToken }),
+          },
+        );
+        const verified = (await verifyResponse.json()) as {
+          user?: { email: string; name?: string };
+          error?: string;
+        };
+        if (!verifyResponse.ok || !verified.user)
+          throw new Error(verified.error || "Unable to verify magic link");
+        login(verified.user.email, verified.user.name || "Devpulse User");
+      } catch (error) {
+        console.error(error);
+        setIsLoading(false);
+      }
+      return;
+    }
+    login(email || "alex@devpulse.dev", "Alex");
   };
 
   return (
@@ -51,7 +120,6 @@ export const LoginPage: React.FC = () => {
       <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-[#0DF5C4]/5 rounded-full blur-[100px] pointer-events-none" />
 
       <div className="w-full max-w-[1080px] grid grid-cols-1 lg:grid-cols-12 gap-8 items-center z-10">
-        
         {/* Left Card: Login Form */}
         <div className="lg:col-span-7 bg-[#111118]/90 backdrop-blur-xl border border-[#232334] rounded-2xl p-8 sm:p-10 shadow-2xl shadow-black/80 relative">
           {/* Top Brand Header */}
@@ -60,7 +128,9 @@ export const LoginPage: React.FC = () => {
               <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-[#6C63FF] to-[#8F87FF] flex items-center justify-center shadow-lg shadow-[#6C63FF]/30">
                 <Layers className="w-5 h-5 text-white" />
               </div>
-              <span className="text-xl font-bold tracking-tight text-white">Codeplane</span>
+              <span className="text-xl font-bold tracking-tight text-white">
+                Devpulse
+              </span>
             </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#0DF5C4]/10 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[11px] font-mono font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
@@ -73,43 +143,69 @@ export const LoginPage: React.FC = () => {
             Build at the speed of thought.
           </h1>
           <p className="text-[#8c8ca5] text-sm sm:text-base mb-8 leading-relaxed">
-            Sign in to access your cloud workspaces, ephemeral devboxes, and neural coding agents.
+            Sign in to access your cloud workspaces, ephemeral devboxes, and
+            neural coding agents.
           </p>
+          {authError && (
+            <div className="mb-5 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+              {authError}
+            </div>
+          )}
 
           {/* Auth Providers */}
           <div className="space-y-3 mb-6">
             {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
             <button
-              onClick={() => handleLogin('github')}
+              onClick={() => handleLogin("github")}
               disabled={isLoading}
               className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20"
             >
               <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+                <path
+                  fillRule="evenodd"
+                  clipRule="evenodd"
+                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
+                />
               </svg>
-              <span>{isLoading && loginMethod === 'github' ? 'Authenticating with GitHub...' : 'Continue with GitHub'}</span>
+              <span>
+                {isLoading && loginMethod === "github"
+                  ? "Authenticating with GitHub..."
+                  : "Continue with GitHub"}
+              </span>
             </button>
 
             {/* Continue with GitLab */}
             <button
-              onClick={() => handleLogin('gitlab')}
+              onClick={() => handleLogin("gitlab")}
               disabled={isLoading}
               className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
-              <svg className="w-5 h-5 text-[#FC6D26]" viewBox="0 0 24 24" fill="currentColor">
+              <svg
+                className="w-5 h-5 text-[#FC6D26]"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
                 <path d="m23.6 9.57-.03-.08-3.48-8.87a.89.89 0 0 0-1.68 0L15.35 8H8.65L5.59.62a.89.89 0 0 0-1.68 0L.43 9.49l-.03.08a5.9 5.9 0 0 0 2.08 6.74L12 23.4l9.52-7.09a5.9 5.9 0 0 0 2.08-6.74Z" />
               </svg>
-              <span>{isLoading && loginMethod === 'gitlab' ? 'Connecting GitLab...' : 'Continue with GitLab'}</span>
+              <span>
+                {isLoading && loginMethod === "gitlab"
+                  ? "Connecting GitLab..."
+                  : "Continue with GitLab"}
+              </span>
             </button>
 
             {/* Single Sign-On (SSO / SAML) */}
             <button
-              onClick={() => handleLogin('sso')}
+              onClick={() => handleLogin("sso")}
               disabled={isLoading}
               className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
               <KeyRound className="w-4 h-4 text-[#8c8ca5]" />
-              <span>{isLoading && loginMethod === 'sso' ? 'Handshaking SAML...' : 'Single Sign-On (SSO / SAML)'}</span>
+              <span>
+                {isLoading && loginMethod === "sso"
+                  ? "Handshaking SAML..."
+                  : "Single Sign-On (SSO / SAML)"}
+              </span>
             </button>
           </div>
 
@@ -131,18 +227,22 @@ export const LoginPage: React.FC = () => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLogin('email')}
+                onKeyDown={(e) => e.key === "Enter" && handleLogin("email")}
                 placeholder="dev@company.com"
                 className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#0b0b10] border border-[#27273a] text-white placeholder-[#585870] text-sm focus:outline-none focus:border-[#6C63FF] focus:ring-1 focus:ring-[#6C63FF] transition-all font-mono"
               />
             </div>
 
             <button
-              onClick={() => handleLogin('email')}
+              onClick={() => handleLogin("email")}
               disabled={isLoading}
               className="w-full py-3 px-4 rounded-xl bg-[#1c1c28] hover:bg-[#252538] border border-[#31314a] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all group"
             >
-              <span>{isLoading && loginMethod === 'email' ? 'Dispatching Magic Link...' : 'Send Magic Link'}</span>
+              <span>
+                {isLoading && loginMethod === "email"
+                  ? "Dispatching Magic Link..."
+                  : "Send Magic Link"}
+              </span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </button>
           </div>
@@ -198,15 +298,20 @@ export const LoginPage: React.FC = () => {
                 <span className="text-white font-medium">mTLS-v1.3</span>
               </div>
               <div className="text-[#0DF5C4] pt-1">
-                ☁ Connecting to cluster: <span className="underline">us-east-1a</span>
+                ☁ Connecting to cluster:{" "}
+                <span className="underline">us-east-1a</span>
               </div>
               <div className="flex items-center justify-between text-[#8c8ca5] bg-[#13131f] p-2 rounded-lg border border-[#1f1f30]">
                 <span>round-trip latency:</span>
-                <span className="text-[#0DF5C4] font-bold text-sm font-mono">{latency}ms</span>
+                <span className="text-[#0DF5C4] font-bold text-sm font-mono">
+                  {latency}ms
+                </span>
               </div>
               <div className="text-[#b5afff] pt-1 flex items-center gap-2">
                 <span>λ orchestrator ephemeral instances available:</span>
-                <span className="text-white font-bold">{instances.toLocaleString()}</span>
+                <span className="text-white font-bold">
+                  {instances.toLocaleString()}
+                </span>
               </div>
             </div>
           </div>
@@ -217,7 +322,9 @@ export const LoginPage: React.FC = () => {
               <Zap className="w-5 h-5 text-[#6C63FF]" />
             </div>
             <div>
-              <h4 className="text-white text-sm font-semibold mb-1">Sub-second Spinup</h4>
+              <h4 className="text-white text-sm font-semibold mb-1">
+                Sub-second Spinup
+              </h4>
               <p className="text-[#8c8ca5] text-xs leading-relaxed">
                 Warm pre-provisioned Linux kernels resume in &lt;350ms globally.
               </p>
@@ -226,17 +333,31 @@ export const LoginPage: React.FC = () => {
 
           {/* System Footer Links */}
           <div className="flex items-center justify-between text-xs text-[#5e5e78] font-mono px-2">
-            <span>© Codeplane Cloud Inc.</span>
+            <span>© Devpulse Cloud Inc.</span>
             <div className="flex gap-4">
-              <button onClick={() => handleLogin('preview')} className="hover:text-[#a0a0c0] transition-colors">Privacy</button>
+              <button
+                onClick={() => login("alex@devpulse.dev", "Alex")}
+                className="hover:text-[#a0a0c0] transition-colors"
+              >
+                Privacy
+              </button>
               <span>/</span>
-              <button onClick={() => handleLogin('preview')} className="hover:text-[#a0a0c0] transition-colors">Terms</button>
+              <button
+                onClick={() => login("alex@devpulse.dev", "Alex")}
+                className="hover:text-[#a0a0c0] transition-colors"
+              >
+                Terms
+              </button>
               <span>/</span>
-              <button onClick={() => handleLogin('preview')} className="hover:text-[#a0a0c0] transition-colors">System</button>
+              <button
+                onClick={() => login("alex@devpulse.dev", "Alex")}
+                className="hover:text-[#a0a0c0] transition-colors"
+              >
+                System
+              </button>
             </div>
           </div>
         </div>
-
       </div>
     </div>
   );

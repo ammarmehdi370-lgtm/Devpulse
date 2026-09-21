@@ -1,54 +1,56 @@
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import { useApp, Repository } from '../context/AppContext';
-import { 
-  Search, 
-  Plus, 
-  GitFork, 
-  Star, 
-  ExternalLink, 
-  Box, 
-  Rocket, 
-  Copy, 
-  Check, 
-  GitBranch, 
-  Clock, 
+import React, { useState } from "react";
+import { useApp, Repository } from "../context/AppContext";
+import {
+  Search,
+  Plus,
+  GitFork,
+  Star,
+  ExternalLink,
+  Box,
+  Rocket,
+  Copy,
+  Check,
+  GitBranch,
+  Clock,
   ArrowRight,
   FolderGit2,
   Lock,
-  Globe
-} from 'lucide-react';
+  Globe,
+  Trash2,
+} from "lucide-react";
 
 export const RepositoriesPage: React.FC = () => {
-  const { 
-    repositories, 
-    searchRepoQuery, 
-    setSearchRepoQuery, 
-    repoFilter, 
+  const {
+    repositories,
+    searchRepoQuery,
+    setSearchRepoQuery,
+    repoFilter,
     setRepoFilter,
-    addRepository, 
-    toggleStarRepo, 
-    spinUpDevbox, 
+    addRepository,
+    deleteRepository,
+    toggleStarRepo,
+    spinUpDevbox,
     setPage,
-    theme 
+    theme,
   } = useApp();
 
   const [isNewRepoModalOpen, setIsNewRepoModalOpen] = useState(false);
-  const [newRepoName, setNewRepoName] = useState('');
-  const [newRepoDesc, setNewRepoDesc] = useState('');
-  const [newRepoLang, setNewRepoLang] = useState('TypeScript');
+  const [newRepoName, setNewRepoName] = useState("");
+  const [newRepoDesc, setNewRepoDesc] = useState("");
+  const [newRepoLang, setNewRepoLang] = useState("TypeScript");
   const [isPrivate, setIsPrivate] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const filteredRepos = repositories.filter((r) => {
-    const matchesSearch = 
+    const matchesSearch =
       r.name.toLowerCase().includes(searchRepoQuery.toLowerCase()) ||
       r.description.toLowerCase().includes(searchRepoQuery.toLowerCase());
-    
+
     if (!matchesSearch) return false;
-    if (repoFilter === 'all') return true;
-    if (repoFilter === 'starred') return r.isStarred;
+    if (repoFilter === "all") return true;
+    if (repoFilter === "starred") return r.isStarred;
     return r.language.toLowerCase() === repoFilter.toLowerCase();
   });
 
@@ -57,42 +59,43 @@ export const RepositoriesPage: React.FC = () => {
     if (!newRepoName.trim()) return;
 
     const langColors: Record<string, string> = {
-      TypeScript: '#3178c6',
-      Python: '#3572A5',
-      Rust: '#dea584',
-      Go: '#00ADD8'
+      TypeScript: "#3178c6",
+      Python: "#3572A5",
+      Rust: "#dea584",
+      Go: "#00ADD8",
     };
 
     addRepository({
-      name: newRepoName.toLowerCase().replace(/\s+/g, '-'),
-      description: newRepoDesc || 'High-performance cloud workspace project.',
+      name: newRepoName.toLowerCase().replace(/\s+/g, "-"),
+      description: newRepoDesc || "High-performance cloud workspace project.",
       language: newRepoLang,
-      languageColor: langColors[newRepoLang] || '#3178c6',
-      branch: 'main',
-      lastCommit: 'Initial commit: repository initialized',
-      deployStatus: 'none',
-      devboxReady: true
+      languageColor: langColors[newRepoLang] || "#3178c6",
+      branch: "main",
+      lastCommit: "Initial commit: repository initialized",
+      deployStatus: "none",
+      devboxReady: true,
     });
 
-    setNewRepoName('');
-    setNewRepoDesc('');
+    setNewRepoName("");
+    setNewRepoDesc("");
     setIsNewRepoModalOpen(false);
   };
 
   const handleCopyCloneUrl = (id: string, repoName: string) => {
-    navigator.clipboard.writeText(`https://github.com/codeplane-org/${repoName}.git`);
+    navigator.clipboard.writeText(
+      `https://github.com/devpulse-org/${repoName}.git`,
+    );
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleLaunchDevbox = (repo: Repository) => {
     spinUpDevbox(`${repo.name}-devbox`, `${repo.language} Cloud Container`);
-    setPage('workspaces');
+    setPage("workspaces");
   };
 
   return (
     <div className="p-6 sm:p-8 max-w-[1240px] mx-auto space-y-6">
-      
       {/* Top Banner with Quick Step Indicator */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-[#1c1c2b]">
         <div>
@@ -100,13 +103,16 @@ export const RepositoriesPage: React.FC = () => {
             <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[#0DF5C4]/10 text-[#0DF5C4] border border-[#0DF5C4]/30">
               STEP 3 OF 5
             </span>
-            <span className="text-xs text-[#7e7e9a] font-mono">GIT REPOSITORIES & SYNC</span>
+            <span className="text-xs text-[#7e7e9a] font-mono">
+              GIT REPOSITORIES & SYNC
+            </span>
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight mt-1">
             Repositories & Linked Sources
           </h1>
           <p className="text-xs text-[#8c8ca5] mt-1">
-            Manage your Git projects, sync remote repositories, and launch isolated devboxes with a single click.
+            Manage your Git projects, sync remote repositories, and launch
+            isolated devboxes with a single click.
           </p>
         </div>
 
@@ -115,14 +121,14 @@ export const RepositoriesPage: React.FC = () => {
           <button
             onClick={() => setIsNewRepoModalOpen(true)}
             className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-transform hover:scale-[1.02] shadow-lg"
-            style={{ backgroundColor: theme.primary, color: '#09090e' }}
+            style={{ backgroundColor: theme.primary, color: "#09090e" }}
           >
             <Plus className="w-4 h-4" />
             <span>New Repository</span>
           </button>
 
           <button
-            onClick={() => setPage('workspaces')}
+            onClick={() => setPage("workspaces")}
             className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#171724] hover:bg-[#202030] border border-[#2b2b40] text-white flex items-center gap-2 transition-colors"
           >
             <span>Proceed to Workspaces</span>
@@ -146,17 +152,17 @@ export const RepositoriesPage: React.FC = () => {
 
         {/* Filter chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          {['all', 'TypeScript', 'Python', 'Go', 'Rust', 'starred'].map((f) => (
+          {["all", "TypeScript", "Python", "Go", "Rust", "starred"].map((f) => (
             <button
               key={f}
               onClick={() => setRepoFilter(f)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize whitespace-nowrap transition-colors ${
                 repoFilter === f
-                  ? 'bg-white/10 text-white border border-white/30'
-                  : 'bg-[#151520] text-[#7a7a98] border border-transparent hover:text-white'
+                  ? "bg-white/10 text-white border border-white/30"
+                  : "bg-[#151520] text-[#7a7a98] border border-transparent hover:text-white"
               }`}
             >
-              {f === 'starred' ? '★ Starred' : f}
+              {f === "starred" ? "★ Starred" : f}
             </button>
           ))}
         </div>
@@ -167,8 +173,12 @@ export const RepositoriesPage: React.FC = () => {
         {filteredRepos.length === 0 ? (
           <div className="p-12 text-center bg-[#11111a] border border-[#1f1f2e] rounded-2xl">
             <FolderGit2 className="w-10 h-10 text-[#555570] mx-auto mb-3" />
-            <h3 className="text-white text-sm font-semibold">No repositories found</h3>
-            <p className="text-xs text-[#7e7e98] mt-1">Try adjusting your search or create a new repository.</p>
+            <h3 className="text-white text-sm font-semibold">
+              No repositories found
+            </h3>
+            <p className="text-xs text-[#7e7e98] mt-1">
+              Try adjusting your search or create a new repository.
+            </p>
           </div>
         ) : (
           filteredRepos.map((repo) => (
@@ -177,7 +187,6 @@ export const RepositoriesPage: React.FC = () => {
               className="bg-[#111119] border border-[#1f1f2d] hover:border-[#2e2e42] rounded-2xl p-5 transition-all shadow-md group"
             >
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                
                 {/* Repo Info */}
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-3">
@@ -193,13 +202,13 @@ export const RepositoriesPage: React.FC = () => {
                     </span>
 
                     {/* Deploy status */}
-                    {repo.deployStatus === 'live' && (
+                    {repo.deployStatus === "live" && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#0DF5C4]/10 text-[#0DF5C4] border border-[#0DF5C4]/30 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
                         Live Traffic
                       </span>
                     )}
-                    {repo.deployStatus === 'building' && (
+                    {repo.deployStatus === "building" && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#FF9E64]/10 text-[#FF9E64] border border-[#FF9E64]/30 flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-[#FF9E64] animate-spin" />
                         Building
@@ -214,7 +223,10 @@ export const RepositoriesPage: React.FC = () => {
                   {/* Metadata line */}
                   <div className="flex flex-wrap items-center gap-4 text-xs text-[#6e6e88] pt-1 font-mono">
                     <div className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: repo.languageColor }} />
+                      <span
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: repo.languageColor }}
+                      />
                       <span className="text-[#a4a4be]">{repo.language}</span>
                     </div>
 
@@ -239,11 +251,13 @@ export const RepositoriesPage: React.FC = () => {
                     onClick={() => toggleStarRepo(repo.id)}
                     className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 transition-colors ${
                       repo.isStarred
-                        ? 'bg-[#FF9E64]/15 border-[#FF9E64]/40 text-[#FF9E64]'
-                        : 'bg-[#161622] border-[#252536] text-[#7a7a98] hover:text-white'
+                        ? "bg-[#FF9E64]/15 border-[#FF9E64]/40 text-[#FF9E64]"
+                        : "bg-[#161622] border-[#252536] text-[#7a7a98] hover:text-white"
                     }`}
                   >
-                    <Star className={`w-3.5 h-3.5 ${repo.isStarred ? 'fill-current' : ''}`} />
+                    <Star
+                      className={`w-3.5 h-3.5 ${repo.isStarred ? "fill-current" : ""}`}
+                    />
                     <span>{repo.stars}</span>
                   </button>
 
@@ -253,12 +267,16 @@ export const RepositoriesPage: React.FC = () => {
                     title="Copy Git Clone URL"
                     className="p-2 rounded-xl bg-[#161622] hover:bg-[#1f1f2e] border border-[#252536] text-[#8c8ca5] hover:text-white transition-colors"
                   >
-                    {copiedId === repo.id ? <Check className="w-3.5 h-3.5 text-[#0DF5C4]" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copiedId === repo.id ? (
+                      <Check className="w-3.5 h-3.5 text-[#0DF5C4]" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
                   </button>
 
                   {/* View Deployments */}
                   <button
-                    onClick={() => setPage('deployments')}
+                    onClick={() => setPage("deployments")}
                     title="View Deployments"
                     className="px-3 py-2 rounded-xl bg-[#161622] hover:bg-[#1f1f2e] border border-[#252536] text-xs font-mono text-[#a0a0ba] hover:text-white flex items-center gap-1.5 transition-colors"
                   >
@@ -285,7 +303,6 @@ export const RepositoriesPage: React.FC = () => {
                     <span>Launch Devbox</span>
                   </button>
                 </div>
-
               </div>
             </div>
           ))
@@ -297,13 +314,22 @@ export const RepositoriesPage: React.FC = () => {
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#12121a] border border-[#262638] rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-              <h3 className="text-white font-bold text-base">Create a New Repository</h3>
-              <button onClick={() => setIsNewRepoModalOpen(false)} className="text-[#686884] hover:text-white text-sm">✕</button>
+              <h3 className="text-white font-bold text-base">
+                Create a New Repository
+              </h3>
+              <button
+                onClick={() => setIsNewRepoModalOpen(false)}
+                className="text-[#686884] hover:text-white text-sm"
+              >
+                ✕
+              </button>
             </div>
 
             <form onSubmit={handleCreateRepo} className="space-y-4 text-xs">
               <div>
-                <label className="text-[#8c8ca5] font-mono block mb-1">Repository Name</label>
+                <label className="text-[#8c8ca5] font-mono block mb-1">
+                  Repository Name
+                </label>
                 <input
                   type="text"
                   required
@@ -315,7 +341,9 @@ export const RepositoriesPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[#8c8ca5] font-mono block mb-1">Description (optional)</label>
+                <label className="text-[#8c8ca5] font-mono block mb-1">
+                  Description (optional)
+                </label>
                 <input
                   type="text"
                   placeholder="e.g. High-throughput event pipeline"
@@ -326,7 +354,9 @@ export const RepositoriesPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[#8c8ca5] font-mono block mb-1">Primary Language</label>
+                <label className="text-[#8c8ca5] font-mono block mb-1">
+                  Primary Language
+                </label>
                 <select
                   value={newRepoLang}
                   onChange={(e) => setNewRepoLang(e.target.value)}
@@ -359,7 +389,6 @@ export const RepositoriesPage: React.FC = () => {
           </div>
         </div>
       )}
-
     </div>
   );
 };

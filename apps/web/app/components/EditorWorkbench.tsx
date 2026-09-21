@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useApp, EditorFile } from "../context/AppContext";
 import {
   FolderTree,
@@ -38,6 +38,10 @@ export const EditorWorkbench: React.FC = () => {
     theme,
     isEditorProjectOpen,
     setIsEditorProjectOpen,
+    editorProjectId,
+    isEditorLoading,
+    editorError,
+    loadEditorProject,
     loadedProjectName,
     setLoadedProjectName,
     treeFiles,
@@ -46,6 +50,7 @@ export const EditorWorkbench: React.FC = () => {
     setActiveFileId,
     fileContents,
     updateFileContent,
+    saveFileContent,
     openFileInEditor,
     closeFileFromEditor,
     createNewFile,
@@ -71,11 +76,17 @@ export const EditorWorkbench: React.FC = () => {
   const [newFileNameInput, setNewFileNameInput] = useState("");
   const [runOutput, setRunOutput] = useState<string | null>(null);
   const [isRunningCode, setIsRunningCode] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const activeFile =
     openFiles.find((f) => f.id === activeFileId) || openFiles[0];
   const currentCode = activeFile ? fileContents[activeFile.id] || "" : "";
+
+  useEffect(() => {
+    if (!editorProjectId) void loadEditorProject();
+  }, [editorProjectId]);
 
   // 1. Native File Selection via Browser File API
   const handleNativeFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,28 +134,69 @@ export const EditorWorkbench: React.FC = () => {
   const handleCreateNewFile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFileNameInput.trim()) return;
-    createNewFile(newFileNameInput.trim(), newFileNameInput.trim(), "");
-    setNewFileNameInput("");
-    setIsCreatingFile(false);
+    void createNewFile(newFileNameInput.trim(), newFileNameInput.trim(), "")
+      .then(() => {
+        setNewFileNameInput("");
+        setIsCreatingFile(false);
+      })
+      .catch((error: unknown) =>
+        setSaveError(
+          error instanceof Error ? error.message : "Unable to create file",
+        ),
+      );
   };
 
   // Run Code Dynamically
-  const handleRunCode = () => {
+  const handleRunCode = async () => {
     setIsRunningCode(true);
     setRunOutput(null);
-    setTimeout(() => {
-      setIsRunningCode(false);
-      const lines = currentCode.trim().split("\n").length;
-      const chars = currentCode.length;
-      const now = new Date().toLocaleTimeString();
-      setRunOutput(
-        `[${now}] Evaluated ${activeFile?.name || "buffer"} (${lines} lines, ${chars} bytes) -> Status: 0 exit code · Memory: 8.4MB · No uncaught exceptions.`,
+    try {
+      const language =
+        activeFile?.language === "python"
+          ? "python"
+          : activeFile?.language === "rust"
+            ? "rust"
+            : activeFile?.language === "go"
+              ? "go"
+              : "javascript";
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/execute`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language, code: currentCode }),
+        },
       );
-    }, 600);
+      const result = await response.json();
+      setRunOutput(
+        `${response.ok ? "Exit code" : "Execution error"}: ${result.exitCode ?? "unavailable"}\n${result.stdout || result.stderr || result.error || "No output"}`,
+      );
+    } catch (error) {
+      setRunOutput(
+        `Execution error: ${error instanceof Error ? error.message : "Unable to reach execution service"}`,
+      );
+    } finally {
+      setIsRunningCode(false);
+    }
+  };
+
+  const handleSaveFile = async () => {
+    if (!activeFile || !activeFile.isDirty) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await saveFileContent(activeFile.id);
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : "Unable to save file",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Dynamic AI Chat
-  const handleSendAi = (e: React.FormEvent) => {
+  const handleSendAi = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aiQuery.trim()) return;
 
@@ -152,20 +204,50 @@ export const EditorWorkbench: React.FC = () => {
     setAiHistory((prev) => [...prev, { sender: "You", text: userPrompt }]);
     setAiQuery("");
     setIsAiLoading(true);
-
-    setTimeout(() => {
-      setIsAiLoading(false);
-      const fileName = activeFile ? activeFile.name : "code";
-      const aiResponseCode = `// AI Solution for ${fileName}\nexport function optimizedHandler(input: string) {\n  const sanitized = input.trim();\n  console.log("Processed:", sanitized);\n  return { success: true, timestamp: Date.now() };\n}`;
+    try {
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:4002"}/v1/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              {
+                role: "user",
+                content: `Project: ${loadedProjectName || "Devpulse project"}\nActive file: ${activeFile?.path || "none"}\nBranch: main\nRequest: ${userPrompt}\n\nRespond with a concise explanation and, when useful, a complete code patch.`,
+              },
+            ],
+          }),
+        },
+      );
+      const result = (await response.json()) as {
+        content?: { type: string; text?: string }[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error || "AI request failed");
+      const responseText =
+        result.content
+          ?.filter((item) => item.type === "text")
+          .map((item) => item.text || "")
+          .join("\n") || "The AI returned no text.";
+      setAiHistory((prev) => [
+        ...prev,
+        { sender: "Devpulse AI", text: responseText, code: responseText },
+      ]);
+    } catch (error) {
       setAiHistory((prev) => [
         ...prev,
         {
-          sender: "Codeplane AI",
-          text: `Here is the optimized implementation for "${userPrompt}" in ${fileName}:`,
-          code: aiResponseCode,
+          sender: "Devpulse AI",
+          text:
+            error instanceof Error
+              ? `AI error: ${error.message}`
+              : "AI request failed",
         },
       ]);
-    }, 1000);
+    } finally {
+      setIsAiLoading(false);
+    }
   };
 
   // 1. VS Code-Style Blank Welcome Screen (Shown when opening Editor initially)
@@ -191,6 +273,16 @@ export const EditorWorkbench: React.FC = () => {
         />
 
         <div className="max-w-2xl w-full bg-[#101017] border border-[#202030] rounded-3xl p-8 sm:p-10 shadow-2xl space-y-8 z-10">
+          {isEditorLoading && (
+            <div className="text-xs text-[#0DF5C4] font-mono">
+              Loading Devpulse project...
+            </div>
+          )}
+          {editorError && (
+            <div className="text-xs text-[#f87171] font-mono">
+              {editorError}
+            </div>
+          )}
           {/* Header */}
           <div className="flex items-center gap-4 border-b border-[#1c1c2a] pb-6">
             <div
@@ -384,6 +476,14 @@ export const EditorWorkbench: React.FC = () => {
               className={`w-3 h-3 fill-current ${isRunningCode ? "animate-spin" : ""}`}
             />
             <span>{isRunningCode ? "Running..." : "Run"}</span>
+          </button>
+
+          <button
+            onClick={handleSaveFile}
+            disabled={isSaving || !activeFile?.isDirty}
+            className="px-3 py-1 rounded-lg bg-[#6C63FF]/15 hover:bg-[#6C63FF]/25 border border-[#6C63FF]/40 text-[#c8c4ff] disabled:opacity-40 font-semibold text-xs flex items-center gap-1.5 transition-all"
+          >
+            <span>{isSaving ? "Saving..." : "Save"}</span>
           </button>
 
           <button
@@ -640,9 +740,17 @@ export const EditorWorkbench: React.FC = () => {
           </div>
 
           {/* Execution Output (if run) */}
+          {saveError && (
+            <div className="bg-[#2a1118] border-t border-[#7f1d1d] px-3 py-2 text-xs font-mono text-[#fca5a5]">
+              Save error: {saveError}
+            </div>
+          )}
+
           {runOutput && (
             <div className="h-16 bg-[#0a0a12] border-t border-[#1e1e2d] p-3 text-xs font-mono text-[#0DF5C4] flex items-center justify-between">
-              <span>{runOutput}</span>
+              <pre className="whitespace-pre-wrap overflow-auto">
+                {runOutput}
+              </pre>
               <button
                 onClick={() => setRunOutput(null)}
                 className="text-[#656580] hover:text-white text-xs"

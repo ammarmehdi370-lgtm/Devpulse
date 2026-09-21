@@ -1,122 +1,186 @@
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import { useApp, PageType } from '../context/AppContext';
-import { 
-  Box, 
-  GitFork, 
-  Code2, 
-  Rocket, 
-  Database, 
-  MessageSquare, 
-  Settings, 
-  Search, 
-  Layers, 
-  ChevronDown, 
-  Palette, 
-  LogOut, 
-  Terminal, 
-  Sparkles, 
-  Monitor, 
-  CreditCard, 
-  Check, 
-  Cpu, 
-  Radio, 
-  Activity, 
-  GitBranch, 
-  FolderTree, 
-  Split, 
-  Columns, 
+import React, { useState } from "react";
+import { useApp, PageType } from "../context/AppContext";
+import {
+  Box,
+  GitFork,
+  Code2,
+  Rocket,
+  Database,
+  MessageSquare,
+  Settings,
+  Search,
+  Layers,
+  ChevronDown,
+  Palette,
+  LogOut,
+  Terminal,
+  Sparkles,
+  Monitor,
+  CreditCard,
+  Check,
+  Cpu,
+  Radio,
+  Activity,
+  GitBranch,
+  FolderTree,
+  Split,
+  Columns,
   Maximize2,
-  ArrowLeft
-} from 'lucide-react';
+  ArrowLeft,
+} from "lucide-react";
 
-export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { 
-    page, 
-    setPage, 
-    theme, 
-    user, 
-    logout, 
+export const AppShell: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const {
+    page,
+    setPage,
+    theme,
+    user,
+    logout,
     setIsCommandPaletteOpen,
     setIsEditorProjectOpen,
-    setIsFileTreeOpen
+    setIsFileTreeOpen,
   } = useApp();
 
   const [isRepoMenuOpen, setIsRepoMenuOpen] = useState(false);
-  const [selectedRepoBranch, setSelectedRepoBranch] = useState('codeplane-core / staging');
+  const [selectedRepoBranch, setSelectedRepoBranch] = useState(
+    "devpulse-core / staging",
+  );
 
   // Check if current view is Workbench mode (Screenshots 1 & 3)
-  const isWorkbenchMode = page === 'editor' || page === 'ai-studio';
+  const isWorkbenchMode = page === "editor" || page === "ai-studio";
 
   // Standard platform items
-  const platformNavItems: { id: PageType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-    { id: 'workspaces', label: 'Workspaces', icon: Box },
-    { id: 'repositories', label: 'Repositories', icon: GitFork },
-    { id: 'editor', label: 'Editor', icon: Code2 },
-    { id: 'deployments', label: 'Deployments', icon: Rocket },
-    { id: 'remote-control', label: 'Remote Control', icon: Monitor },
-    { id: 'ai-studio', label: 'AI Studio', icon: Sparkles },
-    { id: 'pricing', label: 'Pricing & Plans', icon: CreditCard },
-    { id: 'chat', label: 'Messaging / Chat', icon: MessageSquare }
+  const platformNavItems: {
+    id: PageType;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    { id: "workspaces", label: "Workspaces", icon: Box },
+    { id: "repositories", label: "Repositories", icon: GitFork },
+    { id: "editor", label: "Editor", icon: Code2 },
+    { id: "deployments", label: "Deployments", icon: Rocket },
+    { id: "remote-control", label: "Remote Control", icon: Monitor },
+    { id: "ai-studio", label: "AI Studio", icon: Sparkles },
+    { id: "pricing", label: "Pricing & Plans", icon: CreditCard },
+    { id: "chat", label: "Messaging / Chat", icon: MessageSquare },
   ];
 
   // Workbench items (Matches Screenshot 1 & 3 exactly)
   const workbenchNavItems = [
-    { id: 'editor', label: '<> Editor', icon: Code2, badge: '<3', active: page === 'editor' },
-    { id: 'explorer', label: 'Explorer', icon: FolderTree, badge: '~2', action: () => { setPage('editor'); setIsFileTreeOpen(true); } },
-    { id: 'source-control', label: 'Source Control', icon: GitBranch, badge: 'main', badgeColor: 'bg-[#0DF5C4]/15 text-[#0DF5C4] border-[#0DF5C4]/30', action: () => setPage('repositories') },
-    { id: 'terminal', label: 'Terminal & Runs', icon: Terminal, action: () => setPage('editor') },
-    { id: 'deployments', label: 'Deployments', icon: Rocket, dot: true, action: () => setPage('deployments') },
-    { id: 'databases', label: 'Databases', icon: Database, action: () => alert('Postgres Devbox cluster online.') },
-    { id: 'api-sandbox', label: 'API Sandbox', icon: Radio, action: () => setPage('editor') },
+    {
+      id: "editor",
+      label: "<> Editor",
+      icon: Code2,
+      badge: "<3",
+      active: page === "editor",
+    },
+    {
+      id: "explorer",
+      label: "Explorer",
+      icon: FolderTree,
+      badge: "~2",
+      action: () => {
+        setPage("editor");
+        setIsFileTreeOpen(true);
+      },
+    },
+    {
+      id: "source-control",
+      label: "Source Control",
+      icon: GitBranch,
+      badge: "main",
+      badgeColor: "bg-[#0DF5C4]/15 text-[#0DF5C4] border-[#0DF5C4]/30",
+      action: () => setPage("repositories"),
+    },
+    {
+      id: "terminal",
+      label: "Terminal & Runs",
+      icon: Terminal,
+      action: () => setPage("editor"),
+    },
+    {
+      id: "deployments",
+      label: "Deployments",
+      icon: Rocket,
+      dot: true,
+      action: () => setPage("deployments"),
+    },
+    {
+      id: "databases",
+      label: "Databases",
+      icon: Database,
+      action: () => alert("Postgres Devbox cluster online."),
+    },
+    {
+      id: "api-sandbox",
+      label: "API Sandbox",
+      icon: Radio,
+      action: () => setPage("editor"),
+    },
   ];
 
   return (
     <div className="min-h-screen bg-[#09090e] text-[#ededf5] flex flex-col font-sans select-none">
-      
       {/* Top Navigation Bar */}
       <header className="h-14 border-b border-[#1f1f2e] bg-[#0c0c13] px-4 flex items-center justify-between z-30 sticky top-0 font-sans">
-        
         {/* Left: Brand + Info String matching screenshots */}
         <div className="flex items-center gap-3">
-          <div 
-            onClick={() => setPage('workspaces')}
+          <div
+            onClick={() => setPage("workspaces")}
             className="flex items-center gap-2 cursor-pointer group"
           >
-            <div 
+            <div
               className="w-7 h-7 rounded-lg flex items-center justify-center shadow-md transition-transform group-hover:scale-105 text-[#09090e]"
               style={{ backgroundColor: theme.primary }}
             >
               <Layers className="w-4 h-4" />
             </div>
-            <span className="font-bold text-white text-sm tracking-tight hidden sm:inline">Codeplane</span>
+            <span className="font-bold text-white text-sm tracking-tight hidden sm:inline">
+              Devpulse
+            </span>
           </div>
 
           {/* Token String displayed in header (Screenshots 3 & 4) */}
           <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#13131e] border border-[#222234] text-[11px] font-mono text-[#8b8ba8]">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: theme.primary }} />
-            <span>Primary color: <strong className="text-white">{theme.primary}</strong></span>
-            <span>- Font: <strong className="text-white">{theme.font}</strong></span>
-            <span>- Mode: <strong className="text-white">{theme.mode}</strong></span>
-            <span>- Roundness: <strong className="text-white">{theme.roundness}</strong></span>
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: theme.primary }}
+            />
+            <span>
+              Primary color:{" "}
+              <strong className="text-white">{theme.primary}</strong>
+            </span>
+            <span>
+              - Font: <strong className="text-white">{theme.font}</strong>
+            </span>
+            <span>
+              - Mode: <strong className="text-white">{theme.mode}</strong>
+            </span>
+            <span>
+              - Roundness:{" "}
+              <strong className="text-white">{theme.roundness}</strong>
+            </span>
           </div>
 
           {/* Quick Header Nav Links */}
           <div className="hidden md:flex items-center gap-1 text-xs font-mono pl-2">
             {[
-              { id: 'workspaces', label: 'Workspaces' },
-              { id: 'editor', label: 'Editor' },
-              { id: 'ai-studio', label: 'AI' },
-              { id: 'pricing', label: 'Pricing' },
+              { id: "workspaces", label: "Workspaces" },
+              { id: "editor", label: "Editor" },
+              { id: "ai-studio", label: "AI" },
+              { id: "pricing", label: "Pricing" },
             ].map((link) => (
               <button
                 key={link.id}
                 onClick={() => setPage(link.id as PageType)}
                 className={`px-2.5 py-1 rounded-lg transition-colors ${
                   page === link.id
-                    ? 'bg-white/10 text-white font-semibold'
-                    : 'text-[#85859e] hover:text-white'
+                    ? "bg-white/10 text-white font-semibold"
+                    : "text-[#85859e] hover:text-white"
                 }`}
               >
                 {link.label}
@@ -136,23 +200,38 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
             {isRepoMenuOpen && (
               <div className="absolute left-0 mt-1.5 w-56 bg-[#12121c] border border-[#26263a] rounded-xl shadow-2xl py-1 z-50 text-xs font-mono">
-                <div className="px-3 py-1.5 text-[10px] text-[#6b6b88] uppercase tracking-wider">Switch Context</div>
+                <div className="px-3 py-1.5 text-[10px] text-[#6b6b88] uppercase tracking-wider">
+                  Switch Context
+                </div>
                 <button
-                  onClick={() => { setSelectedRepoBranch('codeplane-core / staging'); setIsRepoMenuOpen(false); }}
+                  onClick={() => {
+                    setSelectedRepoBranch("devpulse-core / staging");
+                    setIsRepoMenuOpen(false);
+                  }}
                   className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
                 >
-                  <span>codeplane-core / staging</span>
-                  {selectedRepoBranch.includes('staging') && <Check className="w-3 h-3 text-[#0DF5C4]" />}
+                  <span>devpulse-core / staging</span>
+                  {selectedRepoBranch.includes("staging") && (
+                    <Check className="w-3 h-3 text-[#0DF5C4]" />
+                  )}
                 </button>
                 <button
-                  onClick={() => { setSelectedRepoBranch('codeplane-core / main'); setIsRepoMenuOpen(false); }}
+                  onClick={() => {
+                    setSelectedRepoBranch("devpulse-core / main");
+                    setIsRepoMenuOpen(false);
+                  }}
                   className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
                 >
-                  <span>codeplane-core / main</span>
-                  {selectedRepoBranch.includes('main') && <Check className="w-3 h-3 text-[#0DF5C4]" />}
+                  <span>devpulse-core / main</span>
+                  {selectedRepoBranch.includes("main") && (
+                    <Check className="w-3 h-3 text-[#0DF5C4]" />
+                  )}
                 </button>
                 <button
-                  onClick={() => { setSelectedRepoBranch('neural-agent / cuda'); setIsRepoMenuOpen(false); }}
+                  onClick={() => {
+                    setSelectedRepoBranch("neural-agent / cuda");
+                    setIsRepoMenuOpen(false);
+                  }}
                   className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
                 >
                   <span>neural-agent / cuda</span>
@@ -166,7 +245,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         <div className="flex items-center gap-3">
           {/* Quick jump to palette */}
           <button
-            onClick={() => setPage('theme')}
+            onClick={() => setPage("theme")}
             title="Theme Palette"
             className="p-1.5 rounded-lg bg-[#141420] hover:bg-[#1e1e2d] border border-[#242436] text-[#9a9ab8] hover:text-white transition-colors flex items-center gap-1.5 text-xs font-mono"
           >
@@ -181,7 +260,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           >
             <Search className="w-3.5 h-3.5" />
             <span>Search or jump to...</span>
-            <kbd className="px-1.5 py-0.5 rounded bg-[#1c1c2b] text-[10px] text-[#9b9bb6] border border-[#2c2c40]">Ctrl+K</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-[#1c1c2b] text-[10px] text-[#9b9bb6] border border-[#2c2c40]">
+              Ctrl+K
+            </kbd>
           </button>
 
           {/* Cluster Status Badge */}
@@ -193,7 +274,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
           {/* User Profile avatar */}
           <div className="flex items-center gap-2 pl-2 border-l border-[#202030]">
-            <div className="relative cursor-pointer group" onClick={() => logout()} title="Click to logout">
+            <div
+              className="relative cursor-pointer group"
+              onClick={() => logout()}
+              title="Click to logout"
+            >
               <img
                 src={user.avatar}
                 alt={user.name}
@@ -207,14 +292,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
       {/* Body with Sidebar and Main Content */}
       <div className="flex flex-1 overflow-hidden">
-        
         {/* DUAL MODE SIDEBAR */}
 
         {/* 1. WORKBENCH MODE SIDEBAR (Matches Screenshot 1 & Screenshot 3 Left Sidebar) */}
         {isWorkbenchMode ? (
           <aside className="w-56 bg-[#0c0c14] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
             <div className="p-3 space-y-5">
-              
               {/* Top Header */}
               <div>
                 <div className="flex items-center justify-between px-2 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
@@ -225,7 +308,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                 <nav className="space-y-1">
                   {workbenchNavItems.map((item) => {
                     const Icon = item.icon;
-                    const isSelected = item.id === 'editor' && page === 'editor';
+                    const isSelected =
+                      item.id === "editor" && page === "editor";
                     return (
                       <button
                         key={item.id}
@@ -235,10 +319,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         }}
                         className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
                           isSelected
-                            ? 'text-[#09090e] font-bold shadow-md'
-                            : 'text-[#8e8ea6] hover:text-[#d0d0e2] hover:bg-[#141422]'
+                            ? "text-[#09090e] font-bold shadow-md"
+                            : "text-[#8e8ea6] hover:text-[#d0d0e2] hover:bg-[#141422]"
                         }`}
-                        style={isSelected ? { backgroundColor: theme.primary } : {}}
+                        style={
+                          isSelected ? { backgroundColor: theme.primary } : {}
+                        }
                       >
                         <div className="flex items-center gap-2">
                           <Icon className="w-4 h-4" />
@@ -246,7 +332,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                         </div>
 
                         {item.badge && (
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${item.badgeColor || (isSelected ? 'bg-black/20 text-[#09090e]' : 'bg-[#181826] text-[#71718c]')}`}>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${item.badgeColor || (isSelected ? "bg-black/20 text-[#09090e]" : "bg-[#181826] text-[#71718c]")}`}
+                          >
                             {item.badge}
                           </span>
                         )}
@@ -262,13 +350,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
               {/* Return to Platform Link */}
               <button
-                onClick={() => setPage('workspaces')}
+                onClick={() => setPage("workspaces")}
                 className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-mono text-[#787896] hover:text-white hover:bg-[#151522] transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Exit Workbench</span>
               </button>
-
             </div>
 
             {/* Bottom Telemetry Gauges (Pixel-Perfect to Screenshot 1 & 3) */}
@@ -301,7 +388,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
               {/* Settings Footer */}
               <div className="pt-2 border-t border-[#1a1a28] flex items-center justify-between text-[#787896]">
-                <button onClick={() => setPage('theme')} className="hover:text-white flex items-center gap-1.5 text-xs">
+                <button
+                  onClick={() => setPage("theme")}
+                  className="hover:text-white flex items-center gap-1.5 text-xs"
+                >
                   <Settings className="w-3.5 h-3.5" />
                   <span>Settings</span>
                 </button>
@@ -316,7 +406,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
           <aside className="w-56 bg-[#0b0b12] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
             <div className="p-3 space-y-6">
-              
               {/* Platform Section */}
               <div>
                 <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
@@ -330,17 +419,24 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                       <button
                         key={item.id}
                         onClick={() => {
-                          if (item.id === 'editor') {
+                          if (item.id === "editor") {
                             setIsEditorProjectOpen(false);
                           }
                           setPage(item.id);
                         }}
                         className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                           isActive
-                            ? 'text-white font-semibold shadow-sm'
-                            : 'text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420]'
+                            ? "text-white font-semibold shadow-sm"
+                            : "text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420]"
                         }`}
-                        style={isActive ? { backgroundColor: theme.primary, color: '#0b0b12' } : {}}
+                        style={
+                          isActive
+                            ? {
+                                backgroundColor: theme.primary,
+                                color: "#0b0b12",
+                              }
+                            : {}
+                        }
                       >
                         <Icon className="w-4 h-4" />
                         <span>{item.label}</span>
@@ -356,8 +452,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   SYSTEM
                 </div>
                 <div className="space-y-1">
-                  <button 
-                    onClick={() => setPage('theme')}
+                  <button
+                    onClick={() => setPage("theme")}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors"
                   >
                     <Settings className="w-4 h-4" />
@@ -376,14 +472,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   </div>
                 </div>
               </div>
-
             </div>
 
             {/* Footer Version Tag */}
             <div className="p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] font-mono text-[#5b5b75]">
               <span>v2.4.18-edge</span>
-              <button 
-                onClick={() => logout()} 
+              <button
+                onClick={() => logout()}
                 title="Sign out"
                 className="hover:text-[#e0e0f0] transition-colors flex items-center gap-1 text-[10px]"
               >
@@ -395,10 +490,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         )}
 
         {/* Main Content Pane */}
-        <main className="flex-1 overflow-y-auto bg-[#08080d]">
-          {children}
-        </main>
-
+        <main className="flex-1 overflow-y-auto bg-[#08080d]">{children}</main>
       </div>
     </div>
   );
