@@ -3,19 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
-  "engines": { "node": ">=20.10.0" },
+  "engines": {
+    "node": ">=20.10.0"
+  },
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "test": "turbo test",
-    "lint": "turbo lint",
-    "typecheck": "turbo typecheck",
+    "dev": "node scripts/turbo.mjs dev",
+    "build": "node scripts/turbo.mjs build",
+    "test": "node scripts/turbo.mjs test",
+    "lint": "node scripts/turbo.mjs lint",
+    "typecheck": "node scripts/turbo.mjs typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "migrate": "pnpm --filter @devpulse/database db:migrate",
     "seed": "pnpm --filter @devpulse/database db:seed",
     "studio": "pnpm --filter @devpulse/database db:studio",
-    "clean": "turbo clean"
+    "clean": "node scripts/turbo.mjs clean"
   },
   "devDependencies": {
     "@devpulse/config": "workspace:*",

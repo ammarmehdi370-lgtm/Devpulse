@@ -12,5 +12,6 @@ expo-env.d.ts
 !.env.example
 !.env.test
 *.tsbuildinfo
+apps/mobile/.expo
 prisma/*.db
 prisma/*.db-journal

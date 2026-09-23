@@ -28,6 +28,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm --filter @devpulse/web lint
+      - run: pnpm --filter @devpulse/web typecheck
+      - run: pnpm --filter @devpulse/web build
 
   deploy-staging:
     name: Deploy staging
