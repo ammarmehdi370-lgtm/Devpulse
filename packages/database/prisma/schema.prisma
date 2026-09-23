@@ -27,6 +27,17 @@ enum ChannelType {
   DIRECT
 }
 
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+enum FileOrigin {
+  API
+  LOCAL
+  NEW
+}
+
 model User {
   id           String            @id @default(cuid())
   email        String            @unique
@@ -36,6 +47,11 @@ model User {
   memberships  WorkspaceMember[]
   ownedSpaces  Workspace[]       @relation("WorkspaceOwner")
   messages     Message[]
+  aiConversations AIConversation[]
+  aiUsage         AIUsage[]
+  executions      CodeExecution[]
+  editorSessions  EditorSession[]
+  lastEditedFiles File[]          @relation("FileLastEditor")
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
 }
@@ -81,6 +97,8 @@ model Project {
   devboxReady   Boolean       @default(true)
   workspace     Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   files         File[]
+  aiConversations AIConversation[]
+  editorSessions EditorSession[]
   devboxes      Devbox[]
   deployments   Deployment[]
   environmentVariables EnvironmentVariable[]
@@ -149,12 +167,21 @@ model File {
   path       String
   content    String        @default("")
   language   String?
+  sizeBytes  Int?
+  lastEditedById String?
+  lastEditedBy User? @relation("FileLastEditor", fields: [lastEditedById], references: [id])
+  lastEditedAt DateTime?
   version    Int           @default(1)
   project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   revisions  FileRevision[]
+  executions CodeExecution[]
+  aiConversations AIConversation[]
   updatedAt  DateTime      @updatedAt
   @@unique([projectId, path])
   @@index([projectId])
+  @@index([projectId, path])
+  @@index([projectId, updatedAt])
+  @@index([projectId, language])
 }
 
 model FileRevision {
@@ -166,6 +193,12 @@ model FileRevision {
   file      File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   @@unique([fileId, version])
+  @@index([fileId, createdAt])
+  appliedFromAI Boolean @default(false)
+  aiMessageId String?
+  lineCount Int?
+  charCount Int?
+  diffPatch String? @db.Text
 }
 
 model Channel {
@@ -190,4 +223,87 @@ model Message {
   editedAt  DateTime?
   deletedAt DateTime?
   @@index([channelId, createdAt])
+}
+
+model AIConversation {
+  id            String   @id @default(cuid())
+  title         String   @default("New conversation")
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  fileId        String?
+  file          File?    @relation(fields: [fileId], references: [id], onDelete: SetNull)
+  model         String   @default("claude-sonnet-4-6")
+  messageCount  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  messages      AIMessage[]
+  @@index([userId, fileId])
+  @@index([projectId, updatedAt])
+}
+
+model AIMessage {
+  id              String        @id @default(cuid())
+  conversationId  String
+  conversation    AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role            MessageRole
+  content         String        @db.Text
+  command         String?
+  tokensUsed      Int?
+  responseTimeMs  Int?
+  hasCode         Boolean       @default(false)
+  codeLanguage    String?
+  appliedToFileId String?
+  appliedAt       DateTime?
+  createdAt       DateTime      @default(now())
+  @@index([conversationId, createdAt])
+}
+
+model AIUsage {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId   String?
+  month         Int
+  year          Int
+  requestCount  Int      @default(0)
+  tokenCount    Int      @default(0)
+  estimatedCost Float    @default(0)
+  updatedAt     DateTime @updatedAt
+  @@unique([userId, month, year])
+  @@index([userId, year, month])
+}
+
+model CodeExecution {
+  id         String   @id @default(cuid())
+  fileId     String
+  file       File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  language   String
+  code       String   @db.Text
+  stdout     String?  @db.Text
+  stderr     String?  @db.Text
+  exitCode   Int?
+  durationMs Int?
+  timedOut   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  @@index([fileId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model EditorSession {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  openFileIds     String[]
+  activeFileId    String?
+  scrollPositions Json?
+  cursorPositions Json?
+  updatedAt       DateTime @updatedAt
+  @@unique([userId, projectId])
+  @@index([userId, updatedAt])
 }

@@ -1,896 +1,252 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
-import { useApp, EditorFile } from "../context/AppContext";
+import dynamic from "next/dynamic";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  FolderTree,
-  FileCode,
-  FileText,
-  Play,
-  Sparkles,
-  Send,
-  Copy,
-  Check,
-  X,
-  Bot,
-  Terminal,
-  GitBranch,
-  RefreshCw,
-  Split,
-  Columns,
-  FolderPlus,
-  FilePlus,
-  Trash2,
-  Key,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-  CornerDownLeft,
-  Folder,
-  File,
-  Code2,
-  FolderOpen,
+  Braces, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot,
+  CircleX, Copy, File, FileCode, FilePlus, FileText, Folder,
+  FolderOpen, FolderPlus, Globe, GitBranch, Play, RefreshCw, Search,
+  Palette, Send, Settings2, Sparkles, Terminal, Trash2, X, Zap,
 } from "lucide-react";
+import { EditorFile, useApp } from "../context/AppContext";
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const AI_BASE = process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:4002";
+
+type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean };
+type OutputTab = "terminal" | "output" | "problems";
+type ContextMenu = { x: number; y: number; file: EditorFile } | null;
+type CursorPosition = { lineNumber: number; column: number };
+type EditorHandle = { trigger: (source: string, action: string, payload: unknown) => void };
+
+export const DEVPULSE_MONACO_THEME = {
+  base: "vs-dark", inherit: true,
+  rules: [
+    { token: "comment", foreground: "6A9955" }, { token: "keyword", foreground: "569CD6" },
+    { token: "string", foreground: "CE9178" }, { token: "identifier", foreground: "9CDCFE" },
+    { token: "number", foreground: "B5CEA8" }, { token: "type", foreground: "4EC9B0" },
+    { token: "function", foreground: "DCDCAA" },
+  ],
+  colors: {
+    "editor.background": "#0A0A0F", "editor.lineHighlightBackground": "#1a1a2e",
+    "editor.selectionBackground": "#7C3AED33", "editorCursor.foreground": "#7C3AED",
+    "editorLineNumber.foreground": "#4b4b63", "editorLineNumber.activeForeground": "#c4b5fd",
+    "editorIndentGuide.background1": "#1c1c2b", "editorIndentGuide.activeBackground1": "#3b2d63",
+  },
+} as const;
+
+const languageForFile = (file?: EditorFile) => {
+  const extension = file?.name.split(".").pop()?.toLowerCase();
+  if (extension === "py") return "python";
+  if (extension === "rs") return "rust";
+  if (extension === "go") return "go";
+  return "javascript";
+};
+
+const monacoLanguageForFile = (file?: EditorFile) => {
+  const extension = file?.name.split(".").pop()?.toLowerCase();
+  if (extension === "ts" || extension === "tsx") return "typescript";
+  if (extension === "js" || extension === "jsx") return "javascript";
+  if (extension === "json") return "json";
+  if (extension === "css" || extension === "scss") return "scss";
+  if (extension === "md") return "markdown";
+  if (extension === "html") return "html";
+  return extension || "plaintext";
+};
+
+const extractCode = (text: string) =>
+  text.match(/```(?:[\w#+-]+)?\s*([\s\S]*?)```/)?.[1]?.trim() || text;
+const extractCodeLanguage = (text: string) =>
+  text.match(/```([\w#+-]+)?\s*[\s\S]*?```/)?.[1] || "text";
+
+const parseSseLine = (line: string) => {
+  if (!line.startsWith("data:")) return "";
+  const payload = line.slice(5).trim();
+  if (!payload || payload === "[DONE]") return "";
+  try {
+    const parsed = JSON.parse(payload) as { text?: string; delta?: string };
+    return parsed.text || parsed.delta || "";
+  } catch {
+    return payload;
+  }
+};
+
+const FileTypeIcon: React.FC<{ file: EditorFile; className?: string }> = ({ file, className = "h-4 w-4" }) => {
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  if (["tsx", "jsx", "ts", "js"].includes(extension || "")) return <FileCode className={`${className} text-cyan-400`} />;
+  if (["css", "scss"].includes(extension || "")) return <Palette className={`${className} text-blue-400`} />;
+  if (extension === "json") return <Braces className={`${className} text-amber-400`} />;
+  if (extension === "md") return <FileText className={`${className} text-slate-400`} />;
+  if (extension === "py") return <FileCode className={`${className} text-green-400`} />;
+  if (extension === "html") return <Globe className={`${className} text-orange-400`} />;
+  return <File className={`${className} text-slate-500`} />;
+};
+
+const FileRow: React.FC<{ file: EditorFile; active: boolean; onOpen: () => void; onMenu: (event: React.MouseEvent<HTMLButtonElement>) => void }> = ({ file, active, onOpen, onMenu }) => (
+  <button onClick={onOpen} onContextMenu={onMenu} className={`group flex w-full items-center gap-2 border-l-2 px-3 py-1 text-left ${active ? "border-l-[#7C3AED] bg-[#1a1a2e] text-white" : "border-l-transparent text-slate-400 hover:bg-[#1a1a2e]"}`}>
+    <FileTypeIcon file={file} /> <span className="truncate">{file.name}</span>
+    {file.isDirty && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
+  </button>
+);
+
+const AiPanel: React.FC<{
+  messages: AiMessage[]; input: string; setInput: (value: string) => void;
+  onSubmit: (event: React.FormEvent) => void; onClose: () => void;
+  onCopy: (message: AiMessage) => void; copiedId: string | null;
+  onApply: (message: AiMessage) => void; activeFile?: EditorFile; isStreaming: boolean;
+}> = ({ messages, input, setInput, onSubmit, onClose, onCopy, copiedId, onApply, activeFile, isStreaming }) => (
+  <aside className="flex w-[320px] shrink-0 flex-col border-l border-[#28243c] bg-[#11111a]">
+    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[#28243c] px-3">
+      <Zap className={`h-4 w-4 text-purple-400 ${isStreaming ? "animate-pulse" : ""}`} />
+      <span className="font-bold text-white">Devpulse AI</span>
+      <span className="ml-auto border border-purple-400/30 bg-purple-400/10 px-1.5 py-0.5 text-[9px] text-purple-200">claude-sonnet-4-6</span>
+      <button onClick={onClose} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button>
+    </div>
+    <div className="flex-1 space-y-3 overflow-y-auto p-3">
+      {messages.map((message) => (
+        <div key={message.id} className={message.role === "user" ? "ml-6" : "mr-2 border-l-2 border-purple-500 pl-2"}>
+          <div className={message.role === "user" ? "bg-[#5B21B6] p-2 text-white" : "bg-[#191923] p-2 text-slate-300"}>
+            <div className="whitespace-pre-wrap text-[11px] leading-5">{message.text || (message.streaming ? "Thinking..." : "")}{message.streaming && <span className="ml-1 animate-pulse text-purple-300">▌</span>}</div>
+            {message.role === "assistant" && message.text && !message.streaming && (
+              <div className="mt-2 border border-[#28243c] bg-[#0d0d16] p-2">
+                <div className="mb-1 flex items-center justify-between text-[9px] text-slate-500"><span>{extractCodeLanguage(message.text).toUpperCase()}</span><button onClick={() => onCopy(message)}>{copiedId === message.id ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}</button></div>
+                <button onClick={() => onApply(message)} className="mt-2 w-full bg-cyan-400/15 px-2 py-1.5 text-[10px] font-bold text-cyan-300">Apply to editor</button>
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+    <div className="border-t border-[#28243c] p-3">
+      <div className="mb-2 text-[10px] text-slate-500">Analyzing: <span className="text-cyan-300">{activeFile?.name || "no file"}</span></div>
+      <form onSubmit={onSubmit} className="flex items-end gap-2">
+        <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} rows={2} placeholder="Ask Devpulse AI... /fix" className="min-w-0 flex-1 resize-none border border-[#332b50] bg-[#0d0d16] p-2 text-[11px] text-white outline-none" />
+        <button disabled={isStreaming} className="bg-[#7C3AED] p-2 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button>
+      </form>
+      <div className="mt-2 text-[9px] text-slate-600">/fix /explain /test /comment /refactor</div>
+    </div>
+  </aside>
+);
+
+const OutputPanel: React.FC<{
+  outputTab: OutputTab; setOutputTab: (tab: OutputTab) => void; runOutput: string;
+  runExitCode: number | null; isRunning: boolean; onRun: () => void; onClear: () => void;
+}> = ({ outputTab, setOutputTab, runOutput, runExitCode, isRunning, onRun, onClear }) => (
+  <section className="flex h-[176px] shrink-0 flex-col border-t border-[#28243c] bg-[#0d0d16]">
+    <div className="flex h-9 shrink-0 items-center border-b border-[#28243c] px-3">
+      <div className="flex h-full items-center gap-4">{(["terminal", "output", "problems"] as OutputTab[]).map((tab) => <button key={tab} onClick={() => setOutputTab(tab)} className={`h-full text-[10px] font-bold tracking-wider ${outputTab === tab ? "border-b-2 border-purple-400 text-white" : "text-slate-500"}`}>{tab.toUpperCase()}</button>)}</div>
+      <div className="ml-auto flex items-center gap-3"><button onClick={onRun} className="flex items-center gap-1 text-[10px] text-cyan-300"><Play className="h-3 w-3" />{isRunning ? "Running" : "Run"}</button><button onClick={onClear} className="text-[10px] text-slate-500">Clear</button></div>
+    </div>
+    <div className="min-h-0 flex-1 overflow-auto p-3 text-[11px] leading-5">
+      {outputTab === "problems" ? <div className="flex items-center gap-2 text-slate-600"><CircleDot className="h-3.5 w-3.5" />No problems detected</div> : outputTab === "output" ? <div className="text-slate-500">Build and diagnostic output will appear here.</div> : <div className={runExitCode !== null && runExitCode !== 0 ? "text-red-300" : "text-green-300"}><div className="mb-1 flex items-center gap-2 text-[10px]">{runExitCode === null ? <CircleDot className="h-3 w-3 text-slate-500" /> : runExitCode === 0 ? <Check className="h-3 w-3" /> : <CircleX className="h-3 w-3" />}<span>Exit code: {runExitCode ?? "running"}</span></div><pre className="whitespace-pre-wrap"><span className="text-purple-400">$</span> <span className="text-cyan-300">devpulse terminal</span>{"\n"}{runOutput}{isRunning && <span className="animate-pulse text-cyan-300"> ▌</span>}</pre></div>}
+    </div>
+  </section>
+);
 
 export const EditorWorkbench: React.FC = () => {
-  const {
-    theme,
-    isEditorProjectOpen,
-    setIsEditorProjectOpen,
-    editorProjectId,
-    isEditorLoading,
-    editorError,
-    loadEditorProject,
-    loadedProjectName,
-    setLoadedProjectName,
-    treeFiles,
-    openFiles,
-    activeFileId,
-    setActiveFileId,
-    fileContents,
-    updateFileContent,
-    saveFileContent,
-    openFileInEditor,
-    closeFileFromEditor,
-    createNewFile,
-    deleteFile,
-    loadUserLocalFiles,
-    loadSingleLocalFile,
-    isFileTreeOpen,
-    setIsFileTreeOpen,
-    isAiDrawerOpen,
-    setIsAiDrawerOpen,
-    applyDiffToActiveFile,
-  } = useApp();
-
+  const { isEditorProjectOpen, editorProjectId, isEditorLoading, editorError, loadEditorProject, loadedProjectName, treeFiles, openFiles, activeFileId, setActiveFileId, fileContents, updateFileContent, saveFileContent, openFileInEditor, closeFileFromEditor, createNewFile, deleteFile, loadUserLocalFiles, loadSingleLocalFile, isAiDrawerOpen, setIsAiDrawerOpen, applyDiffToActiveFile, setIsCommandPaletteOpen } = useApp();
+  const editorRef = useRef<EditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-
-  const [aiQuery, setAiQuery] = useState("");
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiHistory, setAiHistory] = useState<
-    Array<{ sender: string; text: string; code?: string }>
-  >([]);
+  const aiAbortRef = useRef<AbortController | null>(null);
+  const [isOutputOpen, setIsOutputOpen] = useState(true);
+  const [outputTab, setOutputTab] = useState<OutputTab>("terminal");
+  const [runOutput, setRunOutput] = useState("Ready. Run the active file to see output.");
+  const [runExitCode, setRunExitCode] = useState<number | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [cursor, setCursor] = useState<CursorPosition>({ lineNumber: 1, column: 1 });
+  const [messages, setMessages] = useState<AiMessage[]>([]);
+  const [aiInput, setAiInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
+  const [fileSearch, setFileSearch] = useState("");
+  const [isFileSearchOpen, setIsFileSearchOpen] = useState(false);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
-  const [newFileNameInput, setNewFileNameInput] = useState("");
-  const [runOutput, setRunOutput] = useState<string | null>(null);
-  const [isRunningCode, setIsRunningCode] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const activeFile = openFiles.find((file) => file.id === activeFileId) || openFiles[0];
+  const activeContent = activeFile ? fileContents[activeFile.id] || "" : "";
+  const filteredFiles = treeFiles.filter((file) => `${file.name} ${file.path}`.toLowerCase().includes(fileSearch.toLowerCase()));
 
-  const activeFile =
-    openFiles.find((f) => f.id === activeFileId) || openFiles[0];
-  const currentCode = activeFile ? fileContents[activeFile.id] || "" : "";
-
+  useEffect(() => { if (!editorProjectId) void loadEditorProject(); }, [editorProjectId, loadEditorProject]);
   useEffect(() => {
-    if (!editorProjectId) void loadEditorProject();
-  }, [editorProjectId]);
-
-  // 1. Native File Selection via Browser File API
-  const handleNativeFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const file = files[0]!;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = (event.target?.result as string) || "";
-      loadSingleLocalFile(file.name, content);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.shiftKey && event.key.toLowerCase() === "p") { event.preventDefault(); setIsCommandPaletteOpen(true); return; }
+      if (event.key.toLowerCase() === "s") { event.preventDefault(); if (activeFile?.isDirty) void saveActiveFile(); }
+      else if (event.key.toLowerCase() === "p") { event.preventDefault(); setIsFileSearchOpen(true); }
+      else if (event.key === "`") { event.preventDefault(); setIsOutputOpen((open) => !open); }
+      else if (event.key.toLowerCase() === "i") { event.preventDefault(); setIsAiDrawerOpen((open) => !open); }
+      else if (event.key === "/") { event.preventDefault(); editorRef.current?.trigger("keyboard", "editor.action.commentLine", null); }
     };
-    reader.readAsText(file);
+    window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
+  });
+  useEffect(() => { const closeMenu = () => setContextMenu(null); window.addEventListener("click", closeMenu); return () => window.removeEventListener("click", closeMenu); }, []);
+
+  const saveActiveFile = async () => {
+    if (!activeFile?.isDirty) return;
+    try { await saveFileContent(activeFile.id); setRunOutput(`Saved ${activeFile.path} and created a new file revision.`); }
+    catch (error) { setRunOutput(error instanceof Error ? error.message : "Unable to save file"); }
   };
-
-  // 2. Native Folder Selection via Browser Directory API
-  const handleNativeFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const loadedList: { name: string; path: string; content: string }[] = [];
-    const folderName =
-      files[0]?.webkitRelativePath.split("/")[0] || "My-Local-Folder";
-    let readCount = 0;
-    const maxFiles = Math.min(files.length, 30); // read up to 30 text files for instant responsiveness
-
-    for (let i = 0; i < maxFiles; i++) {
-      const f = files[i]!;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = (event.target?.result as string) || "";
-        loadedList.push({
-          name: f.name,
-          path: f.webkitRelativePath || f.name,
-          content: text,
-        });
-        readCount++;
-        if (readCount === maxFiles) {
-          loadUserLocalFiles(folderName, loadedList);
-        }
-      };
-      reader.readAsText(f);
-    }
-  };
-
-  const handleCreateNewFile = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newFileNameInput.trim()) return;
-    void createNewFile(newFileNameInput.trim(), newFileNameInput.trim(), "")
-      .then(() => {
-        setNewFileNameInput("");
-        setIsCreatingFile(false);
-      })
-      .catch((error: unknown) =>
-        setSaveError(
-          error instanceof Error ? error.message : "Unable to create file",
-        ),
-      );
-  };
-
-  // Run Code Dynamically
-  const handleRunCode = async () => {
-    setIsRunningCode(true);
-    setRunOutput(null);
+  const handleRun = async () => {
+    if (!activeFile) return;
+    setIsRunning(true); setOutputTab("terminal"); setIsOutputOpen(true); setRunOutput(`$ devpulse run ${activeFile.name}\n\nRunning...`); setRunExitCode(null);
     try {
-      const language =
-        activeFile?.language === "python"
-          ? "python"
-          : activeFile?.language === "rust"
-            ? "rust"
-            : activeFile?.language === "go"
-              ? "go"
-              : "javascript";
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/execute`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ language, code: currentCode }),
-        },
-      );
-      const result = await response.json();
-      setRunOutput(
-        `${response.ok ? "Exit code" : "Execution error"}: ${result.exitCode ?? "unavailable"}\n${result.stdout || result.stderr || result.error || "No output"}`,
-      );
-    } catch (error) {
-      setRunOutput(
-        `Execution error: ${error instanceof Error ? error.message : "Unable to reach execution service"}`,
-      );
-    } finally {
-      setIsRunningCode(false);
-    }
+      const response = await fetch(`${API_BASE}/v1/execute`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: languageForFile(activeFile), code: activeContent }) });
+      const result = await response.json() as { exitCode?: number; stdout?: string; stderr?: string; error?: string };
+      const exitCode = result.exitCode ?? (response.ok ? 0 : 1); setRunExitCode(exitCode); setRunOutput(`$ devpulse run ${activeFile.name}\n\n${result.stdout || result.stderr || result.error || "Process completed with no output."}`);
+    } catch (error) { setRunExitCode(1); setRunOutput(error instanceof Error ? error.message : "Execution service unavailable"); }
+    finally { setIsRunning(false); }
   };
-
-  const handleSaveFile = async () => {
-    if (!activeFile || !activeFile.isDirty) return;
-    setIsSaving(true);
-    setSaveError(null);
+  const handleNativeFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => void loadSingleLocalFile(file.name, String(reader.result || "")); reader.readAsText(file); event.target.value = ""; };
+  const handleNativeFolderSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []).slice(0, 30); if (!files.length) return; const folderName = files[0]?.webkitRelativePath.split("/")[0] || "Local folder";
+    Promise.all(files.map((file) => new Promise<{ name: string; path: string; content: string }>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, path: file.webkitRelativePath || file.name, content: String(reader.result || "") }); reader.readAsText(file); }))).then((loaded) => void loadUserLocalFiles(folderName, loaded)); event.target.value = "";
+  };
+  const streamAiResponse = async (prompt: string) => {
+    aiAbortRef.current?.abort(); const controller = new AbortController(); aiAbortRef.current = controller; const assistantId = `assistant-${Date.now()}`;
+    setMessages((previous) => [...previous, { id: assistantId, role: "assistant", text: "", streaming: true }]); setIsStreaming(true);
     try {
-      await saveFileContent(activeFile.id);
-    } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "Unable to save file",
-      );
-    } finally {
-      setIsSaving(false);
-    }
+      const response = await fetch(`${AI_BASE}/v1/chat`, { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" }, body: JSON.stringify({ stream: true, messages: [{ role: "user", content: `Project: ${loadedProjectName || "Devpulse project"}\nActive file: ${activeFile?.path || "none"}\nRequest: ${prompt}\n\nRespond with a concise explanation and, when useful, a complete code patch.` }] }) });
+      if (!response.ok) throw new Error((await response.text()) || "AI request failed");
+      if ((response.headers.get("content-type") || "").includes("text/event-stream") && response.body) {
+        const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+        while (true) { const chunk = await reader.read(); if (chunk.done) break; buffer += decoder.decode(chunk.value, { stream: true }); const lines = buffer.split("\n"); buffer = lines.pop() || ""; const text = lines.map(parseSseLine).join(""); if (text) setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text: message.text + text } : message)); }
+      } else {
+        const result = await response.json() as { content?: { type: string; text?: string }[] }; const text = result.content?.filter((item) => item.type === "text").map((item) => item.text || "").join("\n") || "The AI returned no text.";
+        setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text } : message));
+      }
+    } catch (error) { if ((error as Error).name !== "AbortError") setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text: error instanceof Error ? `AI error: ${error.message}` : "AI request failed" } : message)); }
+    finally { setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, streaming: false } : message)); setIsStreaming(false); }
   };
-
-  // Dynamic AI Chat
-  const handleSendAi = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aiQuery.trim()) return;
-
-    const userPrompt = aiQuery.trim();
-    setAiHistory((prev) => [...prev, { sender: "You", text: userPrompt }]);
-    setAiQuery("");
-    setIsAiLoading(true);
-    try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:4002"}/v1/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [
-              {
-                role: "user",
-                content: `Project: ${loadedProjectName || "Devpulse project"}\nActive file: ${activeFile?.path || "none"}\nBranch: main\nRequest: ${userPrompt}\n\nRespond with a concise explanation and, when useful, a complete code patch.`,
-              },
-            ],
-          }),
-        },
-      );
-      const result = (await response.json()) as {
-        content?: { type: string; text?: string }[];
-        error?: string;
-      };
-      if (!response.ok) throw new Error(result.error || "AI request failed");
-      const responseText =
-        result.content
-          ?.filter((item) => item.type === "text")
-          .map((item) => item.text || "")
-          .join("\n") || "The AI returned no text.";
-      setAiHistory((prev) => [
-        ...prev,
-        { sender: "Devpulse AI", text: responseText, code: responseText },
-      ]);
-    } catch (error) {
-      setAiHistory((prev) => [
-        ...prev,
-        {
-          sender: "Devpulse AI",
-          text:
-            error instanceof Error
-              ? `AI error: ${error.message}`
-              : "AI request failed",
-        },
-      ]);
-    } finally {
-      setIsAiLoading(false);
-    }
+  const sendAi = (event: React.FormEvent) => { event.preventDefault(); const prompt = aiInput.trim(); if (!prompt || isStreaming) return; setMessages((previous) => [...previous, { id: `user-${Date.now()}`, role: "user", text: prompt }]); setAiInput(""); void streamAiResponse(prompt); };
+  const copyMessage = async (message: AiMessage) => { await navigator.clipboard.writeText(extractCode(message.text)); setCopiedId(message.id); window.setTimeout(() => setCopiedId(null), 1400); };
+  const handleContextAction = async (action: "new" | "rename" | "delete" | "copy", file: EditorFile) => {
+    setContextMenu(null);
+    if (action === "new") setIsCreatingFile(true);
+    else if (action === "copy") await navigator.clipboard.writeText(file.path);
+    else if (action === "delete") { if (window.confirm(`Delete ${file.path}?`)) await deleteFile(file.id); }
+    else { const nextPath = window.prompt("Rename file", file.path); if (nextPath && nextPath !== file.path) { await fetch(`${API_BASE}/v1/files/${file.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: nextPath }) }); await loadEditorProject(); } }
   };
+  const createFile = async (event: React.FormEvent) => { event.preventDefault(); if (!newFileName.trim()) return; await createNewFile(newFileName.trim(), newFileName.trim(), ""); setNewFileName(""); setIsCreatingFile(false); };
+  const fileTree = useMemo(() => {
+    const roots: Array<{ kind: "folder" | "file"; label: string; path: string; file?: EditorFile; children?: EditorFile[] }> = []; const folders = new Map<string, EditorFile[]>();
+    filteredFiles.forEach((file) => { const parts = file.path.split(/[\\/]/); if (parts.length === 1) roots.push({ kind: "file", label: file.name, path: file.path, file }); else { const folder = parts.slice(0, -1).join("/"); folders.set(folder, [...(folders.get(folder) || []), file]); } });
+    folders.forEach((children, path) => roots.push({ kind: "folder", label: path.split(/[\\/]/).pop() || path, path, children })); return roots.sort((left, right) => left.kind.localeCompare(right.kind) || left.label.localeCompare(right.label));
+  }, [filteredFiles]);
 
-  // 1. VS Code-Style Blank Welcome Screen (Shown when opening Editor initially)
-  if (!isEditorProjectOpen) {
-    return (
-      <div className="h-[calc(100vh-3.5rem)] flex items-center justify-center p-6 bg-[#08080d] bg-grid-pattern relative select-none font-sans">
-        {/* Hidden Native File & Folder Inputs */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleNativeFileSelect}
-          className="hidden"
-        />
-        <input
-          type="file"
-          // @ts-expect-error webkitdirectory is standard in Chromium browsers
-          webkitdirectory=""
-          directory=""
-          multiple
-          ref={folderInputRef}
-          onChange={handleNativeFolderSelect}
-          className="hidden"
-        />
+  if (!isEditorProjectOpen) return <div className="flex h-[calc(100vh-3.5rem)] items-center justify-center bg-[#08080d] p-6 text-[#d6d6e6]"><div className="w-full max-w-xl border border-[#28243c] bg-[#101017] p-8 shadow-2xl"><div className="mb-7 flex items-center gap-4 border-b border-[#252238] pb-6"><div className="flex h-12 w-12 items-center justify-center bg-[#7C3AED] text-white"><Sparkles /></div><div><h1 className="text-2xl font-bold text-white">Devpulse Editor</h1><p className="mt-1 text-xs text-slate-400">Open a project, local file, or folder to begin.</p></div></div>{editorError && <p className="mb-4 text-xs text-red-400">{editorError}</p>}{isEditorLoading && <p className="mb-4 text-xs text-cyan-400">Loading project...</p>}<div className="grid gap-2 sm:grid-cols-3"><button onClick={() => folderInputRef.current?.click()} className="flex flex-col items-center gap-2 border border-[#2b2940] bg-[#171522] p-4 text-xs"><FolderOpen className="text-cyan-400" />Folder</button><button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 border border-[#2b2940] bg-[#171522] p-4 text-xs"><File className="text-purple-400" />File</button><button onClick={() => setIsCreatingFile(true)} className="flex flex-col items-center gap-2 border border-[#2b2940] bg-[#171522] p-4 text-xs"><FilePlus className="text-amber-400" />New file</button></div>{isCreatingFile && <form onSubmit={createFile} className="mt-5 flex gap-2"><input autoFocus value={newFileName} onChange={(event) => setNewFileName(event.target.value)} placeholder="src/index.ts" className="min-w-0 flex-1 border border-[#332b50] bg-[#0d0d16] px-3 py-2 text-xs text-white" /><button className="bg-[#7C3AED] px-4 text-xs font-bold text-white">Create</button></form>}<input ref={fileInputRef} type="file" className="hidden" onChange={handleNativeFileSelect} /><input ref={folderInputRef} type="file" className="hidden" multiple onChange={handleNativeFolderSelect} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} /></div></div>;
 
-        <div className="max-w-2xl w-full bg-[#101017] border border-[#202030] rounded-3xl p-8 sm:p-10 shadow-2xl space-y-8 z-10">
-          {isEditorLoading && (
-            <div className="text-xs text-[#0DF5C4] font-mono">
-              Loading Devpulse project...
-            </div>
-          )}
-          {editorError && (
-            <div className="text-xs text-[#f87171] font-mono">
-              {editorError}
-            </div>
-          )}
-          {/* Header */}
-          <div className="flex items-center gap-4 border-b border-[#1c1c2a] pb-6">
-            <div
-              className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg"
-              style={{ backgroundColor: theme.primary }}
-            >
-              <Code2 className="w-7 h-7 text-[#09090e]" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-extrabold text-white tracking-tight">
-                  Visual Studio Code Studio
-                </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#0DF5C4]/15 text-[#0DF5C4] border border-[#0DF5C4]/30">
-                  READY
-                </span>
-              </div>
-              <p className="text-xs text-[#82829e] mt-0.5">
-                Select a local file or folder to open it in the editor.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Start Section (Native File / Folder dialogs) */}
-            <div className="space-y-3">
-              <div className="text-[11px] font-mono text-[#6c6c88] uppercase tracking-wider">
-                START FROM DISK
-              </div>
-
-              <div className="space-y-2 text-xs">
-                {/* Open Folder Button */}
-                <button
-                  onClick={() => folderInputRef.current?.click()}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <FolderOpen className="w-4 h-4 text-[#0DF5C4]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#0DF5C4] transition-colors">
-                      Open Folder...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Select any folder from your PC
-                    </div>
-                  </div>
-                </button>
-
-                {/* Open File Button */}
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <File className="w-4 h-4 text-[#6C63FF]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#6C63FF] transition-colors">
-                      Open File...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Select any source code or text file
-                    </div>
-                  </div>
-                </button>
-
-                {/* New Blank File Button */}
-                <button
-                  onClick={() => setIsCreatingFile(true)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <FilePlus className="w-4 h-4 text-[#FF9E64]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#FF9E64] transition-colors">
-                      New File...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Create an empty blank file
-                    </div>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-center rounded-xl border border-dashed border-[#242436] p-6 text-center text-xs text-[#6d6d88]">
-              Choose a file or folder to load its real contents.
-            </div>
-          </div>
-
-          {/* New File Modal */}
-          {isCreatingFile && (
-            <form
-              onSubmit={handleCreateNewFile}
-              className="p-4 bg-[#161624] border border-[#2a2a3e] rounded-2xl space-y-3"
-            >
-              <div className="text-xs font-bold text-white font-mono">
-                Enter File Name
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  placeholder="e.g. app.ts, main.py, server.js"
-                  value={newFileNameInput}
-                  onChange={(e) => setNewFileNameInput(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
-                  style={{ backgroundColor: theme.primary }}
-                >
-                  Create & Open
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingFile(false)}
-                  className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // 2. Full Main Editor Workbench (Matches Screenshot 1 Pixel-Perfect with 100% Dynamic Files & Content)
-  return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-[#0b0b12] text-[#d6d6e6] overflow-hidden font-sans select-none">
-      {/* Hidden Native File & Folder Inputs for top toolbar */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleNativeFileSelect}
-        className="hidden"
-      />
-      <input
-        type="file"
-        // @ts-expect-error webkitdirectory
-        webkitdirectory=""
-        directory=""
-        multiple
-        ref={folderInputRef}
-        onChange={handleNativeFolderSelect}
-        className="hidden"
-      />
-
-      {/* Top Breadcrumb & Quick Controls */}
-      <div className="h-10 bg-[#0e0e16] border-b border-[#1c1c2b] px-4 flex items-center justify-between shrink-0 text-xs font-mono z-20">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsFileTreeOpen((prev) => !prev)}
-            title="Toggle File Explorer Drawer"
-            className="p-1 rounded hover:bg-[#1a1a28] text-[#8e8ea8] hover:text-white"
-          >
-            {isFileTreeOpen ? (
-              <PanelLeftClose className="w-4 h-4" />
-            ) : (
-              <PanelLeftOpen className="w-4 h-4 text-[#0DF5C4]" />
-            )}
-          </button>
-
-          <div className="flex items-center gap-1.5 text-[#7e7e9a]">
-            <span className="text-white font-semibold">
-              {loadedProjectName}
-            </span>
-            <span>/</span>
-            <span className="text-white font-bold">
-              {activeFile ? activeFile.name : "No file open"}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Open another file / folder */}
-          <button
-            onClick={() => folderInputRef.current?.click()}
-            className="hidden sm:flex items-center gap-1 text-[11px] text-[#8e8ea8] hover:text-white px-2 py-1 rounded bg-[#161624] border border-[#242436]"
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-[#0DF5C4]" />
-            <span>Open Folder</span>
-          </button>
-
-          <button
-            onClick={handleRunCode}
-            disabled={isRunningCode || !activeFile}
-            className="px-3 py-1 rounded-lg bg-[#0DF5C4]/15 hover:bg-[#0DF5C4]/25 border border-[#0DF5C4]/40 text-[#0DF5C4] font-semibold text-xs flex items-center gap-1.5 transition-all active:scale-95"
-          >
-            <Play
-              className={`w-3 h-3 fill-current ${isRunningCode ? "animate-spin" : ""}`}
-            />
-            <span>{isRunningCode ? "Running..." : "Run"}</span>
-          </button>
-
-          <button
-            onClick={handleSaveFile}
-            disabled={isSaving || !activeFile?.isDirty}
-            className="px-3 py-1 rounded-lg bg-[#6C63FF]/15 hover:bg-[#6C63FF]/25 border border-[#6C63FF]/40 text-[#c8c4ff] disabled:opacity-40 font-semibold text-xs flex items-center gap-1.5 transition-all"
-          >
-            <span>{isSaving ? "Saving..." : "Save"}</span>
-          </button>
-
-          <button
-            onClick={() => setIsAiDrawerOpen((prev) => !prev)}
-            title="Toggle AI Assistant Drawer"
-            className="p-1 rounded hover:bg-[#1a1a28] text-[#8e8ea8] hover:text-white flex items-center gap-1 text-xs"
-          >
-            <Bot className="w-4 h-4" style={{ color: theme.primary }} />
-            <span className="hidden md:inline text-[11px]">AI</span>
-            {isAiDrawerOpen ? (
-              <PanelRightClose className="w-3.5 h-3.5 ml-0.5" />
-            ) : (
-              <PanelRightOpen className="w-3.5 h-3.5 ml-0.5 text-[#6C63FF]" />
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* Main 3-Pane Body */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Pane: Files Explorer Drawer (Collapsible) */}
-        {isFileTreeOpen && (
-          <div className="w-64 bg-[#0d0d15] border-r border-[#1c1c2b] flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto">
-            <div className="p-3 space-y-4">
-              {/* Header with Project Name + Action Icons */}
-              <div className="flex items-center justify-between pb-2 border-b border-[#1a1a28]">
-                <div className="flex items-center gap-2 truncate">
-                  <div className="w-2.5 h-2.5 rounded bg-[#0DF5C4] shrink-0" />
-                  <span className="font-bold text-white text-xs truncate">
-                    {loadedProjectName}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setIsCreatingFile(true)}
-                    title="New File"
-                    className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
-                  >
-                    <FilePlus className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Open Local File"
-                    className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
-                  >
-                    <FolderOpen className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Dynamic File List */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-[#63637e] uppercase tracking-wider px-1">
-                  <span>WORKSPACE FILES ({treeFiles.length})</span>
-                </div>
-
-                {treeFiles.length === 0 ? (
-                  <div className="p-4 text-center text-[11px] text-[#63637e] space-y-2">
-                    <p>No files loaded.</p>
-                    <button
-                      onClick={() => setIsCreatingFile(true)}
-                      className="px-2.5 py-1 rounded bg-[#181826] text-white hover:bg-[#202034] text-[10px]"
-                    >
-                      + Create First File
-                    </button>
-                  </div>
-                ) : (
-                  treeFiles.map((file) => (
-                    <div
-                      key={file.id}
-                      className={`group flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
-                        activeFile?.id === file.id
-                          ? "bg-[#1a1a2b] text-white font-semibold"
-                          : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"
-                      }`}
-                      onClick={() => openFileInEditor(file)}
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <span
-                          className={`text-[10px] px-1 rounded font-bold uppercase ${
-                            file.iconType === "ts"
-                              ? "bg-[#3178c6]/20 text-[#3178c6]"
-                              : file.iconType === "py"
-                                ? "bg-[#3572A5]/20 text-[#3572A5]"
-                                : file.iconType === "json"
-                                  ? "bg-[#FF9E64]/20 text-[#FF9E64]"
-                                  : "bg-white/10 text-white"
-                          }`}
-                        >
-                          {file.iconType}
-                        </span>
-                        <span className="truncate">{file.name}</span>
-                      </div>
-
-                      {/* Delete File action */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteFile(file.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 hover:text-[#f87171] p-0.5"
-                        title="Delete file"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Inline New File Form if opened */}
-              {isCreatingFile && (
-                <form
-                  onSubmit={handleCreateNewFile}
-                  className="p-2 bg-[#161624] border border-[#2b2b3e] rounded-xl space-y-2"
-                >
-                  <input
-                    type="text"
-                    autoFocus
-                    required
-                    placeholder="filename.ext"
-                    value={newFileNameInput}
-                    onChange={(e) => setNewFileNameInput(e.target.value)}
-                    className="w-full px-2 py-1 bg-[#101018] border border-[#262638] rounded-lg text-xs font-mono text-white focus:outline-none"
-                  />
-                  <div className="flex justify-end gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsCreatingFile(false)}
-                      className="px-2 py-0.5 text-[10px] text-[#787896]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-2 py-0.5 text-[10px] rounded font-semibold text-[#09090e]"
-                      style={{ backgroundColor: theme.primary }}
-                    >
-                      Add
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {/* Bottom Actions */}
-            <div className="p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] text-[#63637e]">
-              <button
-                onClick={() => setIsEditorProjectOpen(false)}
-                className="hover:text-white"
-              >
-                ← Close Project
-              </button>
-              <span>Total: {treeFiles.length} files</span>
-            </div>
-          </div>
-        )}
-
-        {/* Center Pane: Active Code Editor */}
-        <div className="flex-1 flex flex-col bg-[#09090f] overflow-hidden">
-          {/* Tabs Bar */}
-          <div className="h-9 bg-[#0c0c14] border-b border-[#1c1c2b] flex items-center justify-between overflow-x-auto px-2 shrink-0">
-            <div className="flex items-center gap-1">
-              {openFiles.length === 0 ? (
-                <span className="text-[11px] text-[#63637e] font-mono px-2">
-                  No files open
-                </span>
-              ) : (
-                openFiles.map((file) => (
-                  <div
-                    key={file.id}
-                    onClick={() => setActiveFileId(file.id)}
-                    className={`group h-8 px-3 rounded-t-lg flex items-center gap-2 text-xs font-mono border-t-2 transition-colors cursor-pointer ${
-                      activeFile?.id === file.id
-                        ? "bg-[#09090f] text-white font-semibold border-[#6C63FF]"
-                        : "bg-[#11111a] text-[#80809c] border-transparent hover:text-white"
-                    }`}
-                  >
-                    <span className="text-[10px] px-1 rounded bg-white/10 font-bold uppercase">
-                      {file.iconType}
-                    </span>
-                    <span>{file.name}</span>
-                    {file.isDirty && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4]" />
-                    )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeFileFromEditor(file.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 hover:text-white text-[#63637e] p-0.5 rounded"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 text-xs text-[#63637e] pr-2">
-              <Split className="w-3.5 h-3.5 cursor-pointer hover:text-white" />
-              <Columns className="w-3.5 h-3.5 cursor-pointer hover:text-white" />
-            </div>
-          </div>
-
-          {/* Interactive Code Editor Area */}
-          <div className="flex-1 flex overflow-hidden relative font-mono text-xs">
-            {!activeFile ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-[#656582] space-y-3">
-                <FileCode className="w-10 h-10 text-[#45455c]" />
-                <p>No file selected.</p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setIsCreatingFile(true)}
-                    className="px-3 py-1.5 rounded-xl bg-[#151522] border border-[#242436] text-white hover:border-white/30"
-                  >
-                    + Create File
-                  </button>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-1.5 rounded-xl bg-[#151522] border border-[#242436] text-white hover:border-white/30"
-                  >
-                    Open Local File
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Line Numbers */}
-                <div className="w-12 bg-[#09090f] py-4 pr-3 text-right text-[#45455c] select-none border-r border-[#181824] shrink-0 space-y-1">
-                  {currentCode.split("\n").map((_, index) => (
-                    <div key={index} className="h-5 text-[11px]">
-                      {index + 1}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Editable Code Buffer */}
-                <div className="flex-1 relative overflow-auto bg-[#09090f]">
-                  <textarea
-                    value={currentCode}
-                    onChange={(e) =>
-                      updateFileContent(activeFile.id, e.target.value)
-                    }
-                    spellCheck={false}
-                    className="w-full h-full p-4 bg-transparent text-[#dcdceb] font-mono text-xs leading-5 resize-none focus:outline-none selection:bg-[#6C63FF]/30 select-text"
-                    style={{ tabSize: 2 }}
-                    placeholder="Type code here..."
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Execution Output (if run) */}
-          {saveError && (
-            <div className="bg-[#2a1118] border-t border-[#7f1d1d] px-3 py-2 text-xs font-mono text-[#fca5a5]">
-              Save error: {saveError}
-            </div>
-          )}
-
-          {runOutput && (
-            <div className="h-16 bg-[#0a0a12] border-t border-[#1e1e2d] p-3 text-xs font-mono text-[#0DF5C4] flex items-center justify-between">
-              <pre className="whitespace-pre-wrap overflow-auto">
-                {runOutput}
-              </pre>
-              <button
-                onClick={() => setRunOutput(null)}
-                className="text-[#656580] hover:text-white text-xs"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {/* Bottom Editor Status Bar */}
-          <div className="h-6 bg-[#0c0c14] border-t border-[#181824] px-3 flex items-center justify-between text-[11px] font-mono text-[#6c6c88] shrink-0">
-            <div className="flex items-center gap-4">
-              <span className="text-[#0DF5C4] flex items-center gap-1">
-                <GitBranch className="w-3 h-3" />
-                local*
-              </span>
-              <span>
-                {activeFile
-                  ? `${currentCode.split("\n").length} Lines`
-                  : "0 Lines"}
-              </span>
-              <span>{currentCode.length} Chars</span>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <span>Port: 3000</span>
-              <span>UTF-8</span>
-              <span className="text-white uppercase">
-                {activeFile?.language || "Plain Text"}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Pane: AI Assistant Drawer (Collapsible) */}
-        {isAiDrawerOpen && (
-          <div className="w-80 lg:w-96 bg-[#0c0c14] border-l border-[#1c1c2b] flex flex-col justify-between shrink-0 font-sans text-xs overflow-hidden">
-            {/* AI Header */}
-            <div className="p-3 border-b border-[#1c1c2b] flex items-center justify-between bg-[#0e0e16]">
-              <div className="flex items-center gap-2">
-                <div
-                  className="w-5 h-5 rounded-md flex items-center justify-center text-white"
-                  style={{ backgroundColor: theme.primary }}
-                >
-                  <Sparkles className="w-3 h-3 text-[#09090e]" />
-                </div>
-                <div>
-                  <span className="font-bold text-white text-xs">
-                    AI Assistant
-                  </span>
-                  <span className="text-[10px] text-[#0DF5C4] font-mono ml-1.5">
-                    Interactive Engine
-                  </span>
-                </div>
-              </div>
-
-              <X
-                onClick={() => setIsAiDrawerOpen(false)}
-                className="w-4 h-4 cursor-pointer hover:text-white text-[#73738e]"
-              />
-            </div>
-
-            {/* AI Chat Stream */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 select-text">
-              <div className="px-2.5 py-1 rounded-lg bg-[#141420] border border-[#232336] text-[11px] font-mono text-[#8b8ba8] flex items-center gap-1.5">
-                <FileCode className="w-3 h-3 text-[#0DF5C4]" />
-                <span>
-                  Context: {activeFile ? activeFile.name : "Workspace"}
-                </span>
-              </div>
-
-              {aiHistory.length === 0 ? (
-                <div className="p-4 text-center text-xs text-[#71718c] space-y-2">
-                  <p>
-                    Ask anything about your code or request functions,
-                    optimizations, and bug fixes.
-                  </p>
-                </div>
-              ) : (
-                aiHistory.map((item, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="text-[11px] font-bold font-mono text-[#a4a4c4]">
-                      {item.sender}
-                    </div>
-                    <div className="p-3 rounded-xl bg-[#141422] border border-[#232338] text-white text-xs leading-relaxed">
-                      {item.text}
-                    </div>
-
-                    {item.code && (
-                      <div className="bg-[#09090f] border border-[#202030] rounded-xl overflow-hidden font-mono text-xs">
-                        <pre className="p-3 text-[11px] text-[#d6d6e8] leading-relaxed overflow-x-auto">
-                          <code>{item.code}</code>
-                        </pre>
-                        <div className="p-2 border-t border-[#1a1a28] flex justify-end">
-                          <button
-                            onClick={() => applyDiffToActiveFile(item.code!)}
-                            className="px-3 py-1 rounded-lg text-xs font-semibold text-[#09090e]"
-                            style={{ backgroundColor: theme.primary }}
-                          >
-                            Apply Diff to Editor
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-
-              {isAiLoading && (
-                <div className="p-3 text-xs text-[#0DF5C4] font-mono flex items-center gap-2">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>
-                    AI generating code for {activeFile?.name || "file"}...
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Prompt Input */}
-            <div className="p-3 border-t border-[#1c1c2b] bg-[#0e0e16]">
-              <form onSubmit={handleSendAi} className="relative">
-                <input
-                  type="text"
-                  placeholder="Ask AI to write or fix code..."
-                  value={aiQuery}
-                  onChange={(e) => setAiQuery(e.target.value)}
-                  className="w-full pl-3 pr-10 py-2.5 bg-[#141422] border border-[#242438] rounded-xl text-xs text-white placeholder-[#595975] focus:outline-none focus:border-[#6C63FF]"
-                />
-                <button
-                  type="submit"
-                  className="absolute right-2 top-2 p-1.5 rounded-lg text-[#09090e]"
-                  style={{ backgroundColor: theme.primary }}
-                >
-                  <Send className="w-3 h-3 text-[#09090e]" />
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#0A0A0F] font-mono text-xs text-slate-300">
+    <input ref={fileInputRef} type="file" className="hidden" onChange={handleNativeFileSelect} /><input ref={folderInputRef} type="file" className="hidden" multiple onChange={handleNativeFolderSelect} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} />
+    <div className="flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-[#28243c] bg-[#11111a]">{openFiles.length === 0 ? <div className="flex items-center px-4 text-slate-600">No files open</div> : openFiles.map((file) => <button key={file.id} onClick={() => setActiveFileId(file.id)} onMouseDown={(event) => { if (event.button === 1) { event.preventDefault(); closeFileFromEditor(file.id); } }} className={`group flex min-w-[128px] max-w-[220px] items-center gap-2 border-r border-[#28243c] px-3 text-left ${file.id === activeFileId ? "border-t-2 border-t-[#7C3AED] bg-[#0A0A0F] text-white" : "text-slate-500 hover:bg-[#1a1a2e]"}`}><FileTypeIcon file={file} className="h-3.5 w-3.5 shrink-0" />{file.isDirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#a78bfa]" />}<span className="truncate">{file.name}</span><span onClick={(event) => { event.stopPropagation(); closeFileFromEditor(file.id); }} className="ml-auto hidden group-hover:block"><X className="h-3.5 w-3.5" /></span></button>)}</div>
+    <div className="flex min-h-0 flex-1"><aside className="flex w-[208px] shrink-0 flex-col border-r border-[#28243c] bg-[#11111a]"><div className="flex h-9 items-center justify-between border-b border-[#28243c] px-3 text-[10px] font-bold tracking-widest text-slate-400"><span>EXPLORER</span><div className="flex gap-1"><button title="New file" onClick={() => setIsCreatingFile(true)}><FilePlus className="h-3.5 w-3.5" /></button><button title="New folder"><FolderPlus className="h-3.5 w-3.5" /></button><button title="Refresh" onClick={() => void loadEditorProject()}><RefreshCw className="h-3.5 w-3.5" /></button></div></div><div className="flex items-center gap-2 border-b border-[#28243c] px-3 py-2 text-[11px] font-bold text-white"><ChevronDown className="h-3 w-3" /><FolderOpen className="h-3.5 w-3.5 text-cyan-400" /><span className="truncate">{loadedProjectName || "PROJECT"}</span></div><div className="flex-1 overflow-y-auto py-1">{fileTree.map((item) => item.kind === "folder" ? <div key={item.path}><button onClick={() => setExpandedFolders((previous) => ({ ...previous, [item.path]: !previous[item.path] }))} className="flex w-full items-center gap-1 px-2 py-1 text-left text-slate-400">{expandedFolders[item.path] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}<Folder className="h-4 w-4 text-amber-300" /><span>{item.label}</span></button>{expandedFolders[item.path] && item.children?.map((file) => <FileRow key={file.id} file={file} active={file.id === activeFileId} onOpen={() => openFileInEditor(file)} onMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, file }); }} />)}</div> : item.file ? <FileRow key={item.file.id} file={item.file} active={item.file.id === activeFileId} onOpen={() => openFileInEditor(item.file!)} onMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, file: item.file! }); }} /> : null)}{!treeFiles.length && <div className="px-3 py-6 text-center text-[10px] text-slate-600">No files in project</div>}</div></aside>
+      <main className="flex min-w-0 flex-1 flex-col"><div className="flex min-h-0 flex-1 flex-col"><div className="flex min-h-0 flex-1"><div className="min-w-0 flex-1">{activeFile ? <MonacoEditor height="100%" language={monacoLanguageForFile(activeFile)} theme="devpulse-dark" value={activeContent} onMount={(editor, monaco) => { editorRef.current = editor; monaco.editor.defineTheme("devpulse-dark", DEVPULSE_MONACO_THEME); monaco.editor.setTheme("devpulse-dark"); editor.onDidChangeCursorPosition((event) => setCursor(event.position)); }} onChange={(value) => updateFileContent(activeFile.id, value || "")} options={{ minimap: { enabled: true }, lineNumbers: "on", wordWrap: "off", tabSize: 2, bracketPairColorization: { enabled: true }, smoothScrolling: true, cursorSmoothCaretAnimation: "on", fontFamily: "JetBrains Mono", fontSize: 13, fontLigatures: true, padding: { top: 12, bottom: 12 }, automaticLayout: true }} /> : <div className="flex h-full items-center justify-center text-slate-600">Select a file from the explorer to begin.</div>}</div>{isAiDrawerOpen && <AiPanel messages={messages} input={aiInput} setInput={setAiInput} onSubmit={sendAi} onClose={() => setIsAiDrawerOpen(false)} onCopy={copyMessage} copiedId={copiedId} onApply={(message) => void applyDiffToActiveFile(extractCode(message.text))} activeFile={activeFile} isStreaming={isStreaming} />}</div>{isOutputOpen && <OutputPanel outputTab={outputTab} setOutputTab={setOutputTab} runOutput={runOutput} runExitCode={runExitCode} isRunning={isRunning} onRun={() => void handleRun()} onClear={() => { setRunOutput("Ready. Run the active file to see output."); setRunExitCode(null); }} />}</div></main></div>
+    <div className="flex h-7 shrink-0 items-center justify-between bg-[#4C1D95] px-3 text-[10px] text-white"><div className="flex items-center gap-4"><span className="flex items-center gap-1"><GitBranch className="h-3 w-3" />main</span><span className="flex items-center gap-1 text-red-300"><CircleX className="h-3 w-3" />0</span><span className="flex items-center gap-1 text-amber-200"><CircleAlert className="h-3 w-3" />0</span></div><div className="flex items-center gap-4"><span>{activeFile ? monacoLanguageForFile(activeFile) : "Plain Text"}</span><span>UTF-8</span><span>Ln {cursor.lineNumber}, Col {cursor.column}</span><span>Spaces: 2</span><button onClick={() => setIsAiDrawerOpen((open) => !open)} className="text-cyan-300"><Zap className="mr-1 inline h-3 w-3" />Devpulse AI</button><button onClick={() => setIsOutputOpen((open) => !open)}><Terminal className="mr-1 inline h-3 w-3" />Terminal</button></div></div>
+    {contextMenu && <div style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()} className="fixed z-50 w-44 border border-[#332b50] bg-[#161624] py-1 text-[11px] shadow-2xl"><button onClick={() => void handleContextAction("new", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left"><FilePlus className="h-3.5 w-3.5" />New File</button><button onClick={() => void handleContextAction("rename", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left"><Settings2 className="h-3.5 w-3.5" />Rename</button><button onClick={() => void handleContextAction("copy", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left"><Copy className="h-3.5 w-3.5" />Copy Path</button><button onClick={() => void handleContextAction("delete", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left text-red-300"><Trash2 className="h-3.5 w-3.5" />Delete</button></div>}
+    {isFileSearchOpen && <div className="fixed inset-0 z-40 bg-black/60 p-20" onClick={() => setIsFileSearchOpen(false)}><div className="mx-auto max-w-lg border border-[#44346d] bg-[#161624]" onClick={(event) => event.stopPropagation()}><div className="flex items-center gap-2 border-b border-[#332b50] px-3 py-3"><Search className="h-4 w-4 text-purple-300" /><input autoFocus value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Search files..." className="flex-1 bg-transparent text-sm text-white outline-none" /></div><div className="max-h-72 overflow-y-auto p-1">{filteredFiles.map((file) => <button key={file.id} onClick={() => { openFileInEditor(file); setIsFileSearchOpen(false); setFileSearch(""); }} className="flex w-full gap-2 px-3 py-2 text-left"><FileTypeIcon file={file} /><span className="text-white">{file.name}</span><span className="ml-auto text-[10px] text-slate-500">{file.path}</span></button>)}</div></div></div>}
+    {isCreatingFile && <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-24"><form onSubmit={createFile} className="w-full max-w-md border border-[#44346d] bg-[#161624] p-4"><div className="mb-3 text-sm font-bold text-white">Create file</div><input autoFocus value={newFileName} onChange={(event) => setNewFileName(event.target.value)} placeholder="src/index.ts" className="mb-3 w-full border border-[#332b50] bg-[#0d0d16] px-3 py-2 text-xs text-white" /><div className="flex justify-end gap-2"><button type="button" onClick={() => setIsCreatingFile(false)} className="px-3 py-2 text-xs text-slate-400">Cancel</button><button className="bg-[#7C3AED] px-3 py-2 text-xs font-bold text-white">Create</button></div></form></div>}
+  </div>;
 };

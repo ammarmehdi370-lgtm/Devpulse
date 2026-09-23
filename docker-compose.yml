@@ -5,7 +5,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-devpulse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpulse}
       POSTGRES_DB: ${POSTGRES_DB:-devpulse}
-    ports: ["5432:5432"]
+    ports: ["5433:5432"]
     volumes: [devpulse-postgres:/var/lib/postgresql/data]
     healthcheck:
       test:

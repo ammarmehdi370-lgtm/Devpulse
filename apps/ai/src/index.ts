@@ -23,6 +23,23 @@ app.post("/v1/chat", async (request, response) => {
   if (!Array.isArray(request.body.messages))
     return response.status(400).json({ error: "messages must be an array" });
   try {
+    if (request.body.stream === true) {
+      response.status(200);
+      response.setHeader("Content-Type", "text/event-stream");
+      response.setHeader("Cache-Control", "no-cache");
+      response.setHeader("Connection", "keep-alive");
+      const stream = anthropic.messages.stream({
+        model: process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-latest",
+        max_tokens: 1024,
+        messages: request.body.messages,
+      });
+      for await (const event of stream) {
+        if (event.type !== "content_block_delta" || event.delta.type !== "text_delta") continue;
+        response.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+      }
+      response.write("data: [DONE]\n\n");
+      return response.end();
+    }
     const result = await anthropic.messages.create({
       model: process.env.ANTHROPIC_MODEL ?? "claude-3-5-sonnet-latest",
       max_tokens: 1024,
