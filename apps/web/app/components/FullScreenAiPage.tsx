@@ -101,15 +101,16 @@ export const FullScreenAiPage: React.FC = () => {
         },
       );
       const result = (await response.json()) as {
-        content?: { type: string; text?: string }[];
+        content?: string | { type: string; text?: string }[];
         error?: string;
       };
       if (!response.ok) throw new Error(result.error || "AI request failed");
-      const responseText =
-        result.content
-          ?.filter((item) => item.type === "text")
-          .map((item) => item.text || "")
-          .join("\n") || "The AI returned no text.";
+      const responseText = Array.isArray(result.content)
+        ? result.content
+            .filter((item) => item.type === "text")
+            .map((item) => item.text || "")
+            .join("\n")
+        : result.content || "The AI returned no text.";
       const aiMsg = {
         id: Date.now() + 1,
         sender: "Devpulse Engine",
