@@ -93,6 +93,7 @@ export interface EditorFile {
   id: string;
   name: string;
   path: string;
+  content: string;
   language: string;
   version: number;
   iconType:
@@ -106,6 +107,12 @@ export interface EditorFile {
     | "css"
     | "txt"
     | "folder";
+  origin: "api" | "local" | "new" | "readonly";
+  apiFileId?: string;
+  revisionId?: string;
+  lastSavedAt?: Date;
+  sizeBytes?: number;
+  modified: boolean;
   isDirty?: boolean;
 }
 
@@ -173,6 +180,7 @@ interface AppContextType {
   fileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
   saveFileContent: (fileId: string) => Promise<void>;
+  saveLocalFileToProject: (fileId: string, path?: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
   closeFileFromEditor: (fileId: string) => void;
   createNewFile: (
@@ -1059,13 +1067,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     path: string;
     language?: string | null;
     version?: number;
+    sizeBytes?: number | null;
   }): EditorFile => ({
     id: file.id,
     name: file.path.split("/").pop() || file.path,
     path: file.path,
+    content: "",
     language: file.language || "plaintext",
     version: file.version ?? 1,
     iconType: getIconType(file.path),
+    origin: "api",
+    apiFileId: file.id,
+    sizeBytes: file.sizeBytes ?? undefined,
+    modified: false,
   });
 
   const loadEditorProject = async () => {
@@ -1084,14 +1098,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }
       const fileResponse = await apiJson<{
         project: { id: string; name: string };
-        files: { id: string; path: string; language?: string | null; version?: number }[];
+        files: { id: string; path: string; language?: string | null; version?: number; sizeBytes?: number | null }[];
       }>(`/v1/projects/${project.id}/files`);
       const filesWithContent = await Promise.all(
         fileResponse.files.map(async (file) => {
           const detail = await apiJson<{ content: string }>(
             `/v1/projects/${project.id}/files/${file.id}`,
           );
-          return { file: editorFileFromApi(file), content: detail.content };
+          return { file: { ...editorFileFromApi(file), content: detail.content }, content: detail.content };
         }),
       );
       const nextFiles = filesWithContent.map(({ file }) => file);
@@ -1133,27 +1147,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const updateFileContent = (fileId: string, content: string) => {
     setFileContents((prev) => ({ ...prev, [fileId]: content }));
     setOpenFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, isDirty: true } : f)),
+      prev.map((f) => (f.id === fileId ? { ...f, content, isDirty: true, modified: true } : f)),
     );
+    setTreeFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, content, isDirty: true, modified: true } : f)));
   };
 
   const saveFileContent = async (fileId: string) => {
     const content = fileContents[fileId] ?? "";
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
-    const saved = await apiJson<{ id: string; version: number }>(`/v1/files/${fileId}`, {
+    const saved = await apiJson<{ id: string; version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || fileId}`, {
       method: "PATCH",
       body: JSON.stringify({ content, expectedVersion: currentFile?.version }),
     });
+    const savedAt = new Date();
     setOpenFiles((prev) =>
       prev.map((file) =>
-        file.id === saved.id ? { ...file, isDirty: false, version: saved.version } : file,
+        file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
       ),
     );
     setTreeFiles((prev) =>
       prev.map((file) =>
-        file.id === saved.id ? { ...file, isDirty: false, version: saved.version } : file,
+        file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
       ),
     );
+  };
+
+  const saveLocalFileToProject = async (fileId: string, path?: string) => {
+    const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
+    if (!currentFile) throw new Error("File is no longer open");
+    const projectId = editorProjectId || (await apiJson<{ projects: { id: string }[] }>("/v1/projects")).projects[0]?.id;
+    if (!projectId) throw new Error("No editor project is available");
+    const created = await apiJson<{ id: string; version?: number }>(`/v1/projects/${projectId}/files`, { method: "POST", body: JSON.stringify({ path: path || currentFile.path, content: "", language: currentFile.language }) });
+    const content = fileContents[fileId] ?? currentFile.content;
+    const saved = await apiJson<{ version: number; revisionId?: string }>(`/v1/files/${created.id}`, { method: "PATCH", body: JSON.stringify({ content, expectedVersion: created.version ?? 1 }) });
+    const promotedPath = path || currentFile.path;
+    const promoted = { ...currentFile, id: created.id, name: promotedPath.split("/").pop() || currentFile.name, path: promotedPath, apiFileId: created.id, origin: "api" as const, version: saved.version, revisionId: saved.revisionId, lastSavedAt: new Date(), content, modified: false, isDirty: false };
+    setFileContents((prev) => { const next = { ...prev, [created.id]: content }; delete next[fileId]; return next; });
+    setOpenFiles((prev) => prev.map((file) => file.id === fileId ? promoted : file));
+    setTreeFiles((prev) => prev.map((file) => file.id === fileId ? promoted : file));
+    if (activeFileId === fileId) setActiveFileId(created.id);
   };
 
   const openFileInEditor = (file: EditorFile) => {
@@ -1177,23 +1209,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     path?: string,
     initialContent?: string,
   ) => {
-    const created = await apiJson<{
-      id: string;
-      path: string;
-      language?: string | null;
-    }>(`/v1/projects/${editorProjectId}/files`, {
-      method: "POST",
-      body: JSON.stringify({
-        path: path || name,
-        content: initialContent || "",
-        language: name.endsWith(".py")
-          ? "python"
-          : name.endsWith(".json")
-            ? "json"
-            : "typescript",
-      }),
-    });
-    const newFile = editorFileFromApi(created);
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: path || name, content: initialContent || "", language: name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript", version: 1, iconType: getIconType(name), origin: "new", modified: true, isDirty: true };
     setTreeFiles((prev) => [...prev, newFile]);
     setFileContents((prev) => ({
       ...prev,
@@ -1213,30 +1229,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   };
 
-  // Real native local file loader
   const loadSingleLocalFile = async (name: string, content: string) => {
-    if (!editorProjectId) await loadEditorProject();
-    const projectId =
-      editorProjectId ||
-      (await apiJson<{ projects: { id: string }[] }>("/v1/projects"))
-        .projects[0]?.id;
-    if (!projectId) throw new Error("No editor project is available");
-    const newFileData = await apiJson<{
-      id: string;
-      path: string;
-      language?: string | null;
-    }>(`/v1/projects/${projectId}/files`, {
-      method: "POST",
-      body: JSON.stringify({
-        path: name,
-        content,
-        language: name.endsWith(".py") ? "python" : "typescript",
-      }),
-    });
-    const newFile = editorFileFromApi(newFileData);
-    setTreeFiles([newFile]);
-    setFileContents({ [newFile.id]: content });
-    setOpenFiles([newFile]);
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: name, content, language: name.endsWith(".py") ? "python" : "typescript", version: 1, iconType: getIconType(name), origin: "local", modified: false };
+    setTreeFiles((prev) => [...prev, newFile]);
+    setFileContents((prev) => ({ ...prev, [newFile.id]: content }));
+    setOpenFiles((prev) => [...prev, newFile]);
     setActiveFileId(newFile.id);
     setLoadedProjectName(name.split(".")[0] || "local-file");
     setIsEditorProjectOpen(true);
@@ -1247,37 +1244,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     folderName: string,
     files: { name: string; path: string; content: string }[],
   ) => {
-    if (!editorProjectId) await loadEditorProject();
-    const projectId =
-      editorProjectId ||
-      (await apiJson<{ projects: { id: string }[] }>("/v1/projects"))
-        .projects[0]?.id;
-    if (!projectId) throw new Error("No editor project is available");
-    const imported = await Promise.all(
-      files.map(async (file) => {
-        const created = await apiJson<{
-          id: string;
-          path: string;
-          language?: string | null;
-        }>(`/v1/projects/${projectId}/files`, {
-          method: "POST",
-          body: JSON.stringify({
-            path: file.path,
-            content: file.content,
-            language: file.name.endsWith(".py")
-              ? "python"
-              : file.name.endsWith(".json")
-                ? "json"
-                : "typescript",
-          }),
-        });
-        return { file: editorFileFromApi(created), content: file.content };
-      }),
-    );
-    const newTree = imported.map(({ file }) => file);
-    const newContents = Object.fromEntries(
-      imported.map(({ file, content }) => [file.id, content]),
-    );
+    const newTree = files.map((file): EditorFile => ({ id: crypto.randomUUID(), name: file.name, path: file.path, content: file.content, language: file.name.endsWith(".py") ? "python" : file.name.endsWith(".json") ? "json" : "typescript", version: 1, iconType: getIconType(file.name), origin: "local", modified: false }));
+    const newContents = Object.fromEntries(newTree.map((file, index) => [file.id, files[index]?.content || ""]));
 
     setLoadedProjectName(folderName);
     setTreeFiles(newTree);
@@ -1372,6 +1340,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         fileContents,
         updateFileContent,
         saveFileContent,
+        saveLocalFileToProject,
         openFileInEditor,
         closeFileFromEditor,
         createNewFile,

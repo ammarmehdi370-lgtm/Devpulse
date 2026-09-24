@@ -16,6 +16,8 @@
   --neutral-dark: #111118;
   --neutral-panel: #161622;
   --neutral-surface: #1c1c2b;
+  --dp-surface: #171722;
+  --dp-surface2: #28243c;
   --neutral-border: #262638;
   --app-bg: #09090e;
   --font-family-base: "Inter", sans-serif;
@@ -118,6 +120,15 @@ body {
 }
 
 /* Shimmer animation */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 @keyframes pulseGlow {
   0%,
   100% {
