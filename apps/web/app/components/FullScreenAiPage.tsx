@@ -86,10 +86,11 @@ export const FullScreenAiPage: React.FC = () => {
     setIsGenerating(true);
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:4002"}/v1/chat`,
+        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/ai/chat`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
           body: JSON.stringify({
             messages: [
               {
@@ -100,17 +101,30 @@ export const FullScreenAiPage: React.FC = () => {
           }),
         },
       );
-      const result = (await response.json()) as {
-        content?: string | { type: string; text?: string }[];
-        error?: string;
-      };
-      if (!response.ok) throw new Error(result.error || "AI request failed");
-      const responseText = Array.isArray(result.content)
-        ? result.content
-            .filter((item) => item.type === "text")
-            .map((item) => item.text || "")
-            .join("\n")
-        : result.content || "The AI returned no text.";
+      if (!response.ok) {
+        const result = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(result.error || "AI request failed");
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("AI service returned no response stream");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let responseText = "";
+      while (true) {
+        const chunk = await reader.read();
+        buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const event of events) {
+          const line = event.split("\n").find((value) => value.startsWith("data: "));
+          if (!line) continue;
+          const payload = JSON.parse(line.slice(6)) as { type?: string; content?: string; message?: string };
+          if (payload.type === "chunk") responseText += payload.content ?? "";
+          if (payload.type === "error") throw new Error(payload.message || "AI request failed");
+        }
+        if (chunk.done) break;
+      }
+      if (!responseText) responseText = "The AI returned no text.";
       const aiMsg = {
         id: Date.now() + 1,
         sender: "Devpulse Engine",

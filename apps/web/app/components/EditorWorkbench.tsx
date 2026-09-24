@@ -12,7 +12,6 @@ import { EditorFile, useApp } from "../context/AppContext";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-const AI_BASE = process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:4002";
 
 type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean };
 type OutputTab = "terminal" | "output" | "problems";
@@ -65,8 +64,8 @@ const parseSseLine = (line: string) => {
   const payload = line.slice(5).trim();
   if (!payload || payload === "[DONE]") return "";
   try {
-    const parsed = JSON.parse(payload) as { text?: string; delta?: string };
-    return parsed.text || parsed.delta || "";
+    const parsed = JSON.parse(payload) as { type?: string; content?: string; text?: string; delta?: string };
+    return parsed.type === "chunk" ? parsed.content || "" : parsed.text || parsed.delta || "";
   } catch {
     return payload;
   }
@@ -184,6 +183,23 @@ export const EditorWorkbench: React.FC = () => {
     window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
   });
   useEffect(() => { const closeMenu = () => setContextMenu(null); window.addEventListener("click", closeMenu); return () => window.removeEventListener("click", closeMenu); }, []);
+  useEffect(() => {
+    if (!editorProjectId) return;
+    const timer = window.setTimeout(() => {
+      void fetch(`${API_BASE}/v1/editor/session`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: editorProjectId,
+          openFileIds: openFiles.map((file) => file.id),
+          activeFileId: activeFileId || undefined,
+          cursorPositions: activeFileId ? { [activeFileId]: { line: cursor.lineNumber, col: cursor.column } } : {},
+        }),
+      }).catch(() => undefined);
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [editorProjectId, openFiles, activeFileId, cursor]);
 
   const saveActiveFile = async () => {
     if (!activeFile?.isDirty) return;
@@ -194,8 +210,8 @@ export const EditorWorkbench: React.FC = () => {
     if (!activeFile) return;
     setIsRunning(true); setOutputTab("terminal"); setIsOutputOpen(true); setRunOutput(`$ devpulse run ${activeFile.name}\n\nRunning...`); setRunExitCode(null);
     try {
-      const response = await fetch(`${API_BASE}/v1/execute`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: languageForFile(activeFile), code: activeContent }) });
-      const result = await response.json() as { exitCode?: number; stdout?: string; stderr?: string; error?: string };
+      const response = await fetch(`${API_BASE}/v1/execute`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: activeFile.id, language: languageForFile(activeFile), code: activeContent }) });
+      const result = await response.json() as { exitCode?: number; stdout?: string; stderr?: string; error?: string; executionId?: string };
       const exitCode = result.exitCode ?? (response.ok ? 0 : 1); setRunExitCode(exitCode); setRunOutput(`$ devpulse run ${activeFile.name}\n\n${result.stdout || result.stderr || result.error || "Process completed with no output."}`);
     } catch (error) { setRunExitCode(1); setRunOutput(error instanceof Error ? error.message : "Execution service unavailable"); }
     finally { setIsRunning(false); }
@@ -209,7 +225,7 @@ export const EditorWorkbench: React.FC = () => {
     aiAbortRef.current?.abort(); const controller = new AbortController(); aiAbortRef.current = controller; const assistantId = `assistant-${Date.now()}`;
     setMessages((previous) => [...previous, { id: assistantId, role: "assistant", text: "", streaming: true }]); setIsStreaming(true);
     try {
-      const response = await fetch(`${AI_BASE}/v1/chat`, { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" }, body: JSON.stringify({ stream: true, messages: [{ role: "user", content: `Project: ${loadedProjectName || "Devpulse project"}\nActive file: ${activeFile?.path || "none"}\nRequest: ${prompt}\n\nRespond with a concise explanation and, when useful, a complete code patch.` }] }) });
+      const response = await fetch(`${API_BASE}/v1/ai/chat`, { method: "POST", credentials: "include", signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify({ projectId: editorProjectId, fileId: activeFile?.id, context: { projectName: loadedProjectName, fileName: activeFile?.path, language: activeFile?.language }, messages: [{ role: "user", content: prompt }] }) });
       if (!response.ok) throw new Error((await response.text()) || "AI request failed");
       if ((response.headers.get("content-type") || "").includes("text/event-stream") && response.body) {
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";

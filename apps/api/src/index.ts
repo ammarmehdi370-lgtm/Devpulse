@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
+import { extname } from "node:path";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -10,7 +11,6 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import pinoHttp from "pino-http";
 import { z } from "zod";
 import { db } from "@devpulse/database";
-import type { Prisma } from "@devpulse/database";
 
 const app: express.Express = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -324,6 +324,92 @@ async function findProjectFile(fileId: string) {
   });
 }
 
+type AuthenticatedRequest = express.Request & { userId?: string; fileRecord?: Awaited<ReturnType<typeof findProjectFile>>; aiUsage?: { id: string; requestCount: number; tokenCount: number; limit: number; plan: string } };
+
+function getRequestUserId(request: express.Request): string | null {
+  const cookie = request.headers.cookie?.match(/(?:^|; )devpulse_session=([^;]+)/)?.[1];
+  const authorization = request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  const token = cookie ?? authorization;
+  if (!token) return null;
+  try {
+    return String((jwt.verify(token, jwtSecret) as { sub: string }).sub);
+  } catch {
+    return null;
+  }
+}
+
+function requireUser(request: express.Request, response: express.Response): string | null {
+  const userId = getRequestUserId(request);
+  if (!userId) {
+    response.status(401).json({ error: "Authentication required" });
+    return null;
+  }
+  (request as AuthenticatedRequest).userId = userId;
+  return userId;
+}
+
+async function checkFileAccess(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
+  const userId = requireUser(request, response);
+  if (!userId) return;
+  const file = await findProjectFile(String(request.params.fileId));
+  if (!file) {
+    response.status(404).json({ error: "File not found" });
+    return;
+  }
+  const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } });
+  if (!membership) {
+    response.status(403).json({ error: "You do not have access to this file" });
+    return;
+  }
+  (request as AuthenticatedRequest).fileRecord = file;
+  next();
+}
+
+function languageFromPath(filePath: string): string | undefined {
+  const languages: Record<string, string> = { ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript", ".py": "python", ".rs": "rust", ".go": "go", ".json": "json", ".css": "css", ".html": "html", ".md": "markdown" };
+  return languages[extname(filePath).toLowerCase()];
+}
+
+function fileSummary(file: { id: string; path: string; language: string | null; sizeBytes: number | null; updatedAt: Date; version: number; content?: string }) {
+  return { id: file.id, name: file.path.split("/").pop() ?? file.path, path: file.path, language: file.language, sizeBytes: file.sizeBytes, version: file.version, modified: file.updatedAt };
+}
+
+function buildFileTree(files: Array<{ id: string; path: string; language: string | null; sizeBytes: number | null; updatedAt: Date; version: number }>) {
+  const root: Array<Record<string, unknown>> = [];
+  for (const file of files) {
+    let current = root;
+    const parts = file.path.split("/").filter(Boolean);
+    parts.forEach((name, index) => {
+      const pathValue = parts.slice(0, index + 1).join("/");
+      const isFile = index === parts.length - 1;
+      let node = current.find((item) => item.path === pathValue);
+      if (!node) {
+        node = isFile
+          ? { ...fileSummary(file), type: "file", name, path: pathValue }
+          : { id: `folder:${pathValue}`, name, path: pathValue, type: "folder", children: [] };
+        current.push(node);
+      }
+      if (!isFile) current = node.children as Array<Record<string, unknown>>;
+    });
+  }
+  return root;
+}
+
+function lineCount(content: string): number { return content.length === 0 ? 0 : content.split("\n").length; }
+
+async function saveFileRevision(fileId: string, userId: string, content: string, expectedVersion: number, language?: string, appliedFromAI = false, aiMessageId?: string, path?: string) {
+  return db.$transaction(async (transaction) => {
+    const updated = await transaction.file.updateMany({
+      where: { id: fileId, version: expectedVersion },
+      data: { content, ...(language ? { language } : {}), ...(path ? { path } : {}), sizeBytes: Buffer.byteLength(content, "utf8"), lastEditedById: userId, lastEditedAt: new Date(), version: { increment: 1 } },
+    });
+    if (updated.count !== 1) return null;
+    const file = await transaction.file.findUniqueOrThrow({ where: { id: fileId } });
+    const revision = await transaction.fileRevision.create({ data: { fileId, version: file.version, content, authorId: userId, appliedFromAI, aiMessageId, lineCount: lineCount(content), charCount: content.length } });
+    return { file, revision };
+  });
+}
+
 app.get("/v1/projects", async (_request, response, next) => {
   try {
     const projects = await db.project.findMany({
@@ -482,61 +568,100 @@ app.post(
   },
 );
 
-app.patch("/v1/files/:fileId", async (request, response, next) => {
-  const parsed = z
-    .object({
-      path: filePathSchema.optional(),
-      content: fileContentSchema.optional(),
-      language: fileLanguageSchema,
-    })
-    .refine(
-      (value) =>
-        value.path !== undefined ||
-        value.content !== undefined ||
-        value.language !== undefined,
-      "at least one field is required",
-    )
-    .safeParse(request.body);
+const updateFileSchema = z
+  .object({
+    path: filePathSchema.optional(),
+    content: z.string().max(5_000_000).optional(),
+    language: fileLanguageSchema,
+    expectedVersion: z.number().int().positive().optional(),
+  })
+  .refine((value) => value.path !== undefined || value.content !== undefined || value.language !== undefined, "at least one field is required");
+
+app.patch("/v1/files/:fileId", checkFileAccess, async (request, response, next) => {
+  const parsed = updateFileSchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
-    const existing = await findProjectFile(request.params.fileId);
+    const authenticated = request as AuthenticatedRequest;
+    const existing = authenticated.fileRecord;
     if (!existing)
       return response.status(404).json({ error: "File not found" });
     const nextContent = parsed.data.content ?? existing.content;
     const contentChanged =
       parsed.data.content !== undefined &&
       parsed.data.content !== existing.content;
-    const file = await db.$transaction(
-      async (transaction: Prisma.TransactionClient) => {
-        const updated = await transaction.file.update({
-          where: { id: existing.id },
-          data: {
-            path: parsed.data.path,
-            language: parsed.data.language,
-            content: parsed.data.content,
-            ...(contentChanged ? { version: { increment: 1 } } : {}),
-          },
-        });
-        if (contentChanged)
-          await transaction.fileRevision.create({
-            data: {
-              fileId: updated.id,
-              version: updated.version,
-              content: nextContent,
-            },
-          });
-        return updated;
-      },
-    );
-    return response.json(file);
+    const expectedVersion = parsed.data.expectedVersion ?? existing.version;
+    const nextPath = parsed.data.path ?? existing.path;
+    const nextLanguage = parsed.data.language ?? existing.language ?? languageFromPath(nextPath);
+    const metadataChanged = nextPath !== existing.path || nextLanguage !== existing.language;
+    if (!contentChanged && !metadataChanged) return response.json({ ...existing, file: existing, revisionId: null, version: existing.version });
+    if (!contentChanged) {
+      const updated = await db.file.updateMany({ where: { id: existing.id, version: expectedVersion }, data: { path: nextPath, language: nextLanguage } });
+      if (!updated.count) {
+        const current = await db.file.findUnique({ where: { id: existing.id }, select: { version: true } });
+        return response.status(409).json({ error: "File was modified elsewhere", currentVersion: current?.version ?? existing.version });
+      }
+      const file = await db.file.findUniqueOrThrow({ where: { id: existing.id } });
+      return response.json({ ...file, file, revisionId: null, version: file.version });
+    }
+    const saved = await saveFileRevision(existing.id, authenticated.userId!, nextContent, expectedVersion, nextLanguage, false, undefined, nextPath);
+    if (!saved) {
+      const current = await db.file.findUnique({ where: { id: existing.id }, select: { version: true } });
+      return response.status(409).json({ error: "File was modified elsewhere", currentVersion: current?.version ?? existing.version });
+    }
+    return response.json({ ...saved.file, file: saved.file, revisionId: saved.revision.id, version: saved.file.version });
   } catch (error) {
     return next(error);
   }
 });
 
-app.delete("/v1/files/:fileId", async (request, response, next) => {
+app.get("/v1/files/:fileId/revisions", checkFileAccess, async (request, response, next) => {
   try {
-    const file = await findProjectFile(request.params.fileId);
+    const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100);
+    const fileId = String(request.params.fileId);
+    const revisions = await db.fileRevision.findMany({ where: { fileId }, orderBy: { createdAt: "desc" }, take: limit + 1, ...(typeof request.query.cursor === "string" ? { skip: 1, cursor: { id: request.query.cursor } } : {}), select: { id: true, version: true, createdAt: true, lineCount: true, charCount: true, authorId: true } });
+    const hasNext = revisions.length > limit;
+    const page = revisions.slice(0, limit);
+    const authors = await db.user.findMany({ where: { id: { in: page.flatMap((revision) => revision.authorId ? [revision.authorId] : []) } }, select: { id: true, name: true, avatarUrl: true } });
+    const authorMap = new Map(authors.map((author) => [author.id, author]));
+    return response.json({ revisions: page.map((revision) => ({ id: revision.id, version: revision.version, createdAt: revision.createdAt, lineCount: revision.lineCount, charCount: revision.charCount, author: revision.authorId ? { name: authorMap.get(revision.authorId)?.name ?? null, avatar: authorMap.get(revision.authorId)?.avatarUrl ?? null } : null })), nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null });
+  } catch (error) { return next(error); }
+});
+
+app.get("/v1/files/:fileId/revisions/:revisionId", checkFileAccess, async (request, response, next) => {
+  try {
+    const revision = await db.fileRevision.findFirst({ where: { id: String(request.params.revisionId), fileId: String(request.params.fileId) }, select: { id: true, content: true, version: true, createdAt: true, diffPatch: true } });
+    if (!revision) return response.status(404).json({ error: "Revision not found" });
+    return response.json({ revision });
+  } catch (error) { return next(error); }
+});
+
+const restoreSchema = z.object({ revisionId: z.string().cuid() });
+app.post("/v1/files/:fileId/restore", checkFileAccess, async (request, response, next) => {
+  const parsed = restoreSchema.safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const authenticated = request as AuthenticatedRequest;
+    const revision = await db.fileRevision.findFirst({ where: { id: parsed.data.revisionId, fileId: String(request.params.fileId) } });
+    if (!revision) return response.status(404).json({ error: "Revision not found" });
+    const file = authenticated.fileRecord!;
+    const saved = await saveFileRevision(file.id, authenticated.userId!, revision.content, file.version, file.language ?? languageFromPath(file.path));
+    if (!saved) return response.status(409).json({ error: "File was modified elsewhere", currentVersion: (await db.file.findUniqueOrThrow({ where: { id: file.id }, select: { version: true } })).version });
+    return response.json({ file: saved.file, newRevisionId: saved.revision.id });
+  } catch (error) { return next(error); }
+});
+
+app.get("/v1/projects/:projectId/tree", async (request, response, next) => {
+  try {
+    const project = await db.project.findUnique({ where: { id: request.params.projectId } });
+    if (!project) return response.status(404).json({ error: "Project not found" });
+    const files = await db.file.findMany({ where: { projectId: project.id }, orderBy: { path: "asc" }, select: { id: true, path: true, language: true, sizeBytes: true, updatedAt: true, version: true } });
+    return response.json({ tree: buildFileTree(files) });
+  } catch (error) { return next(error); }
+});
+
+app.delete("/v1/files/:fileId", checkFileAccess, async (request, response, next) => {
+  try {
+    const file = await findProjectFile(String(request.params.fileId));
     if (!file) return response.status(404).json({ error: "File not found" });
     await db.file.delete({ where: { id: file.id } });
     return response.status(204).send();
@@ -545,10 +670,166 @@ app.delete("/v1/files/:fileId", async (request, response, next) => {
   }
 });
 
+const aiMessageSchema = z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(200_000) });
+const aiChatSchema = z.object({
+  messages: z.array(aiMessageSchema).min(1).max(100),
+  model: z.string().trim().min(1).max(120).default("claude-sonnet-4-6"),
+  command: z.enum(["/fix", "/explain", "/test", "/comment", "/refactor"]).optional(),
+  context: z.object({ fileName: z.string().max(512).optional(), language: z.string().max(40).optional(), selectedCode: z.string().max(200_000).optional(), surroundingCode: z.string().max(200_000).optional(), projectName: z.string().max(120).optional(), recentErrors: z.array(z.string().max(4_000)).max(20).optional() }).optional(),
+  fileId: z.string().cuid().optional(),
+  projectId: z.string().cuid().optional(),
+});
+const aiApplySchema = z.object({ fileId: z.string().cuid(), code: z.string().max(5_000_000), range: z.object({ startLine: z.number().int().positive(), endLine: z.number().int().positive() }).refine((value) => value.endLine >= value.startLine, "endLine must be greater than or equal to startLine").optional(), aiMessageId: z.string().cuid().optional() });
+
+async function getOrCreateAIUsage(userId: string, projectId?: string) {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const workspaceId = projectId
+    ? (await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } }))?.workspaceId
+    : (await db.workspaceMember.findFirst({ where: { userId }, orderBy: { joinedAt: "asc" }, select: { workspaceId: true } }))?.workspaceId;
+  const usage = await db.aIUsage.upsert({ where: { userId_month_year: { userId, month, year } }, create: { userId, month, year, workspaceId }, update: workspaceId ? { workspaceId } : {} });
+  const plan = workspaceId ? (await db.workspace.findUnique({ where: { id: workspaceId }, select: { plan: true } }))?.plan ?? "FREE" : "FREE";
+  return { ...usage, plan: plan.toLowerCase(), limit: plan === "FREE" ? 100 : 10_000 };
+}
+
+async function userCanAccessProject(userId: string, projectId: string): Promise<boolean> {
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
+  if (!project) return false;
+  return Boolean(await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } }, select: { userId: true } }));
+}
+
+async function checkAIUsage(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
+  const userId = requireUser(request, response);
+  if (!userId) return;
+  const parsedProjectId = typeof request.body?.projectId === "string" ? request.body.projectId : undefined;
+  const usage = await getOrCreateAIUsage(userId, parsedProjectId);
+  if (usage.requestCount >= usage.limit) {
+    response.status(429).json({ error: "Monthly limit reached", used: usage.requestCount, limit: usage.limit });
+    return;
+  }
+  (request as AuthenticatedRequest).aiUsage = usage;
+  next();
+}
+
+function setSSEHeaders(response: express.Response): void {
+  response.status(200).set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+  response.flushHeaders();
+}
+
+app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
+  const parsed = aiChatSchema.safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  const authenticated = request as AuthenticatedRequest;
+  let conversationId: string | undefined;
+  try {
+    if (parsed.data.fileId) {
+      const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { projectId: true } });
+      if (!file) return response.status(404).json({ error: "File not found" });
+      if (!(await userCanAccessProject(authenticated.userId!, file.projectId))) return response.status(403).json({ error: "You do not have access to this file" });
+    }
+    if (parsed.data.projectId && !(await userCanAccessProject(authenticated.userId!, parsed.data.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
+    if (parsed.data.projectId || parsed.data.fileId) {
+      const conversation = await db.aIConversation.create({ data: { userId: authenticated.userId!, projectId: parsed.data.projectId, fileId: parsed.data.fileId, model: parsed.data.model, title: parsed.data.messages.find((message) => message.role === "user")?.content.slice(0, 80) ?? "New conversation" } });
+      conversationId = conversation.id;
+      const lastUserMessage = [...parsed.data.messages].reverse().find((message) => message.role === "user");
+      if (lastUserMessage) await db.aIMessage.create({ data: { conversationId, role: "USER", content: lastUserMessage.content, command: parsed.data.command } });
+    }
+    const upstream = await fetch(`${process.env.AI_URL ?? "http://localhost:4002"}/v1/chat`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify(parsed.data) });
+    if (!upstream.ok || !upstream.body) {
+      const details = await upstream.text();
+      return response.status(upstream.status || 502).json({ error: "AI service request failed", details });
+    }
+    setSSEHeaders(response);
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let assistantContent = "";
+    let tokensUsed: number | undefined;
+    let upstreamSentDone = false;
+    const writeEvent = (event: string): void => {
+      if (!event.startsWith("data: ")) return;
+      try {
+        const value = JSON.parse(event.slice(6)) as { type?: string; content?: string; tokensUsed?: number; message?: string };
+        if (value.type === "chunk") assistantContent += value.content ?? "";
+        if (value.type === "done") { tokensUsed = value.tokensUsed; upstreamSentDone = true; }
+        response.write(`${event}\n\n`);
+      } catch { response.write(`data: ${JSON.stringify({ type: "error", message: "Invalid AI stream response" })}\n\n`); }
+    };
+    while (true) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+      events.forEach(writeEvent);
+      if (chunk.done) break;
+    }
+    if (buffer.trim()) writeEvent(buffer.trim());
+    await db.aIUsage.update({ where: { id: authenticated.aiUsage!.id }, data: { requestCount: { increment: 1 }, tokenCount: { increment: tokensUsed ?? 0 } } });
+    if (conversationId && assistantContent) {
+      await db.aIMessage.create({ data: { conversationId, role: "ASSISTANT", content: assistantContent, tokensUsed } });
+      await db.aIConversation.update({ where: { id: conversationId }, data: { messageCount: { increment: 2 } } });
+    }
+    if (!response.writableEnded && !upstreamSentDone) response.write(`data: ${JSON.stringify({ type: "done", tokensUsed: tokensUsed ?? 0 })}\n\n`);
+    if (!response.writableEnded) response.write("data: [DONE]\n\n");
+    response.end();
+  } catch (error) {
+    if (response.headersSent) { response.write(`data: ${JSON.stringify({ type: "error", message: error instanceof Error ? error.message : "AI request failed" })}\n\n`); response.end(); return; }
+    next(error);
+  }
+});
+
+app.post("/v1/ai/apply", checkFileAccess, async (request, response, next) => {
+  const parsed = aiApplySchema.safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const authenticated = request as AuthenticatedRequest;
+    const file = authenticated.fileRecord!;
+    const lines = file.content.split("\n");
+    let nextContent = parsed.data.code;
+    let linesReplaced = lines.length;
+    if (parsed.data.range) {
+      const start = parsed.data.range.startLine - 1;
+      const count = parsed.data.range.endLine - start;
+      lines.splice(start, count, ...parsed.data.code.split("\n"));
+      nextContent = lines.join("\n");
+      linesReplaced = count;
+    }
+    const saved = await saveFileRevision(file.id, authenticated.userId!, nextContent, file.version, file.language ?? languageFromPath(file.path), true, parsed.data.aiMessageId);
+    if (!saved) return response.status(409).json({ error: "File was modified elsewhere", currentVersion: (await db.file.findUniqueOrThrow({ where: { id: file.id }, select: { version: true } })).version });
+    if (parsed.data.aiMessageId) {
+      const message = await db.aIMessage.findFirst({ where: { id: parsed.data.aiMessageId, conversation: { userId: authenticated.userId! } } });
+      if (message) await db.aIMessage.update({ where: { id: message.id }, data: { appliedToFileId: file.id, appliedAt: new Date() } });
+    }
+    return response.json({ file: saved.file, revisionId: saved.revision.id, linesReplaced });
+  } catch (error) { return next(error); }
+});
+
+app.get("/v1/ai/usage", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try { const usage = await getOrCreateAIUsage(userId); const resetDate = new Date(usage.year, usage.month, 1).toISOString().slice(0, 10); return response.json({ used: usage.requestCount, limit: usage.limit, plan: usage.plan, resetDate, percentage: Math.round((usage.requestCount / usage.limit) * 100) }); } catch (error) { return next(error); }
+});
+
+app.get("/v1/ai/conversations", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try { const limit = Math.min(Math.max(Number(request.query.limit ?? 10), 1), 100); const conversations = await db.aIConversation.findMany({ where: { userId, ...(typeof request.query.fileId === "string" ? { fileId: request.query.fileId } : {}), ...(typeof request.query.projectId === "string" ? { projectId: request.query.projectId } : {}) }, orderBy: { updatedAt: "desc" }, take: limit, select: { id: true, title: true, messageCount: true, fileId: true, updatedAt: true } }); return response.json({ conversations }); } catch (error) { return next(error); }
+});
+
+app.get("/v1/ai/conversations/:id/messages", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try { const conversation = await db.aIConversation.findFirst({ where: { id: String(request.params.id), userId } }); if (!conversation) return response.status(404).json({ error: "Conversation not found" }); const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100); const messages = await db.aIMessage.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: "desc" }, take: limit + 1, ...(typeof request.query.cursor === "string" ? { skip: 1, cursor: { id: request.query.cursor } } : {}) }); const hasNext = messages.length > limit; const page = messages.slice(0, limit); return response.json({ messages: page, nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null }); } catch (error) { return next(error); }
+});
+
+app.delete("/v1/ai/conversations/:id", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try { const deleted = await db.aIConversation.deleteMany({ where: { id: String(request.params.id), userId } }); if (!deleted.count) return response.status(404).json({ error: "Conversation not found" }); return response.json({ success: true }); } catch (error) { return next(error); }
+});
+
 const executeSchema = z.object({
   language: z.enum(["javascript", "python", "rust", "go"]),
   code: z.string().max(500_000),
   timeoutMs: z.number().int().min(250).max(30_000).optional(),
+  fileId: z.string().cuid().optional(),
 });
 const executeImages: Record<z.infer<typeof executeSchema>["language"], string> =
   {
@@ -963,20 +1244,84 @@ app.post("/v1/execute", async (request, response) => {
   const cacheKey = `execute:${createHash("sha256").update(JSON.stringify(parsed.data)).digest("hex")}`;
   await redisConnection;
   const cached = redis.isReady ? await redis.get(cacheKey) : null;
-  if (cached) return response.json({ ...JSON.parse(cached), cached: true });
+  if (cached) {
+    const cachedResult = JSON.parse(cached) as { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; durationMs?: number; executionId?: string };
+    const userId = getRequestUserId(request);
+    let executionId = cachedResult.executionId;
+    if (parsed.data.fileId && userId && !executionId) {
+      const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
+      const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
+      if (file && membership) {
+        const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, code: parsed.data.code, stdout: cachedResult.stdout, stderr: cachedResult.stderr, exitCode: cachedResult.exitCode, durationMs: cachedResult.durationMs ?? 0, timedOut: cachedResult.timedOut } });
+        executionId = execution.id;
+      }
+    }
+    return response.json({ ...cachedResult, executionId, cached: true });
+  }
+  const startedAt = Date.now();
   const result = await executeInContainer(
     parsed.data.language,
     parsed.data.code,
     parsed.data.timeoutMs ?? 10_000,
   );
+  const durationMs = Date.now() - startedAt;
+  let executionId: string | undefined;
+  const userId = getRequestUserId(request);
+  if (parsed.data.fileId && userId) {
+    const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
+    const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
+    if (file && membership) {
+      const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, code: parsed.data.code, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, durationMs, timedOut: result.timedOut } });
+      executionId = execution.id;
+    }
+  }
   if (redis.isReady)
-    await redis.set(cacheKey, JSON.stringify(result), { EX: 60 });
+    await redis.set(cacheKey, JSON.stringify({ ...result, durationMs, executionId }), { EX: 60 });
   if (result.stderr.includes("ENOENT") || result.stderr.includes("not found"))
     return response.status(503).json({
       error: "Execution sandbox is unavailable",
       details: result.stderr,
     });
-  return response.status(result.timedOut ? 408 : 200).json(result);
+  return response.status(result.timedOut ? 408 : 200).json({ ...result, durationMs, executionId });
+});
+
+app.get("/v1/files/:fileId/executions", checkFileAccess, async (request, response, next) => {
+  try {
+    const executions = await db.codeExecution.findMany({ where: { fileId: String(request.params.fileId) }, orderBy: { createdAt: "desc" }, take: 10, select: { id: true, language: true, stdout: true, stderr: true, exitCode: true, durationMs: true, timedOut: true, createdAt: true } });
+    return response.json({ executions });
+  } catch (error) { return next(error); }
+});
+
+app.get("/v1/executions/:id", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try {
+    const execution = await db.codeExecution.findFirst({ where: { id: String(request.params.id), userId } });
+    if (!execution) return response.status(404).json({ error: "Execution not found" });
+    return response.json(execution);
+  } catch (error) { return next(error); }
+});
+
+const editorSessionSchema = z.object({ projectId: z.string().cuid(), openFileIds: z.array(z.string().cuid()).max(500), activeFileId: z.string().cuid().optional(), scrollPositions: z.record(z.number().finite()).optional(), cursorPositions: z.record(z.object({ line: z.number().int().nonnegative(), col: z.number().int().nonnegative() })).optional() });
+app.put("/v1/editor/session", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  const parsed = editorSessionSchema.safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const project = await db.project.findUnique({ where: { id: parsed.data.projectId }, select: { workspaceId: true } });
+    if (!project) return response.status(404).json({ error: "Project not found" });
+    const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } } });
+    if (!membership) return response.status(403).json({ error: "You do not have access to this project" });
+    const session = await db.editorSession.upsert({ where: { userId_projectId: { userId, projectId: parsed.data.projectId } }, create: { ...parsed.data, userId }, update: { ...parsed.data } });
+    return response.json({ openFileIds: session.openFileIds, activeFileId: session.activeFileId, scrollPositions: session.scrollPositions, cursorPositions: session.cursorPositions });
+  } catch (error) { return next(error); }
+});
+
+app.get("/v1/editor/session/:projectId", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try {
+    const session = await db.editorSession.findUnique({ where: { userId_projectId: { userId, projectId: String(request.params.projectId) } } });
+    return response.json({ openFileIds: session?.openFileIds ?? [], activeFileId: session?.activeFileId ?? null, scrollPositions: session?.scrollPositions ?? {}, cursorPositions: session?.cursorPositions ?? {} });
+  } catch (error) { return next(error); }
 });
 
 export { app };
