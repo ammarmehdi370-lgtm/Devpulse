@@ -179,7 +179,7 @@ interface AppContextType {
   setActiveFileId: (id: string) => void;
   fileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
-  saveFileContent: (fileId: string) => Promise<void>;
+  saveFileContent: (fileId: string, contentOverride?: string) => Promise<void>;
   saveLocalFileToProject: (fileId: string, path?: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
   closeFileFromEditor: (fileId: string) => void;
@@ -1152,8 +1152,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setTreeFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, content, isDirty: true, modified: true } : f)));
   };
 
-  const saveFileContent = async (fileId: string) => {
-    const content = fileContents[fileId] ?? "";
+  const saveFileContent = async (fileId: string, contentOverride?: string) => {
+    const content = contentOverride ?? fileContents[fileId] ?? "";
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
     const saved = await apiJson<{ id: string; version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || fileId}`, {
       method: "PATCH",

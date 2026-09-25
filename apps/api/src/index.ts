@@ -674,7 +674,7 @@ const aiMessageSchema = z.object({ role: z.enum(["user", "assistant"]), content:
 const aiChatSchema = z.object({
   messages: z.array(aiMessageSchema).min(1).max(100),
   model: z.string().trim().min(1).max(120).default("claude-sonnet-4-6"),
-  command: z.enum(["/fix", "/explain", "/test", "/comment", "/refactor"]).optional(),
+  command: z.enum(["/fix", "/explain", "/test", "/comment", "/refactor", "/optimize"]).optional(),
   context: z.object({ fileName: z.string().max(512).optional(), language: z.string().max(40).optional(), selectedCode: z.string().max(200_000).optional(), surroundingCode: z.string().max(200_000).optional(), projectName: z.string().max(120).optional(), recentErrors: z.array(z.string().max(4_000)).max(20).optional() }).optional(),
   fileId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
