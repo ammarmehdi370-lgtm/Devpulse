@@ -397,7 +397,7 @@ function buildFileTree(files: Array<{ id: string; path: string; language: string
 
 function lineCount(content: string): number { return content.length === 0 ? 0 : content.split("\n").length; }
 
-async function saveFileRevision(fileId: string, userId: string, content: string, expectedVersion: number, language?: string, appliedFromAI = false, aiMessageId?: string, path?: string) {
+async function saveFileRevision(fileId: string, userId: string, content: string, expectedVersion: number, language?: string, appliedFromAI = false, aiMessageId?: string, path?: string, note?: string) {
   return db.$transaction(async (transaction) => {
     const updated = await transaction.file.updateMany({
       where: { id: fileId, version: expectedVersion },
@@ -405,7 +405,7 @@ async function saveFileRevision(fileId: string, userId: string, content: string,
     });
     if (updated.count !== 1) return null;
     const file = await transaction.file.findUniqueOrThrow({ where: { id: fileId } });
-    const revision = await transaction.fileRevision.create({ data: { fileId, version: file.version, content, authorId: userId, appliedFromAI, aiMessageId, lineCount: lineCount(content), charCount: content.length } });
+    const revision = await transaction.fileRevision.create({ data: { fileId, version: file.version, content, authorId: userId, appliedFromAI, aiMessageId, lineCount: lineCount(content), charCount: content.length, ...(note ? { diffPatch: note } : {}) } });
     return { file, revision };
   });
 }
@@ -619,24 +619,48 @@ app.get("/v1/files/:fileId/revisions", checkFileAccess, async (request, response
   try {
     const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100);
     const fileId = String(request.params.fileId);
-    const revisions = await db.fileRevision.findMany({ where: { fileId }, orderBy: { createdAt: "desc" }, take: limit + 1, ...(typeof request.query.cursor === "string" ? { skip: 1, cursor: { id: request.query.cursor } } : {}), select: { id: true, version: true, createdAt: true, lineCount: true, charCount: true, authorId: true } });
+    const cursor = typeof request.query.cursor === "string" ? request.query.cursor : undefined;
+    const [total, revisions] = await Promise.all([
+      db.fileRevision.count({ where: { fileId } }),
+      db.fileRevision.findMany({
+        where: { fileId },
+        orderBy: { createdAt: "desc" },
+        take: limit + 1,
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      }),
+    ]);
     const hasNext = revisions.length > limit;
     const page = revisions.slice(0, limit);
     const authors = await db.user.findMany({ where: { id: { in: page.flatMap((revision) => revision.authorId ? [revision.authorId] : []) } }, select: { id: true, name: true, avatarUrl: true } });
     const authorMap = new Map(authors.map((author) => [author.id, author]));
-    return response.json({ revisions: page.map((revision) => ({ id: revision.id, version: revision.version, createdAt: revision.createdAt, lineCount: revision.lineCount, charCount: revision.charCount, author: revision.authorId ? { name: authorMap.get(revision.authorId)?.name ?? null, avatar: authorMap.get(revision.authorId)?.avatarUrl ?? null } : null })), nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null });
+    return response.json({
+      revisions: page.map((revision) => ({
+        id: revision.id,
+        version: revision.version,
+        createdAt: revision.createdAt,
+        lineCount: revision.lineCount,
+        charCount: revision.charCount,
+        appliedFromAI: revision.appliedFromAI,
+        author: revision.authorId ? authorMap.get(revision.authorId) ?? null : null,
+      })),
+      nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null,
+      total,
+    });
   } catch (error) { return next(error); }
 });
 
 app.get("/v1/files/:fileId/revisions/:revisionId", checkFileAccess, async (request, response, next) => {
   try {
-    const revision = await db.fileRevision.findFirst({ where: { id: String(request.params.revisionId), fileId: String(request.params.fileId) }, select: { id: true, content: true, version: true, createdAt: true, diffPatch: true } });
+    const revision = await db.fileRevision.findFirst({
+      where: { id: String(request.params.revisionId), fileId: String(request.params.fileId) },
+    });
     if (!revision) return response.status(404).json({ error: "Revision not found" });
-    return response.json({ revision });
+    const author = revision.authorId ? await db.user.findUnique({ where: { id: revision.authorId }, select: { id: true, name: true, avatarUrl: true } }) : null;
+    return response.json({ revision: { id: revision.id, version: revision.version, content: revision.content, lineCount: revision.lineCount, charCount: revision.charCount, appliedFromAI: revision.appliedFromAI, createdAt: revision.createdAt, author } });
   } catch (error) { return next(error); }
 });
 
-const restoreSchema = z.object({ revisionId: z.string().cuid() });
+const restoreSchema = z.object({ revisionId: z.string().cuid(), expectedVersion: z.number().int().positive() });
 app.post("/v1/files/:fileId/restore", checkFileAccess, async (request, response, next) => {
   const parsed = restoreSchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
@@ -645,9 +669,9 @@ app.post("/v1/files/:fileId/restore", checkFileAccess, async (request, response,
     const revision = await db.fileRevision.findFirst({ where: { id: parsed.data.revisionId, fileId: String(request.params.fileId) } });
     if (!revision) return response.status(404).json({ error: "Revision not found" });
     const file = authenticated.fileRecord!;
-    const saved = await saveFileRevision(file.id, authenticated.userId!, revision.content, file.version, file.language ?? languageFromPath(file.path));
+    const saved = await saveFileRevision(file.id, authenticated.userId!, revision.content, parsed.data.expectedVersion, file.language ?? languageFromPath(file.path), false, undefined, undefined, `Restored from v${revision.version}`);
     if (!saved) return response.status(409).json({ error: "File was modified elsewhere", currentVersion: (await db.file.findUniqueOrThrow({ where: { id: file.id }, select: { version: true } })).version });
-    return response.json({ file: saved.file, newRevisionId: saved.revision.id });
+    return response.json({ file: saved.file, newRevisionId: saved.revision.id, revisionId: saved.revision.id, version: saved.file.version });
   } catch (error) { return next(error); }
 });
 
