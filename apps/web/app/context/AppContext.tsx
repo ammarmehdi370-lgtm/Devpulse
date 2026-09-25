@@ -96,6 +96,7 @@ export interface EditorFile {
   content: string;
   language: string;
   version: number;
+  apiVersion: number;
   iconType:
     | "ts"
     | "js"
@@ -179,7 +180,7 @@ interface AppContextType {
   setActiveFileId: (id: string) => void;
   fileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
-  saveFileContent: (fileId: string, contentOverride?: string) => Promise<void>;
+  saveFileContent: (fileId: string, contentOverride?: string, forceOverride?: boolean) => Promise<void>;
   saveLocalFileToProject: (fileId: string, path?: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
   closeFileFromEditor: (fileId: string) => void;
@@ -230,6 +231,12 @@ const EMPTY_DEPLOYMENTS: Deployment[] = [];
 const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+export class ApiRequestError extends Error {
+  status: number;
+  details: Record<string, unknown>;
+  constructor(status: number, message: string, details: Record<string, unknown> = {}) { super(message); this.name = "ApiRequestError"; this.status = status; this.details = details; }
+}
 
 const INITIAL_REPOSITORIES: Repository[] = [
   {
@@ -997,9 +1004,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
-      throw new Error(
-        body.error || `Request failed with status ${response.status}`,
-      );
+      throw new ApiRequestError(response.status, body.message || body.error || `Request failed with status ${response.status}`, body as Record<string, unknown>);
     }
     return response.status === 204 ? (undefined as T) : response.json();
   };
@@ -1075,6 +1080,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     content: "",
     language: file.language || "plaintext",
     version: file.version ?? 1,
+    apiVersion: file.version ?? 1,
     iconType: getIconType(file.path),
     origin: "api",
     apiFileId: file.id,
@@ -1152,22 +1158,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setTreeFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, content, isDirty: true, modified: true } : f)));
   };
 
-  const saveFileContent = async (fileId: string, contentOverride?: string) => {
+  const saveFileContent = async (fileId: string, contentOverride?: string, forceOverride = false) => {
     const content = contentOverride ?? fileContents[fileId] ?? "";
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
     const saved = await apiJson<{ id: string; version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || fileId}`, {
       method: "PATCH",
-      body: JSON.stringify({ content, expectedVersion: currentFile?.version }),
+      body: JSON.stringify({ content, expectedVersion: currentFile?.apiVersion ?? currentFile?.version, forceOverride }),
     });
     const savedAt = new Date();
     setOpenFiles((prev) =>
       prev.map((file) =>
-        file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
+        file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
       ),
     );
     setTreeFiles((prev) =>
       prev.map((file) =>
-        file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
+        file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
       ),
     );
   };
@@ -1209,7 +1215,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     path?: string,
     initialContent?: string,
   ) => {
-    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: path || name, content: initialContent || "", language: name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript", version: 1, iconType: getIconType(name), origin: "new", modified: true, isDirty: true };
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: path || name, content: initialContent || "", language: name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "new", modified: true, isDirty: true };
     setTreeFiles((prev) => [...prev, newFile]);
     setFileContents((prev) => ({
       ...prev,
@@ -1230,7 +1236,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const loadSingleLocalFile = async (name: string, content: string) => {
-    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: name, content, language: name.endsWith(".py") ? "python" : "typescript", version: 1, iconType: getIconType(name), origin: "local", modified: false };
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: name, content, language: name.endsWith(".py") ? "python" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "local", modified: false };
     setTreeFiles((prev) => [...prev, newFile]);
     setFileContents((prev) => ({ ...prev, [newFile.id]: content }));
     setOpenFiles((prev) => [...prev, newFile]);
@@ -1244,7 +1250,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     folderName: string,
     files: { name: string; path: string; content: string }[],
   ) => {
-    const newTree = files.map((file): EditorFile => ({ id: crypto.randomUUID(), name: file.name, path: file.path, content: file.content, language: file.name.endsWith(".py") ? "python" : file.name.endsWith(".json") ? "json" : "typescript", version: 1, iconType: getIconType(file.name), origin: "local", modified: false }));
+    const newTree = files.map((file): EditorFile => ({ id: crypto.randomUUID(), name: file.name, path: file.path, content: file.content, language: file.name.endsWith(".py") ? "python" : file.name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(file.name), origin: "local", modified: false }));
     const newContents = Object.fromEntries(newTree.map((file, index) => [file.id, files[index]?.content || ""]));
 
     setLoadedProjectName(folderName);
@@ -1264,13 +1270,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       ? `${current}\n\n// Added by AI Assistant:\n${newSnippet}`
       : current;
     setFileContents((prev) => ({ ...prev, [activeFileId]: nextContent }));
-    await apiJson(`/v1/files/${activeFileId}`, {
+    const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === activeFileId);
+    const saved = await apiJson<{ version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || activeFileId}`, {
       method: "PATCH",
-      body: JSON.stringify({ content: nextContent }),
+      body: JSON.stringify({ content: nextContent, expectedVersion: currentFile?.apiVersion ?? currentFile?.version }),
     });
     setOpenFiles((prev) =>
       prev.map((file) =>
-        file.id === activeFileId ? { ...file, isDirty: false } : file,
+        file.id === activeFileId ? { ...file, content: nextContent, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.revisionId } : file,
       ),
     );
     setTreeFiles((prev) =>

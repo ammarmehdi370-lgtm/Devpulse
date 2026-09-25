@@ -172,6 +172,8 @@ model File {
   lastEditedBy User? @relation("FileLastEditor", fields: [lastEditedById], references: [id])
   lastEditedAt DateTime?
   version    Int           @default(1)
+  lockedBy   String?
+  lockedAt   DateTime?
   project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   revisions  FileRevision[]
   executions CodeExecution[]

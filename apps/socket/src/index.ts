@@ -60,6 +60,13 @@ io.on("connection", (socket) => {
         .emit("presence:changed", payload);
     },
   );
+    socket.on(
+      "file:editing",
+      (payload: { workspaceId: string; fileId: string; userId: string; userName?: string }) => {
+        if (!payload.workspaceId || !payload.fileId || !payload.userId) return;
+        socket.to(`workspace:${payload.workspaceId}`).emit("file:editing", payload);
+      },
+    );
   socket.on(
     "code:change",
     (payload: { workspaceId: string; code: string; revision: number }) => {

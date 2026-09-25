@@ -320,7 +320,7 @@ function sendValidationError(
 async function findProjectFile(fileId: string) {
   return db.file.findUnique({
     where: { id: fileId },
-    include: { project: true },
+    include: { project: true, lastEditedBy: { select: { id: true, name: true } } },
   });
 }
 
@@ -573,7 +573,8 @@ const updateFileSchema = z
     path: filePathSchema.optional(),
     content: z.string().max(5_000_000).optional(),
     language: fileLanguageSchema,
-    expectedVersion: z.number().int().positive().optional(),
+    expectedVersion: z.number().int().positive(),
+    forceOverride: z.boolean().optional().default(false),
   })
   .refine((value) => value.path !== undefined || value.content !== undefined || value.language !== undefined, "at least one field is required");
 
@@ -589,7 +590,7 @@ app.patch("/v1/files/:fileId", checkFileAccess, async (request, response, next) 
     const contentChanged =
       parsed.data.content !== undefined &&
       parsed.data.content !== existing.content;
-    const expectedVersion = parsed.data.expectedVersion ?? existing.version;
+    const expectedVersion = parsed.data.forceOverride ? existing.version : parsed.data.expectedVersion;
     const nextPath = parsed.data.path ?? existing.path;
     const nextLanguage = parsed.data.language ?? existing.language ?? languageFromPath(nextPath);
     const metadataChanged = nextPath !== existing.path || nextLanguage !== existing.language;
@@ -598,7 +599,7 @@ app.patch("/v1/files/:fileId", checkFileAccess, async (request, response, next) 
       const updated = await db.file.updateMany({ where: { id: existing.id, version: expectedVersion }, data: { path: nextPath, language: nextLanguage } });
       if (!updated.count) {
         const current = await db.file.findUnique({ where: { id: existing.id }, select: { version: true } });
-        return response.status(409).json({ error: "File was modified elsewhere", currentVersion: current?.version ?? existing.version });
+        return response.status(409).json({ error: "CONFLICT", message: "This file was modified by someone else.", currentVersion: current?.version ?? existing.version, yourVersion: parsed.data.expectedVersion, lastEditedBy: existing.lastEditedBy?.name ?? null, lastEditedAt: existing.lastEditedAt ?? null });
       }
       const file = await db.file.findUniqueOrThrow({ where: { id: existing.id } });
       return response.json({ ...file, file, revisionId: null, version: file.version });
@@ -606,7 +607,7 @@ app.patch("/v1/files/:fileId", checkFileAccess, async (request, response, next) 
     const saved = await saveFileRevision(existing.id, authenticated.userId!, nextContent, expectedVersion, nextLanguage, false, undefined, nextPath);
     if (!saved) {
       const current = await db.file.findUnique({ where: { id: existing.id }, select: { version: true } });
-      return response.status(409).json({ error: "File was modified elsewhere", currentVersion: current?.version ?? existing.version });
+      return response.status(409).json({ error: "CONFLICT", message: "This file was modified by someone else.", currentVersion: current?.version ?? existing.version, yourVersion: parsed.data.expectedVersion, lastEditedBy: existing.lastEditedBy?.name ?? null, lastEditedAt: existing.lastEditedAt ?? null });
     }
     return response.json({ ...saved.file, file: saved.file, revisionId: saved.revision.id, version: saved.file.version });
   } catch (error) {

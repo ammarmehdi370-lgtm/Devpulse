@@ -1,0 +1,2 @@
+ALTER TABLE "File" ADD COLUMN "lockedBy" TEXT;
+ALTER TABLE "File" ADD COLUMN "lockedAt" TIMESTAMP(3);
