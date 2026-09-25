@@ -397,6 +397,30 @@ function buildFileTree(files: Array<{ id: string; path: string; language: string
 
 function lineCount(content: string): number { return content.length === 0 ? 0 : content.split("\n").length; }
 
+function contributorPeriodStart(period: string): Date | undefined {
+  if (period === "all") return undefined;
+  const days = period === "7d" ? 7 : 30;
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  return start;
+}
+
+function activityWhere(periodStart: Date | undefined): { createdAt?: { gte: Date } } {
+  return periodStart ? { createdAt: { gte: periodStart } } : {};
+}
+
+function addActivity(current: { dates: Set<string>; lastActiveAt: Date | null; daily: Map<string, number> }, createdAt: Date): void {
+  const date = createdAt.toISOString().slice(0, 10);
+  current.dates.add(date);
+  current.daily.set(date, (current.daily.get(date) ?? 0) + 1);
+  if (!current.lastActiveAt || createdAt > current.lastActiveAt) current.lastActiveAt = createdAt;
+}
+
+function contributorOverallPercentage(stats: { revisions: number; linesAdded: number; executions: number; aiRequests: number }, totals: { revisions: number; linesAdded: number; executions: number; aiRequests: number }): number {
+  const share = (value: number, total: number) => total ? value / total : 0;
+  return (share(stats.revisions, totals.revisions) * 0.4 + share(stats.linesAdded, totals.linesAdded) * 0.3 + share(stats.executions, totals.executions) * 0.2 + share(stats.aiRequests, totals.aiRequests) * 0.1) * 100;
+}
+
 async function saveFileRevision(fileId: string, userId: string, content: string, expectedVersion: number, language?: string, appliedFromAI = false, aiMessageId?: string, path?: string, note?: string) {
   return db.$transaction(async (transaction) => {
     const updated = await transaction.file.updateMany({
@@ -426,6 +450,64 @@ app.get("/v1/projects", async (_request, response, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+app.get("/v1/projects/:projectId/contributors", async (request, response, next) => {
+  const userId = requireUser(request, response);
+  if (!userId) return;
+  const period = request.query.period === "7d" || request.query.period === "all" ? request.query.period : "30d";
+  const periodStart = contributorPeriodStart(period);
+  const projectId = String(request.params.projectId);
+  try {
+    const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
+    if (!project) return response.status(404).json({ error: "Project not found" });
+    const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } } });
+    if (!membership) return response.status(403).json({ error: "You do not have access to this project" });
+    const fileId = typeof request.query.fileId === "string" ? request.query.fileId : undefined;
+    const fileFilter = fileId ? { id: fileId } : undefined;
+    const revisionWhere = { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, ...activityWhere(periodStart) };
+    const [members, revisions, executions, aiMessages, baselines] = await Promise.all([
+      db.workspaceMember.findMany({ where: { workspaceId: project.workspaceId }, select: { role: true, joinedAt: true, user: { select: { id: true, name: true, email: true, avatarUrl: true } } } }),
+      db.fileRevision.findMany({ where: revisionWhere, orderBy: { createdAt: "asc" }, select: { fileId: true, authorId: true, createdAt: true, lineCount: true, file: { select: { path: true } } } }),
+      db.codeExecution.findMany({ where: { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, ...activityWhere(periodStart) }, select: { userId: true, fileId: true, createdAt: true, file: { select: { path: true } } } }),
+      db.aIMessage.findMany({ where: { conversation: { projectId, ...(fileFilter ? { fileId } : {}) }, ...activityWhere(periodStart) }, select: { createdAt: true, conversation: { select: { userId: true, fileId: true } } } }),
+      periodStart ? db.fileRevision.findMany({ where: { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, createdAt: { lt: periodStart } }, orderBy: { createdAt: "desc" }, distinct: ["fileId"], select: { fileId: true, lineCount: true } }) : Promise.resolve([]),
+    ]);
+    const contributorMap = new Map<string, { user: { id: string; name: string | null; email: string; avatarUrl: string | null }; role: string; revisions: number; linesAdded: number; linesRemoved: number; executions: number; aiRequests: number; files: Set<string>; fileCounts: Map<string, { path: string; count: number }>; activity: { dates: Set<string>; lastActiveAt: Date | null; daily: Map<string, number> } }>();
+    const ensureContributor = (member: (typeof members)[number]) => {
+      const existing = contributorMap.get(member.user.id);
+      if (existing) return existing;
+      const created = { user: member.user, role: member.role, revisions: 0, linesAdded: 0, linesRemoved: 0, executions: 0, aiRequests: 0, files: new Set<string>(), fileCounts: new Map<string, { path: string; count: number }>(), activity: { dates: new Set<string>(), lastActiveAt: null, daily: new Map<string, number>() } };
+      contributorMap.set(member.user.id, created);
+      return created;
+    };
+    members.forEach(ensureContributor);
+    const baselineLines = new Map(baselines.map((revision) => [revision.fileId, revision.lineCount ?? 0]));
+    const previousLines = new Map(baselineLines);
+    const totalStats = { revisions: 0, linesAdded: 0, executions: 0, aiRequests: 0 };
+    revisions.forEach((revision) => {
+      const currentLines = revision.lineCount ?? 0;
+      const previous = previousLines.get(revision.fileId) ?? 0;
+      totalStats.linesAdded += Math.max(0, currentLines - previous);
+      previousLines.set(revision.fileId, currentLines);
+      if (!revision.authorId) return;
+      const contributor = contributorMap.get(revision.authorId);
+      if (!contributor) return;
+      const file = contributor.fileCounts.get(revision.fileId) ?? { path: revision.file.path, count: 0 };
+      file.count += 1; contributor.fileCounts.set(revision.fileId, file); contributor.files.add(revision.fileId);
+      contributor.revisions += 1; contributor.linesAdded += Math.max(0, currentLines - previous); contributor.linesRemoved += Math.max(0, previous - currentLines); addActivity(contributor.activity, revision.createdAt);
+      totalStats.revisions += 1;
+    });
+    executions.forEach((execution) => { const contributor = contributorMap.get(execution.userId); if (!contributor) return; contributor.executions += 1; contributor.files.add(execution.fileId); addActivity(contributor.activity, execution.createdAt); totalStats.executions += 1; });
+    aiMessages.forEach((message) => { const contributor = contributorMap.get(message.conversation.userId); if (!contributor) return; contributor.aiRequests += 1; if (message.conversation.fileId) contributor.files.add(message.conversation.fileId); addActivity(contributor.activity, message.createdAt); totalStats.aiRequests += 1; });
+    const share = (value: number, total: number) => total ? (value / total) * 100 : 0;
+    const contributors = Array.from(contributorMap.values()).map((contributor) => {
+      const overall = contributorOverallPercentage({ revisions: contributor.revisions, linesAdded: contributor.linesAdded, executions: contributor.executions, aiRequests: contributor.aiRequests }, totalStats);
+      const mostActiveFile = Array.from(contributor.fileCounts.values()).sort((left, right) => right.count - left.count)[0] ?? null;
+      return { userId: contributor.user.id, name: contributor.user.name || contributor.user.email, avatarUrl: contributor.user.avatarUrl, email: contributor.user.email, role: contributor.role, stats: { revisions: contributor.revisions, linesAdded: contributor.linesAdded, linesRemoved: contributor.linesRemoved, executions: contributor.executions, aiRequests: contributor.aiRequests, filesEdited: contributor.files.size, lastActiveAt: (contributor.activity.lastActiveAt ?? new Date(0)).toISOString(), activeDays: contributor.activity.dates.size }, percentages: { revisions: share(contributor.revisions, totalStats.revisions), linesAdded: share(contributor.linesAdded, totalStats.linesAdded), executions: share(contributor.executions, totalStats.executions), overall }, activityByDay: Array.from(contributor.activity.daily, ([date, count]) => ({ date, count })), mostActiveFile };
+    }).sort((left, right) => right.percentages.overall - left.percentages.overall);
+    return response.json({ contributors, period, projectId, totals: { ...totalStats, contributors: contributors.length }, generatedAt: new Date().toISOString() });
+  } catch (error) { return next(error); }
 });
 
 app.post("/v1/projects", async (request, response, next) => {
