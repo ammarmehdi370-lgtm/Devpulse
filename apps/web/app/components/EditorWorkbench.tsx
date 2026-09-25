@@ -21,6 +21,9 @@ type AiMessage = { id: string; role: "user" | "assistant"; text: string; streami
 type OutputTab = "terminal" | "output" | "problems";
 type ContextMenu = { x: number; y: number; file: EditorFile } | null;
 type CursorPosition = { lineNumber: number; column: number };
+type SessionCursorPosition = { line: number; col: number };
+type SessionState = { openFiles: EditorFile[]; activeFile?: EditorFile; scrollPositions: Record<string, number>; cursorPositions: Record<string, SessionCursorPosition> };
+type SessionResponse = { session: { openFileIds: string[]; activeFileId: string | null; scrollPositions?: Record<string, number> | null; cursorPositions?: Record<string, SessionCursorPosition> | null } | null };
 type EditorHandle = { trigger: (source: string, action: string, payload: unknown) => void; getSelection: () => SelectionSnapshot | null };
 type ApplyTarget = "selection" | "cursor" | "file";
 type AiUsage = { used: number; limit: number; plan?: string };
@@ -249,6 +252,16 @@ const parseSseLine = (line: string) => {
   }
 };
 
+const debounce = <T extends (...args: never[]) => void>(callback: T, delay: number) => {
+  let timer: number | undefined;
+  const debounced = (...args: Parameters<T>) => {
+    if (timer !== undefined) window.clearTimeout(timer);
+    timer = window.setTimeout(() => callback(...args), delay);
+  };
+  debounced.cancel = () => { if (timer !== undefined) window.clearTimeout(timer); };
+  return debounced;
+};
+
 const FileTypeIcon: React.FC<{ file: EditorFile; className?: string }> = ({ file, className = "h-4 w-4" }) => {
   const extension = file.name.split(".").pop()?.toLowerCase();
   if (["tsx", "jsx", "ts", "js"].includes(extension || "")) return <FileCode className={`${className} text-cyan-400`} />;
@@ -428,6 +441,12 @@ export const EditorWorkbench: React.FC = () => {
   const [imageFiles, setImageFiles] = useState<Record<string, File>>({});
   const [largeFileOverrides, setLargeFileOverrides] = useState<Record<string, boolean>>({});
   const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const scrollPositionsRef = useRef<Record<string, number>>({});
+  const cursorPositionsRef = useRef<Record<string, SessionCursorPosition>>({});
+  const latestSessionRef = useRef<SessionState>({ openFiles: [], scrollPositions: {}, cursorPositions: {} });
+  const restoredProjectRef = useRef<string | null>(null);
+  const sessionReadyRef = useRef(false);
   const activeFile = openFiles.find((file) => file.id === activeFileId) || openFiles[0];
   const activeContent = activeFile ? fileContents[activeFile.id] || "" : "";
   const filteredFiles = treeFiles.filter((file) => `${file.name} ${file.path}`.toLowerCase().includes(fileSearch.toLowerCase()));
@@ -438,6 +457,74 @@ export const EditorWorkbench: React.FC = () => {
   const usage = useAiUsage(isAiDrawerOpen);
   const usageExhausted = Boolean(usage && usage.used >= usage.limit);
   const { announce: announceProject, liveRegion: projectLiveRegion } = useAnnounce();
+
+  const saveSession = useMemo(() => debounce((state: SessionState) => {
+    if (!editorProjectId) return;
+    const apiFiles = state.openFiles.filter((file) => file.origin === FileOrigin.API);
+    if (apiFiles.length === 0) return;
+    void fetch(`${API_BASE}/v1/editor/session`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: editorProjectId,
+        openFileIds: apiFiles.map((file) => file.apiFileId || file.id),
+        activeFileId: state.activeFile?.origin === FileOrigin.API ? state.activeFile.apiFileId || state.activeFile.id : undefined,
+        scrollPositions: state.scrollPositions,
+        cursorPositions: state.cursorPositions,
+      }),
+    }).catch(() => undefined);
+  }, 3000), [editorProjectId]);
+  const queueSessionSave = useCallback(() => { if (sessionReadyRef.current) saveSession(latestSessionRef.current); }, [saveSession]);
+
+  latestSessionRef.current = { openFiles, activeFile, scrollPositions: scrollPositionsRef.current, cursorPositions: cursorPositionsRef.current };
+
+  useEffect(() => () => saveSession.cancel(), [saveSession]);
+
+  useEffect(() => {
+    if (!editorProjectId || isEditorLoading || !isEditorProjectOpen || restoredProjectRef.current === editorProjectId) return;
+    restoredProjectRef.current = editorProjectId;
+    let cancelled = false;
+    const restoreSession = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/v1/editor/session/${editorProjectId}`, { credentials: "include" });
+        if (!response.ok) throw new Error("Session could not be loaded");
+        const { session } = await response.json() as SessionResponse;
+        if (cancelled) return;
+        if (!session || session.openFileIds.length === 0) {
+          openFiles.forEach((file) => closeFileFromEditor(file.id));
+          sessionReadyRef.current = true;
+          return;
+        }
+        const results = await Promise.allSettled(session.openFileIds.map(async (fileId) => {
+          const fileResponse = await fetch(`${API_BASE}/v1/projects/${editorProjectId}/files/${fileId}`, { credentials: "include" });
+          if (!fileResponse.ok) throw new Error("File not found");
+          return fileResponse.json() as Promise<{ id?: string; file?: { id: string } }>;
+        }));
+        if (cancelled) return;
+        const loadedIds = results.flatMap((result) => result.status === "fulfilled" ? [result.value.file?.id || result.value.id].filter((id): id is string => Boolean(id)) : []);
+        const loadedFiles = session.openFileIds.map((fileId) => treeFiles.find((file) => (file.apiFileId || file.id) === fileId)).filter((file): file is EditorFile => Boolean(file && file.origin === FileOrigin.API && loadedIds.includes(file.apiFileId || file.id)));
+        openFiles.forEach((file) => closeFileFromEditor(file.id));
+        loadedFiles.forEach((file) => openFileInEditor(file));
+        const active = loadedFiles.find((file) => (file.apiFileId || file.id) === session.activeFileId) || loadedFiles[0];
+        if (active) setActiveFileId(active.id);
+        scrollPositionsRef.current = session.scrollPositions || {};
+        cursorPositionsRef.current = session.cursorPositions || {};
+        sessionReadyRef.current = true;
+        if (loadedFiles.length > 0) {
+          const missing = session.openFileIds.length - loadedFiles.length;
+          setSessionNotice(missing > 0 ? `${missing} of ${session.openFileIds.length} files could not be restored (deleted or moved)` : `Restored your last session (${loadedFiles.length} files, ${active?.name || "file"} active)`);
+          window.setTimeout(() => setSessionNotice(null), 3000);
+        }
+      } catch {
+        sessionReadyRef.current = true;
+      }
+    };
+    void restoreSession();
+    return () => { cancelled = true; };
+  }, [editorProjectId, isEditorLoading, isEditorProjectOpen, treeFiles]);
+
+  useEffect(() => { if (sessionReadyRef.current) queueSessionSave(); }, [openFiles, activeFileId, queueSessionSave]);
 
   useEffect(() => { if (!editorProjectId && !isOfflineMode) void loadEditorProject(); }, [editorProjectId, isOfflineMode, loadEditorProject]);
   useEffect(() => {
@@ -474,23 +561,15 @@ export const EditorWorkbench: React.FC = () => {
     window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
   });
   useEffect(() => { const closeMenu = () => setContextMenu(null); window.addEventListener("click", closeMenu); return () => window.removeEventListener("click", closeMenu); }, []);
-  useEffect(() => {
-    if (!editorProjectId) return;
-    const timer = window.setTimeout(() => {
-      void fetch(`${API_BASE}/v1/editor/session`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: editorProjectId,
-          openFileIds: openFiles.map((file) => file.id),
-          activeFileId: activeFileId || undefined,
-          cursorPositions: activeFileId ? { [activeFileId]: { line: cursor.lineNumber, col: cursor.column } } : {},
-        }),
-      }).catch(() => undefined);
-    }, 5000);
-    return () => window.clearTimeout(timer);
-  }, [editorProjectId, openFiles, activeFileId, cursor]);
+  const closeEditorFile = (fileId: string) => {
+    const closingLastTab = openFiles.length === 1 && openFiles[0]?.id === fileId;
+    closeFileFromEditor(fileId);
+    if (closingLastTab && editorProjectId) {
+      saveSession.cancel();
+      void fetch(`${API_BASE}/v1/editor/session/${editorProjectId}`, { method: "DELETE", credentials: "include" }).catch(() => undefined);
+      sessionReadyRef.current = false;
+    }
+  };
 
   const saveActiveFile = async () => {
     if (!activeFile?.modified || activeFile.origin === FileOrigin.READONLY) return;
@@ -637,9 +716,9 @@ export const EditorWorkbench: React.FC = () => {
 
   return <div aria-busy="false" className="flex h-[calc(100vh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#0A0A0F] font-mono text-xs text-slate-300">
     <input ref={fileInputRef} type="file" className="hidden" onChange={handleNativeFileSelect} /><input ref={folderInputRef} type="file" className="hidden" multiple onChange={handleNativeFolderSelect} {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)} />
-    <div role="tablist" aria-label="Open files" className="flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-[#28243c] bg-[#11111a]">{openFiles.length === 0 ? <div className="flex items-center px-4 text-slate-600">No files open</div> : openFiles.map((file, index) => <button role="tab" aria-selected={file.id === activeFileId} tabIndex={file.id === activeFileId ? 0 : -1} key={file.id} onKeyDown={(event) => { if (event.ctrlKey && event.key === "Tab") { event.preventDefault(); const direction = event.shiftKey ? -1 : 1; const nextFile = openFiles[(index + direction + openFiles.length) % openFiles.length]; if (nextFile) setActiveFileId(nextFile.id); } }} onClick={() => setActiveFileId(file.id)} onMouseDown={(event) => { if (event.button === 1) { event.preventDefault(); closeFileFromEditor(file.id); } }} className={`group flex min-w-[128px] max-w-[240px] items-center gap-2 border-r border-[#28243c] px-3 text-left ${file.id === activeFileId ? "border-t-2 border-t-[#7C3AED] bg-[#0A0A0F] text-white" : "text-slate-500 hover:bg-[#1a1a2e]"}`}><FileTypeIcon file={file} className="h-3.5 w-3.5 shrink-0" />{file.id === activeFileId && saveState === "saving" ? <LoaderCircle className="h-3 w-3 shrink-0 animate-spin text-purple-300" /> : file.modified && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#a78bfa]" />}<span className="truncate">{file.name}</span>{presenceByFile[file.apiFileId || file.id]?.name && <span title={`${presenceByFile[file.apiFileId || file.id]?.name} is editing this file`} className="shrink-0 rounded-full bg-amber-400/20 px-1 text-[9px] text-amber-200">{presenceByFile[file.apiFileId || file.id]?.name?.split(" ")[0]}</span>}<OriginBadge origin={file.origin} /><span onClick={(event) => { event.stopPropagation(); closeFileFromEditor(file.id); }} className="ml-auto hidden group-hover:block"><X className="h-3.5 w-3.5" /></span></button>)}</div>
+    <div role="tablist" aria-label="Open files" className="flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-[#28243c] bg-[#11111a]">{openFiles.length === 0 ? <div className="flex items-center px-4 text-slate-600">No files open</div> : openFiles.map((file, index) => <button role="tab" aria-selected={file.id === activeFileId} tabIndex={file.id === activeFileId ? 0 : -1} key={file.id} onKeyDown={(event) => { if (event.ctrlKey && event.key === "Tab") { event.preventDefault(); const direction = event.shiftKey ? -1 : 1; const nextFile = openFiles[(index + direction + openFiles.length) % openFiles.length]; if (nextFile) setActiveFileId(nextFile.id); } }} onClick={() => setActiveFileId(file.id)} onMouseDown={(event) => { if (event.button === 1) { event.preventDefault(); closeEditorFile(file.id); } }} className={`group flex min-w-[128px] max-w-[240px] items-center gap-2 border-r border-[#28243c] px-3 text-left ${file.id === activeFileId ? "border-t-2 border-t-[#7C3AED] bg-[#0A0A0F] text-white" : "text-slate-500 hover:bg-[#1a1a2e]"}`}><FileTypeIcon file={file} className="h-3.5 w-3.5 shrink-0" />{file.id === activeFileId && saveState === "saving" ? <LoaderCircle className="h-3 w-3 shrink-0 animate-spin text-purple-300" /> : file.modified && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#a78bfa]" />}<span className="truncate">{file.name}</span>{presenceByFile[file.apiFileId || file.id]?.name && <span title={`${presenceByFile[file.apiFileId || file.id]?.name} is editing this file`} className="shrink-0 rounded-full bg-amber-400/20 px-1 text-[9px] text-amber-200">{presenceByFile[file.apiFileId || file.id]?.name?.split(" ")[0]}</span>}<OriginBadge origin={file.origin} /><span onClick={(event) => { event.stopPropagation(); closeEditorFile(file.id); }} className="ml-auto hidden group-hover:block"><X className="h-3.5 w-3.5" /></span></button>)}</div>
     <div className="flex min-h-0 flex-1"><aside className="flex w-[208px] shrink-0 flex-col border-r border-[#28243c] bg-[#11111a]"><div className="flex h-9 items-center justify-between border-b border-[#28243c] px-3 text-[10px] font-bold tracking-widest text-slate-400"><span>EXPLORER</span><div className="flex gap-1"><button title="New file" onClick={() => setIsCreatingFile(true)}><FilePlus className="h-3.5 w-3.5" /></button><button title="New folder"><FolderPlus className="h-3.5 w-3.5" /></button><button title="Refresh" onClick={() => void loadEditorProject()}><RefreshCw className="h-3.5 w-3.5" /></button></div></div><div className="flex items-center gap-2 border-b border-[#28243c] px-3 py-2 text-[11px] font-bold text-white"><ChevronDown className="h-3 w-3" /><FolderOpen className="h-3.5 w-3.5 text-cyan-400" /><span className="truncate">{loadedProjectName || "PROJECT"}</span></div><div role="tree" aria-label="Project files" className="flex-1 overflow-y-auto py-1">{fileTree.map((item) => item.kind === "folder" ? <div key={item.path}><button role="treeitem" aria-expanded={Boolean(expandedFolders[item.path])} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "ArrowRight" || event.key === "ArrowLeft") { event.preventDefault(); setExpandedFolders((previous) => ({ ...previous, [item.path]: event.key === "ArrowRight" ? true : event.key === "ArrowLeft" ? false : !previous[item.path] })); } }} onClick={() => setExpandedFolders((previous) => ({ ...previous, [item.path]: !previous[item.path] }))} className="flex w-full items-center gap-1 px-2 py-1 text-left text-slate-400">{expandedFolders[item.path] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}<Folder className="h-4 w-4 text-amber-300" /><span>{item.label}</span></button>{expandedFolders[item.path] && item.children?.map((file) => <FileRow key={file.id} file={file} active={file.id === activeFileId} onOpen={() => openFileInEditor(file)} onMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, file }); }} />)}</div> : item.file ? <FileRow key={item.file.id} file={item.file} active={item.file.id === activeFileId} onOpen={() => openFileInEditor(item.file!)} onMenu={(event) => { event.preventDefault(); setContextMenu({ x: event.clientX, y: event.clientY, file: item.file! }); }} /> : null)}{unreadableFiles.map((file) => { const previewFile = imageFiles[file.path]; return <UnreadableFileRow key={`unreadable-${file.path}`} file={file} onPreview={previewFile ? () => openImagePreview(previewFile) : undefined} />; })}{!treeFiles.length && !unreadableFiles.length && <div className="px-3 py-6 text-center text-[10px] text-slate-600">No files in project</div>}</div></aside>
-      <main className="flex min-w-0 flex-1 flex-col"><div className="flex min-h-0 flex-1 flex-col"><div className="flex min-h-0 flex-1"><div className="min-w-0 flex-1">{activeFile ? <MonacoEditor height="100%" language={monacoLanguageForFile(activeFile, isLargeFile)} theme="devpulse-dark" value={activeContent} onMount={(editor, monaco) => { const readSelection = (): SelectionSnapshot | null => { const current = editor.getSelection(); if (!current) return null; return { startLineNumber: current.startLineNumber, startColumn: current.startColumn, endLineNumber: current.endLineNumber, endColumn: current.endColumn, selectedText: editor.getModel()?.getValueInRange(current) || "" }; }; editorRef.current = { trigger: editor.trigger.bind(editor), getSelection: readSelection }; monaco.editor.defineTheme("devpulse-dark", DEVPULSE_MONACO_THEME); monaco.editor.setTheme("devpulse-dark"); editor.onDidChangeCursorPosition((event) => { setCursor(event.position); setSelection(readSelection()); }); editor.onDidChangeCursorSelection(() => setSelection(readSelection())); }} onChange={(value) => { if (activeFile.origin !== FileOrigin.READONLY) updateFileContent(activeFile.id, value || ""); }} options={{ minimap: { enabled: true }, lineNumbers: "on", wordWrap: "off", tabSize: 2, bracketPairColorization: { enabled: true }, smoothScrolling: true, cursorSmoothCaretAnimation: "on", fontFamily: "JetBrains Mono", fontSize: 13, fontLigatures: true, padding: { top: 12, bottom: 12 }, automaticLayout: true, readOnly: activeFile.origin === FileOrigin.READONLY }} /> : <div className="flex h-full items-center justify-center text-slate-600">Select a file from the explorer to begin.</div>}</div>{isAiDrawerOpen && <AiPanel messages={messages} input={aiInput} setInput={setInput} onSubmit={sendAi} onClose={() => setIsAiDrawerOpen(false)} onCopy={copyMessage} copiedId={copiedId} onApply={(message) => void applyDiffToActiveFile(extractCode(message.text))} activeFile={activeFile} activeContent={activeContent} cursor={cursor} selection={selection} isStreaming={isStreaming} usage={usage} usageExhausted={usageExhausted} onClearHistory={clearAiHistory} historyCount={historyCount} />}</div>{isOutputOpen && <OutputPanel outputTab={outputTab} setOutputTab={setOutputTab} runOutput={runOutput} runExitCode={runExitCode} isRunning={isRunning} elapsedMs={elapsedMs} onRun={() => void handleRun()} onClear={() => { setRunOutput("Ready. Run the active file to see output."); setRunExitCode(null); }} />}</div></main></div>
+      <main className="flex min-w-0 flex-1 flex-col"><div className="flex min-h-0 flex-1 flex-col"><div className="flex min-h-0 flex-1"><div className="min-w-0 flex-1">{activeFile ? <MonacoEditor height="100%" language={monacoLanguageForFile(activeFile, isLargeFile)} theme="devpulse-dark" value={activeContent} onMount={(editor, monaco) => { const fileId = activeFile.apiFileId || activeFile.id; const readSelection = (): SelectionSnapshot | null => { const current = editor.getSelection(); if (!current) return null; return { startLineNumber: current.startLineNumber, startColumn: current.startColumn, endLineNumber: current.endLineNumber, endColumn: current.endColumn, selectedText: editor.getModel()?.getValueInRange(current) || "" }; }; editorRef.current = { trigger: editor.trigger.bind(editor), getSelection: readSelection }; monaco.editor.defineTheme("devpulse-dark", DEVPULSE_MONACO_THEME); monaco.editor.setTheme("devpulse-dark"); editor.onDidChangeCursorPosition((event) => { setCursor(event.position); setSelection(readSelection()); cursorPositionsRef.current[fileId] = { line: event.position.lineNumber, col: event.position.column }; queueSessionSave(); }); editor.onDidChangeCursorSelection(() => setSelection(readSelection())); editor.onDidScrollChange((event) => { if (event.scrollTopChanged) { scrollPositionsRef.current[fileId] = event.scrollTop; queueSessionSave(); } }); window.setTimeout(() => { const savedScrollTop = scrollPositionsRef.current[fileId]; const savedCursor = cursorPositionsRef.current[fileId]; if (savedScrollTop !== undefined) editor.setScrollTop(savedScrollTop); if (savedCursor) { const position = { lineNumber: savedCursor.line, column: savedCursor.col }; editor.setPosition(position); editor.revealPositionInCenter(position); } }, 100); }} onChange={(value) => { if (activeFile.origin !== FileOrigin.READONLY) updateFileContent(activeFile.id, value || ""); }} options={{ minimap: { enabled: true }, lineNumbers: "on", wordWrap: "off", tabSize: 2, bracketPairColorization: { enabled: true }, smoothScrolling: true, cursorSmoothCaretAnimation: "on", fontFamily: "JetBrains Mono", fontSize: 13, fontLigatures: true, padding: { top: 12, bottom: 12 }, automaticLayout: true, readOnly: activeFile.origin === FileOrigin.READONLY }} /> : <div className="flex h-full items-center justify-center text-slate-600">Select a file from the explorer to begin.</div>}</div>{isAiDrawerOpen && <AiPanel messages={messages} input={aiInput} setInput={setInput} onSubmit={sendAi} onClose={() => setIsAiDrawerOpen(false)} onCopy={copyMessage} copiedId={copiedId} onApply={(message) => void applyDiffToActiveFile(extractCode(message.text))} activeFile={activeFile} activeContent={activeContent} cursor={cursor} selection={selection} isStreaming={isStreaming} usage={usage} usageExhausted={usageExhausted} onClearHistory={clearAiHistory} historyCount={historyCount} />}</div>{isOutputOpen && <OutputPanel outputTab={outputTab} setOutputTab={setOutputTab} runOutput={runOutput} runExitCode={runExitCode} isRunning={isRunning} elapsedMs={elapsedMs} onRun={() => void handleRun()} onClear={() => { setRunOutput("Ready. Run the active file to see output."); setRunExitCode(null); }} />}</div></main></div>
     <div className="flex h-7 shrink-0 items-center justify-between bg-[#4C1D95] px-3 text-[10px] text-white"><div className="flex items-center gap-4"><span className="flex items-center gap-1"><GitBranch className="h-3 w-3" />main</span><span className="flex items-center gap-1 text-red-300"><CircleX className="h-3 w-3" />0</span><span className="flex items-center gap-1 text-amber-200"><CircleAlert className="h-3 w-3" />0</span></div><div className="flex items-center gap-4"><span>{saveState === "saving" ? "Saving..." : saveState === "saved" ? "Saved ✓" : saveState === "error" ? "Save failed" : ""}</span>{conflictedFileIds.length > 0 && <button onClick={() => { const fileId = activeFile && conflictedFileIds.includes(activeFile.id) ? activeFile.id : conflictedFileIds[0]; const file = openFiles.find((candidate) => candidate.id === fileId); if (file) setConflict((current) => current || { fileId: file.id, mine: fileContents[file.id] || file.content, details: {} }); }} className="flex items-center gap-1 text-amber-200"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" />Conflict — changes paused</button>}{activeFile?.origin === FileOrigin.LOCAL && <span className="flex items-center gap-1 text-amber-200"><span className="h-1.5 w-1.5 rounded-full bg-amber-300" />local file</span>}{activeFile?.origin === FileOrigin.NEW && <span className="flex items-center gap-1 text-purple-200"><span className="h-1.5 w-1.5 rounded-full bg-purple-300" />not saved to project</span>}<span title={`Current file language: ${activeFile ? languageLabel(monacoLanguageForFile(activeFile)) : "Plain Text"}`}>{activeFile ? monacoLanguageForFile(activeFile) : "Plain Text"}</span><span>UTF-8</span><span>Ln {cursor.lineNumber}, Col {cursor.column}</span><span>Spaces: 2</span><button title="Toggle AI assistant" onClick={() => setIsAiDrawerOpen((open) => !open)} className="text-cyan-300"><Zap className="mr-1 inline h-3 w-3" />Devpulse AI</button><button title="Toggle terminal panel" onClick={() => setIsOutputOpen((open) => !open)}><Terminal className="mr-1 inline h-3 w-3" />Terminal</button></div></div>
     {contextMenu && <div style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()} className="fixed z-50 w-44 border border-[#332b50] bg-[#161624] py-1 text-[11px] shadow-2xl"><button onClick={() => void handleContextAction("new", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left"><FilePlus className="h-3.5 w-3.5" />New File</button><button onClick={() => void handleContextAction("rename", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left"><Settings2 className="h-3.5 w-3.5" />Rename</button><button onClick={() => void handleContextAction("copy", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left"><Copy className="h-3.5 w-3.5" />Copy Path</button><button onClick={() => void handleContextAction("delete", contextMenu.file)} className="flex w-full gap-2 px-3 py-2 text-left text-red-300"><Trash2 className="h-3.5 w-3.5" />Delete</button></div>}
     {isFileSearchOpen && <div className="fixed inset-0 z-40 bg-black/60 p-20" onClick={() => setIsFileSearchOpen(false)}><div className="mx-auto max-w-lg border border-[#44346d] bg-[#161624]" onClick={(event) => event.stopPropagation()}><div className="flex items-center gap-2 border-b border-[#332b50] px-3 py-3"><Search className="h-4 w-4 text-purple-300" /><input autoFocus value={fileSearch} onChange={(event) => setFileSearch(event.target.value)} placeholder="Search files..." className="flex-1 bg-transparent text-sm text-white outline-none" /></div><div className="max-h-72 overflow-y-auto p-1">{filteredFiles.map((file) => <button key={file.id} onClick={() => { openFileInEditor(file); setIsFileSearchOpen(false); setFileSearch(""); }} className="flex w-full gap-2 px-3 py-2 text-left"><FileTypeIcon file={file} /><span className="text-white">{file.name}</span><span className="ml-auto text-[10px] text-slate-500">{file.path}</span></button>)}</div></div></div>}
@@ -648,9 +727,10 @@ export const EditorWorkbench: React.FC = () => {
     {newFilePromptId && <div className="fixed inset-x-0 top-16 z-40"><NewFilePrompt name={savePromptName} folder={savePromptFolder} setName={setSavePromptName} setFolder={setSavePromptFolder} onSave={() => void saveNewFile()} onCancel={() => setNewFilePromptId(null)} /></div>}
     {!treeFiles.length && !unreadableFiles.length && <div className="fixed bottom-7 left-[208px] right-0 top-[6.5rem] z-30 bg-[#0A0A0F]"><EmptyProjectState onNewFile={() => setIsCreatingFile(true)} onUpload={() => fileInputRef.current?.click()} onOpenFolder={() => folderInputRef.current?.click()} /></div>}
     {treeFiles.length > 0 && openFiles.length === 0 && <div className="fixed bottom-7 left-[208px] right-0 top-[6.5rem] z-30 bg-[#0A0A0F]"><NoActiveFileState recentFiles={recentFiles} onOpen={openFileInEditor} onNewFile={() => setIsCreatingFile(true)} onSearch={() => setIsFileSearchOpen(true)} onOpenFile={() => fileInputRef.current?.click()} onAskAi={() => setIsAiDrawerOpen(true)} /></div>}
-    {isLargeFile && !largeFileOverrides[activeFile?.id || ""] && activeFile && <div className="fixed left-[208px] right-0 top-[6.5rem] z-40"><LargeFileWarning fileName={activeFile.name} sizeBytes={activeFile.sizeBytes ?? new TextEncoder().encode(activeContent).length} onOpen={() => setLargeFileOverrides((previous) => ({ ...previous, [activeFile.id]: true }))} onClose={() => closeFileFromEditor(activeFile.id)} /></div>}
+    {isLargeFile && !largeFileOverrides[activeFile?.id || ""] && activeFile && <div className="fixed left-[208px] right-0 top-[6.5rem] z-40"><LargeFileWarning fileName={activeFile.name} sizeBytes={activeFile.sizeBytes ?? new TextEncoder().encode(activeContent).length} onOpen={() => setLargeFileOverrides((previous) => ({ ...previous, [activeFile.id]: true }))} onClose={() => closeEditorFile(activeFile.id)} /></div>}
     {truncatedApply && <div role="dialog" aria-modal="true" aria-labelledby="truncated-ai-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"><div className="w-full max-w-md border border-amber-400/40 bg-[#161624] p-5 shadow-2xl"><h2 id="truncated-ai-title" className="text-sm font-bold text-amber-200">AI Response May Be Incomplete</h2><p className="mt-3 text-xs leading-5 text-slate-300">The AI code appears to be cut off (unmatched braces detected).</p><div className="mt-5 flex justify-end gap-2 text-xs"><button onClick={() => setTruncatedApply(null)} className="px-3 py-2 text-slate-400">Cancel</button><button onClick={() => void applyAiCode(truncatedApply.code, true)} className="bg-amber-500/20 px-3 py-2 text-amber-100">Apply Anyway</button></div></div></div>}
     {aiApplyNotice && <div role="alert" className="fixed bottom-10 right-4 z-50 border border-cyan-300/40 bg-[#161624] px-4 py-2 text-xs text-cyan-100 shadow-lg">{aiApplyNotice}</div>}
+    {sessionNotice && <div role="status" className="fixed bottom-10 right-4 z-50 border border-cyan-300/40 bg-[#161624] px-4 py-2 text-xs text-cyan-100 shadow-lg">{sessionNotice}</div>}
     {saveState === "error" && <button onClick={() => void saveActiveFile()} className="fixed bottom-7 right-4 z-50 border border-red-300/40 bg-[#4C1D95] px-3 py-1 text-[10px] text-white">Retry save</button>}
     {unreadableFiles.length > 0 && !unreadableBannerDismissed && <div className="fixed left-[208px] right-0 top-10 z-40 border-b border-cyan-400/30 bg-[#11111a] px-4 py-2 text-xs text-slate-300"><div className="flex items-center gap-3"><span>ⓘ {unreadableFiles.length} files skipped (binary or too large)</span><span className="text-[10px] text-slate-500">Images, binaries, and archives cannot be opened in the editor.</span><button onClick={() => setUnreadableExpanded((expanded) => !expanded)} className="ml-auto text-cyan-300">See list {unreadableExpanded ? "▲" : "▼"}</button><button aria-label="Dismiss skipped files banner" onClick={() => setUnreadableBannerDismissed(true)} className="text-slate-500">×</button></div>{unreadableExpanded && <div className="mt-2 space-y-1 border-t border-[#28243c] pt-2">{unreadableFiles.map((file) => <div key={file.path} className="flex justify-between text-[10px] text-slate-400"><span>{file.path}</span><span>{file.reason} • {formatFileSize(file.sizeBytes || 0)}</span></div>)}</div>}</div>}
     {imagePreview && <div className="fixed bottom-7 left-[208px] right-0 top-10 z-[45] bg-[#0A0A0F]"><ImagePreviewTab {...imagePreview} onClose={closeImagePreview} /></div>}

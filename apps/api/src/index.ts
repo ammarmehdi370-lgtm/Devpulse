@@ -1346,16 +1346,27 @@ app.put("/v1/editor/session", async (request, response, next) => {
     if (!project) return response.status(404).json({ error: "Project not found" });
     const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } } });
     if (!membership) return response.status(403).json({ error: "You do not have access to this project" });
-    const session = await db.editorSession.upsert({ where: { userId_projectId: { userId, projectId: parsed.data.projectId } }, create: { ...parsed.data, userId }, update: { ...parsed.data } });
-    return response.json({ openFileIds: session.openFileIds, activeFileId: session.activeFileId, scrollPositions: session.scrollPositions, cursorPositions: session.cursorPositions });
+    const session = await db.editorSession.upsert({ where: { userId_projectId: { userId, projectId: parsed.data.projectId } }, create: { ...parsed.data, userId }, update: { ...parsed.data, updatedAt: new Date() } });
+    return response.json({ session });
   } catch (error) { return next(error); }
 });
 
 app.get("/v1/editor/session/:projectId", async (request, response, next) => {
   const userId = requireUser(request, response); if (!userId) return;
   try {
+    if (!await userCanAccessProject(userId, String(request.params.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
     const session = await db.editorSession.findUnique({ where: { userId_projectId: { userId, projectId: String(request.params.projectId) } } });
-    return response.json({ openFileIds: session?.openFileIds ?? [], activeFileId: session?.activeFileId ?? null, scrollPositions: session?.scrollPositions ?? {}, cursorPositions: session?.cursorPositions ?? {} });
+    const savedSession = session ? { openFileIds: session.openFileIds, activeFileId: session.activeFileId, scrollPositions: session.scrollPositions, cursorPositions: session.cursorPositions } : null;
+    return response.json({ session: savedSession, openFileIds: savedSession?.openFileIds ?? [], activeFileId: savedSession?.activeFileId ?? null, scrollPositions: savedSession?.scrollPositions ?? {}, cursorPositions: savedSession?.cursorPositions ?? {} });
+  } catch (error) { return next(error); }
+});
+
+app.delete("/v1/editor/session/:projectId", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try {
+    if (!await userCanAccessProject(userId, String(request.params.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
+    await db.editorSession.deleteMany({ where: { userId, projectId: String(request.params.projectId) } });
+    return response.status(204).send();
   } catch (error) { return next(error); }
 });
 
