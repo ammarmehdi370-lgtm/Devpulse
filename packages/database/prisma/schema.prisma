@@ -32,6 +32,11 @@ enum MessageRole {
   ASSISTANT
 }
 
+enum AIMessageRole {
+  USER
+  ASSISTANT
+}
+
 enum FileOrigin {
   API
   LOCAL
@@ -249,7 +254,7 @@ model AIMessage {
   id              String        @id @default(cuid())
   conversationId  String
   conversation    AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  role            MessageRole
+  role            AIMessageRole
   content         String        @db.Text
   command         String?
   tokensUsed      Int?

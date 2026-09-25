@@ -679,6 +679,7 @@ const aiChatSchema = z.object({
   context: z.object({ fileName: z.string().max(512).optional(), language: z.string().max(40).optional(), selectedCode: z.string().max(200_000).optional(), surroundingCode: z.string().max(200_000).optional(), projectName: z.string().max(120).optional(), recentErrors: z.array(z.string().max(4_000)).max(20).optional() }).optional(),
   fileId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
+  conversationId: z.string().cuid().optional(),
 });
 const AI_APPLY_LIMIT_BYTES = 512_000;
 const aiApplySchema = z.object({
@@ -754,7 +755,11 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
       if (!(await userCanAccessProject(authenticated.userId!, file.projectId))) return response.status(403).json({ error: "You do not have access to this file" });
     }
     if (parsed.data.projectId && !(await userCanAccessProject(authenticated.userId!, parsed.data.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
-    if (parsed.data.projectId || parsed.data.fileId) {
+    if (parsed.data.conversationId) {
+      const existingConversation = await findOwnedConversation(authenticated.userId!, parsed.data.conversationId);
+      if (!existingConversation) return response.status(404).json({ error: "Conversation not found" });
+      conversationId = existingConversation.id;
+    } else if (parsed.data.projectId || parsed.data.fileId) {
       const conversation = await db.aIConversation.create({ data: { userId: authenticated.userId!, projectId: parsed.data.projectId, fileId: parsed.data.fileId, model: parsed.data.model, title: parsed.data.messages.find((message) => message.role === "user")?.content.slice(0, 80) ?? "New conversation" } });
       conversationId = conversation.id;
       const lastUserMessage = [...parsed.data.messages].reverse().find((message) => message.role === "user");
@@ -845,19 +850,89 @@ app.get("/v1/ai/usage", async (request, response, next) => {
   try { const usage = await getOrCreateAIUsage(userId); const resetDate = new Date(usage.year, usage.month, 1).toISOString().slice(0, 10); return response.json({ used: usage.requestCount, limit: usage.limit, plan: usage.plan, resetDate, percentage: Math.round((usage.requestCount / usage.limit) * 100) }); } catch (error) { return next(error); }
 });
 
+const aiConversationMessageSchema = z.object({
+  role: z.enum(["USER", "ASSISTANT", "user", "assistant"]).transform((role) => role.toUpperCase() as "USER" | "ASSISTANT"),
+  content: z.string().max(200_000),
+  command: z.string().trim().max(40).optional(),
+  hasCode: z.boolean().optional().default(false),
+  codeLanguage: z.string().trim().max(40).optional(),
+  tokensUsed: z.number().int().nonnegative().optional(),
+});
+
+async function findOwnedConversation(userId: string, conversationId: string) {
+  return db.aIConversation.findFirst({ where: { id: conversationId, userId } });
+}
+
+function conversationSummary(conversation: { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: Date }) {
+  return { id: conversation.id, title: conversation.title, fileId: conversation.fileId, messageCount: conversation.messageCount, updatedAt: conversation.updatedAt };
+}
+
 app.get("/v1/ai/conversations", async (request, response, next) => {
   const userId = requireUser(request, response); if (!userId) return;
-  try { const limit = Math.min(Math.max(Number(request.query.limit ?? 10), 1), 100); const conversations = await db.aIConversation.findMany({ where: { userId, ...(typeof request.query.fileId === "string" ? { fileId: request.query.fileId } : {}), ...(typeof request.query.projectId === "string" ? { projectId: request.query.projectId } : {}) }, orderBy: { updatedAt: "desc" }, take: limit, select: { id: true, title: true, messageCount: true, fileId: true, updatedAt: true } }); return response.json({ conversations }); } catch (error) { return next(error); }
+  try {
+    const fileId = typeof request.query.fileId === "string" ? request.query.fileId : undefined;
+    const projectId = typeof request.query.projectId === "string" ? request.query.projectId : undefined;
+    if (fileId) {
+      const file = await db.file.findUnique({ where: { id: fileId }, select: { projectId: true } });
+      if (!file) return response.status(404).json({ error: "File not found" });
+      if (!await userCanAccessProject(userId, file.projectId)) return response.status(403).json({ error: "You do not have access to this file" });
+    } else if (projectId && !await userCanAccessProject(userId, projectId)) return response.status(403).json({ error: "You do not have access to this project" });
+    const all = request.query.all === "true";
+    const limit = Math.min(Math.max(Number(request.query.limit ?? (all ? 20 : 1)), 1), 100);
+    let conversations = await db.aIConversation.findMany({ where: { userId, ...(fileId ? { fileId } : {}), ...(projectId ? { projectId } : {}) }, orderBy: { updatedAt: "desc" }, take: limit, select: { id: true, title: true, messageCount: true, fileId: true, updatedAt: true } });
+    if (!all && fileId && conversations.length === 0) {
+      const conversation = await db.aIConversation.create({ data: { userId, fileId, projectId } , select: { id: true, title: true, messageCount: true, fileId: true, updatedAt: true } });
+      conversations = [conversation];
+    }
+    if (!all) return response.json({ conversation: conversations[0] ? conversationSummary(conversations[0]) : null });
+    const withPreview = await Promise.all(conversations.map(async (conversation) => ({ ...conversationSummary(conversation), preview: (await db.aIMessage.findFirst({ where: { conversationId: conversation.id, role: "USER" }, orderBy: { createdAt: "asc" }, select: { content: true } }))?.content.slice(0, 120) ?? "" })));
+    return response.json({ conversations: withPreview });
+  } catch (error) { return next(error); }
 });
 
 app.get("/v1/ai/conversations/:id/messages", async (request, response, next) => {
   const userId = requireUser(request, response); if (!userId) return;
-  try { const conversation = await db.aIConversation.findFirst({ where: { id: String(request.params.id), userId } }); if (!conversation) return response.status(404).json({ error: "Conversation not found" }); const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100); const messages = await db.aIMessage.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: "desc" }, take: limit + 1, ...(typeof request.query.cursor === "string" ? { skip: 1, cursor: { id: request.query.cursor } } : {}) }); const hasNext = messages.length > limit; const page = messages.slice(0, limit); return response.json({ messages: page, nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null }); } catch (error) { return next(error); }
+  try {
+    const conversation = await findOwnedConversation(userId, String(request.params.id));
+    if (!conversation) return response.status(404).json({ error: "Conversation not found" });
+    const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100);
+    const messages = await db.aIMessage.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: "desc" }, take: limit + 1, ...(typeof request.query.cursor === "string" ? { skip: 1, cursor: { id: request.query.cursor } } : {}) });
+    const page = messages.slice(0, limit);
+    return response.json({ messages: page, nextCursor: messages.length > limit ? page[page.length - 1]?.id ?? null : null, total: await db.aIMessage.count({ where: { conversationId: conversation.id } }) });
+  } catch (error) { return next(error); }
+});
+
+app.post("/v1/ai/conversations/:id/messages", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  const parsed = aiConversationMessageSchema.safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const conversation = await findOwnedConversation(userId, String(request.params.id));
+    if (!conversation) return response.status(404).json({ error: "Conversation not found" });
+    const existing = await db.aIMessage.findFirst({ where: { conversationId: conversation.id, role: parsed.data.role, content: parsed.data.content, createdAt: { gte: new Date(Date.now() - 30_000) } }, orderBy: { createdAt: "desc" } });
+    const message = existing ?? await db.aIMessage.create({ data: { conversationId: conversation.id, ...parsed.data }, });
+    if (!existing) await db.aIConversation.update({ where: { id: conversation.id }, data: { messageCount: { increment: 1 } } });
+    return response.json({ message });
+  } catch (error) { return next(error); }
 });
 
 app.delete("/v1/ai/conversations/:id", async (request, response, next) => {
   const userId = requireUser(request, response); if (!userId) return;
   try { const deleted = await db.aIConversation.deleteMany({ where: { id: String(request.params.id), userId } }); if (!deleted.count) return response.status(404).json({ error: "Conversation not found" }); return response.json({ success: true }); } catch (error) { return next(error); }
+});
+
+app.get("/v1/ai/conversations/:id/export", async (request, response, next) => {
+  const userId = requireUser(request, response); if (!userId) return;
+  try {
+    const conversation = await findOwnedConversation(userId, String(request.params.id));
+    if (!conversation) return response.status(404).json({ error: "Conversation not found" });
+    const messages = await db.aIMessage.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: "asc" } });
+    const file = conversation.fileId ? await db.file.findUnique({ where: { id: conversation.fileId }, select: { path: true } }) : null;
+    const title = file?.path.split("/").pop() || "Conversation";
+    const markdown = [`# AI Conversation — ${title}`, "", ...messages.map((message) => `## ${message.createdAt.toISOString().slice(0, 10)}\n**${message.role === "USER" ? "You" : "Devpulse AI"}:** ${message.content}`), ""].join("\n");
+    const filename = `devpulse-ai-${new Date().toISOString().slice(0, 10)}.md`;
+    return response.set({ "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"` }).send(markdown);
+  } catch (error) { return next(error); }
 });
 
 const executeSchema = z.object({
