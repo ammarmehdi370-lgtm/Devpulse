@@ -23,6 +23,9 @@ type CursorPosition = { lineNumber: number; column: number };
 type EditorHandle = { trigger: (source: string, action: string, payload: unknown) => void; getSelection: () => SelectionSnapshot | null };
 type ApplyTarget = "selection" | "cursor" | "file";
 type AiUsage = { used: number; limit: number; plan?: string };
+type AiApplyRequest = { fileId: string; code: string; language: string; range?: { startLine: number; endLine: number }; aiMessageId?: string; expectedVersion: number; skipCheck?: boolean };
+type AiApplyResponse = { file: { id: string; version: number; sizeBytes: number | null; updatedAt: string }; revisionId: string; linesReplaced: number; appliedFromAI: true };
+type AiApplyError = { error?: string; message?: string; currentVersion?: number };
 const AI_COMMANDS: Array<{ value: AiCommand; label: string; description: string; requiresSelection: boolean }> = [
   { value: "/fix", label: "/fix", description: "Fix bugs in selection", requiresSelection: true },
   { value: "/explain", label: "/explain", description: "Explain this code", requiresSelection: true },
@@ -352,6 +355,8 @@ export const EditorWorkbench: React.FC = () => {
   const [savePromptName, setSavePromptName] = useState("");
   const [savePromptFolder, setSavePromptFolder] = useState("/src/");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [truncatedApply, setTruncatedApply] = useState<{ code: string; language: string } | null>(null);
+  const [aiApplyNotice, setAiApplyNotice] = useState<string | null>(null);
   const [largeFileOverrides, setLargeFileOverrides] = useState<Record<string, boolean>>({});
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const activeFile = openFiles.find((file) => file.id === activeFileId) || openFiles[0];
@@ -427,13 +432,32 @@ export const EditorWorkbench: React.FC = () => {
     try { await saveLocalFileToProject(file.id, nextPath); setSaveState("saved"); window.setTimeout(() => setSaveState("idle"), 2000); } catch (error) { setSaveState("error"); setRunOutput(error instanceof Error ? error.message : "Save failed"); }
   };
   const setInput = setAiInput;
-  const applyAiCode = async (message: AiMessage | string) => {
+  const showAiApplyNotice = (message: string) => { setRunOutput(message); setAiApplyNotice(message); window.setTimeout(() => setAiApplyNotice(null), 4000); };
+  const applyAiCode = async (message: AiMessage | string, skipCheck = false) => {
     if (!activeFile || activeFile.origin === FileOrigin.READONLY) return;
-    const appliedContent = typeof message === "string" ? message : message.text;
-    updateFileContent(activeFile.id, appliedContent);
+    const code = typeof message === "string" ? message : message.text;
+    const requestBody: AiApplyRequest = { fileId: activeFile.apiFileId || activeFile.id, code, language: activeFile.language || monacoLanguageForFile(activeFile), expectedVersion: activeFile.version, skipCheck };
     setSaveState("saving");
-    try { await saveFileContent(activeFile.id, appliedContent); setSaveState("saved"); setRunOutput("AI code applied and saved ✓"); window.setTimeout(() => setSaveState("idle"), 2000); }
-    catch { setSaveState("error"); setRunOutput("Applied but save failed — use Ctrl+S to retry"); }
+    try {
+      const response = await fetch(`${API_BASE}/v1/ai/apply`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
+      const body = await response.json() as AiApplyResponse & AiApplyError;
+      if (!response.ok) {
+        if (response.status === 413 && body.error === "CONTENT_TOO_LARGE") showAiApplyNotice("AI generated too much code to apply safely (>500KB). Try a smaller selection.");
+        else if (response.status === 409 && body.error === "VERSION_CONFLICT") { showAiApplyNotice("File changed while AI was responding. Please review and try again."); void loadEditorProject(); }
+        else if (response.status === 422 && body.error === "TRUNCATED_CONTENT" && !skipCheck) setTruncatedApply({ code, language: requestBody.language });
+        else if (response.status === 422 && body.error === "INVALID_JSON") showAiApplyNotice("AI returned invalid JSON — not applied. Try asking again.");
+        else if (response.status === 400 && body.error === "EMPTY_CONTENT") showAiApplyNotice("AI returned empty response — nothing to apply.");
+        else showAiApplyNotice(body.message || "AI code could not be applied.");
+        setSaveState("error");
+        return;
+      }
+      updateFileContent(activeFile.id, code);
+      setTruncatedApply(null);
+      setSaveState("saved");
+      showAiApplyNotice(`AI code applied and saved ✓ (${body.linesReplaced} lines)`);
+      void loadEditorProject();
+      window.setTimeout(() => setSaveState("idle"), 2000);
+    } catch { setSaveState("error"); showAiApplyNotice("AI apply service unavailable — try again"); }
   };
   const applyDiffToActiveFile = applyAiCode;
   useEffect(() => {
@@ -521,6 +545,8 @@ export const EditorWorkbench: React.FC = () => {
     {!treeFiles.length && <div className="fixed bottom-7 left-[208px] right-0 top-[6.5rem] z-30 bg-[#0A0A0F]"><EmptyProjectState onNewFile={() => setIsCreatingFile(true)} onUpload={() => fileInputRef.current?.click()} onOpenFolder={() => folderInputRef.current?.click()} /></div>}
     {treeFiles.length > 0 && openFiles.length === 0 && <div className="fixed bottom-7 left-[208px] right-0 top-[6.5rem] z-30 bg-[#0A0A0F]"><NoActiveFileState recentFiles={recentFiles} onOpen={openFileInEditor} onNewFile={() => setIsCreatingFile(true)} onSearch={() => setIsFileSearchOpen(true)} onOpenFile={() => fileInputRef.current?.click()} onAskAi={() => setIsAiDrawerOpen(true)} /></div>}
     {isLargeFile && !largeFileOverrides[activeFile?.id || ""] && activeFile && <div className="fixed left-[208px] right-0 top-[6.5rem] z-40"><LargeFileWarning fileName={activeFile.name} sizeBytes={activeFile.sizeBytes ?? new TextEncoder().encode(activeContent).length} onOpen={() => setLargeFileOverrides((previous) => ({ ...previous, [activeFile.id]: true }))} onClose={() => closeFileFromEditor(activeFile.id)} /></div>}
+    {truncatedApply && <div role="dialog" aria-modal="true" aria-labelledby="truncated-ai-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"><div className="w-full max-w-md border border-amber-400/40 bg-[#161624] p-5 shadow-2xl"><h2 id="truncated-ai-title" className="text-sm font-bold text-amber-200">AI Response May Be Incomplete</h2><p className="mt-3 text-xs leading-5 text-slate-300">The AI code appears to be cut off (unmatched braces detected).</p><div className="mt-5 flex justify-end gap-2 text-xs"><button onClick={() => setTruncatedApply(null)} className="px-3 py-2 text-slate-400">Cancel</button><button onClick={() => void applyAiCode(truncatedApply.code, true)} className="bg-amber-500/20 px-3 py-2 text-amber-100">Apply Anyway</button></div></div></div>}
+    {aiApplyNotice && <div role="alert" className="fixed bottom-10 right-4 z-50 border border-cyan-300/40 bg-[#161624] px-4 py-2 text-xs text-cyan-100 shadow-lg">{aiApplyNotice}</div>}
     {saveState === "error" && <button onClick={() => void saveActiveFile()} className="fixed bottom-7 right-4 z-50 border border-red-300/40 bg-[#4C1D95] px-3 py-1 text-[10px] text-white">Retry save</button>}
     {saveState === "error" && <div role="alert" className="fixed right-4 top-4 z-50 border border-red-400/40 bg-red-950 px-4 py-2 text-xs text-red-100 shadow-lg">Save failed</div>}{projectLiveRegion}
   </div>;

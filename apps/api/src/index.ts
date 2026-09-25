@@ -679,7 +679,31 @@ const aiChatSchema = z.object({
   fileId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
 });
-const aiApplySchema = z.object({ fileId: z.string().cuid(), code: z.string().max(5_000_000), range: z.object({ startLine: z.number().int().positive(), endLine: z.number().int().positive() }).refine((value) => value.endLine >= value.startLine, "endLine must be greater than or equal to startLine").optional(), aiMessageId: z.string().cuid().optional() });
+const AI_APPLY_LIMIT_BYTES = 512_000;
+const aiApplySchema = z.object({
+  fileId: z.string().cuid(),
+  code: z.string().max(5_000_000),
+  language: z.string().trim().min(1).max(64),
+  range: z.object({ startLine: z.number().int().positive(), endLine: z.number().int().positive() }).refine((value) => value.endLine >= value.startLine, "endLine must be greater than or equal to startLine").optional(),
+  aiMessageId: z.string().cuid().optional(),
+  expectedVersion: z.number().int().positive(),
+  skipCheck: z.boolean().optional().default(false),
+});
+
+type AiApplyRequest = z.infer<typeof aiApplySchema>;
+type AiApplySafetyError = { status: 400 | 422; error: string; message: string; openBraces?: number; closeBraces?: number };
+
+function validateAIApplyContent(code: string, language: string, skipCheck: boolean): AiApplySafetyError | null {
+  if (skipCheck) return null;
+  if (!code.trim()) return { status: 400, error: "EMPTY_CONTENT", message: "AI returned empty code — not applied" };
+  const openBraces = (code.match(/\{/g) || []).length;
+  const closeBraces = (code.match(/\}/g) || []).length;
+  if (openBraces > 0 && openBraces - closeBraces > 2) return { status: 422, error: "TRUNCATED_CONTENT", message: "AI response appears incomplete — missing closing braces", openBraces, closeBraces };
+  if (language.toLowerCase() === "json") {
+    try { JSON.parse(code); } catch { return { status: 422, error: "INVALID_JSON", message: "AI returned invalid JSON" }; }
+  }
+  return null;
+}
 
 async function getOrCreateAIUsage(userId: string, projectId?: string) {
   const now = new Date();
@@ -779,29 +803,39 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
   }
 });
 
-app.post("/v1/ai/apply", checkFileAccess, async (request, response, next) => {
+app.post("/v1/ai/apply", async (request, response, next) => {
   const parsed = aiApplySchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
-    const authenticated = request as AuthenticatedRequest;
-    const file = authenticated.fileRecord!;
+    const userId = requireUser(request, response);
+    if (!userId) return;
+    const sizeBytes = Buffer.byteLength(parsed.data.code, "utf8");
+    if (sizeBytes > AI_APPLY_LIMIT_BYTES) return response.status(413).json({ error: "CONTENT_TOO_LARGE", message: "AI generated content exceeds 500KB limit", sizeBytes, limitBytes: AI_APPLY_LIMIT_BYTES });
+    const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, include: { project: { include: { workspace: true } } } });
+    if (!file) return response.status(404).json({ error: "FILE_NOT_FOUND", message: "File not found" });
+    const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspace.id, userId } }, select: { userId: true } });
+    if (!membership) return response.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this file" });
+    if (file.version !== parsed.data.expectedVersion) return response.status(409).json({ error: "VERSION_CONFLICT", message: "File changed since AI request was made", currentVersion: file.version });
+    const safetyError = validateAIApplyContent(parsed.data.code, parsed.data.language, parsed.data.skipCheck);
+    if (safetyError) return response.status(safetyError.status).json(safetyError);
     const lines = file.content.split("\n");
     let nextContent = parsed.data.code;
     let linesReplaced = lines.length;
     if (parsed.data.range) {
+      if (parsed.data.range.endLine > lines.length) return response.status(400).json({ error: "INVALID_RANGE", message: "Apply range is outside the file" });
       const start = parsed.data.range.startLine - 1;
       const count = parsed.data.range.endLine - start;
       lines.splice(start, count, ...parsed.data.code.split("\n"));
       nextContent = lines.join("\n");
       linesReplaced = count;
     }
-    const saved = await saveFileRevision(file.id, authenticated.userId!, nextContent, file.version, file.language ?? languageFromPath(file.path), true, parsed.data.aiMessageId);
+    const saved = await saveFileRevision(file.id, userId, nextContent, parsed.data.expectedVersion, parsed.data.language, true, parsed.data.aiMessageId);
     if (!saved) return response.status(409).json({ error: "File was modified elsewhere", currentVersion: (await db.file.findUniqueOrThrow({ where: { id: file.id }, select: { version: true } })).version });
     if (parsed.data.aiMessageId) {
-      const message = await db.aIMessage.findFirst({ where: { id: parsed.data.aiMessageId, conversation: { userId: authenticated.userId! } } });
+      const message = await db.aIMessage.findFirst({ where: { id: parsed.data.aiMessageId, conversation: { userId } } });
       if (message) await db.aIMessage.update({ where: { id: message.id }, data: { appliedToFileId: file.id, appliedAt: new Date() } });
     }
-    return response.json({ file: saved.file, revisionId: saved.revision.id, linesReplaced });
+    return response.json({ file: { id: saved.file.id, version: saved.file.version, sizeBytes: saved.file.sizeBytes, updatedAt: saved.file.updatedAt }, revisionId: saved.revision.id, linesReplaced, appliedFromAI: true });
   } catch (error) { return next(error); }
 });
 
