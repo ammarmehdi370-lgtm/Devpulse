@@ -283,19 +283,20 @@ model AIUsage {
 }
 
 model CodeExecution {
-  id         String   @id @default(cuid())
-  fileId     String
-  file       File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  language   String
-  code       String   @db.Text
-  stdout     String?  @db.Text
-  stderr     String?  @db.Text
-  exitCode   Int?
-  durationMs Int?
-  timedOut   Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  fileId       String
+  file         File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  language     String
+  codeSnapshot String   @db.Text
+  stdout       String?  @db.Text
+  stderr       String?  @db.Text
+  exitCode     Int?
+  durationMs   Int?
+  timedOut     Boolean  @default(false)
+  error        String?
+  createdAt    DateTime @default(now())
   @@index([fileId, createdAt])
   @@index([userId, createdAt])
 }

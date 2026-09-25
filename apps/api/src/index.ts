@@ -958,6 +958,7 @@ function executeInContainer(
   stderr: string;
   exitCode: number | null;
   timedOut: boolean;
+  error?: string;
 }> {
   const command =
     language === "javascript"
@@ -1338,7 +1339,7 @@ function executeInContainer(
       );
       clearTimeout(timer);
       stderr += error.message;
-      resolve({ stdout, stderr, exitCode: null, timedOut });
+      resolve({ stdout, stderr, exitCode: null, timedOut, error: error.message });
     });
     child.on("close", (exitCode) => {
       clearTimeout(timer);
@@ -1355,14 +1356,14 @@ app.post("/v1/execute", async (request, response) => {
   await redisConnection;
   const cached = redis.isReady ? await redis.get(cacheKey) : null;
   if (cached) {
-    const cachedResult = JSON.parse(cached) as { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; durationMs?: number; executionId?: string };
+    const cachedResult = JSON.parse(cached) as { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; error?: string; durationMs?: number; executionId?: string };
     const userId = getRequestUserId(request);
     let executionId = cachedResult.executionId;
     if (parsed.data.fileId && userId && !executionId) {
       const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
       const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
       if (file && membership) {
-        const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, code: parsed.data.code, stdout: cachedResult.stdout, stderr: cachedResult.stderr, exitCode: cachedResult.exitCode, durationMs: cachedResult.durationMs ?? 0, timedOut: cachedResult.timedOut } });
+        const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, codeSnapshot: parsed.data.code, stdout: cachedResult.stdout, stderr: cachedResult.stderr, exitCode: cachedResult.exitCode, durationMs: cachedResult.durationMs ?? 0, timedOut: cachedResult.timedOut, error: cachedResult.error ?? null } });
         executionId = execution.id;
       }
     }
@@ -1381,7 +1382,7 @@ app.post("/v1/execute", async (request, response) => {
     const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
     const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
     if (file && membership) {
-      const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, code: parsed.data.code, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, durationMs, timedOut: result.timedOut } });
+      const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, codeSnapshot: parsed.data.code, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, durationMs, timedOut: result.timedOut, error: result.error ?? null } });
       executionId = execution.id;
     }
   }
@@ -1397,17 +1398,18 @@ app.post("/v1/execute", async (request, response) => {
 
 app.get("/v1/files/:fileId/executions", checkFileAccess, async (request, response, next) => {
   try {
-    const executions = await db.codeExecution.findMany({ where: { fileId: String(request.params.fileId) }, orderBy: { createdAt: "desc" }, take: 10, select: { id: true, language: true, stdout: true, stderr: true, exitCode: true, durationMs: true, timedOut: true, createdAt: true } });
-    return response.json({ executions });
+    const limit = Math.min(Math.max(Number(request.query.limit ?? 10), 1), 100);
+    const executions = await db.codeExecution.findMany({ where: { fileId: String(request.params.fileId) }, orderBy: { createdAt: "desc" }, take: limit, select: { id: true, language: true, stdout: true, stderr: true, exitCode: true, durationMs: true, timedOut: true, error: true, createdAt: true } });
+    return response.json({ executions: executions.map((execution) => ({ id: execution.id, language: execution.language, exitCode: execution.exitCode, durationMs: execution.durationMs, timedOut: execution.timedOut, createdAt: execution.createdAt, stdoutPreview: execution.stdout?.slice(0, 200), hasError: Boolean(execution.error) || execution.exitCode !== 0 })) });
   } catch (error) { return next(error); }
 });
 
 app.get("/v1/executions/:id", async (request, response, next) => {
   const userId = requireUser(request, response); if (!userId) return;
   try {
-    const execution = await db.codeExecution.findFirst({ where: { id: String(request.params.id), userId } });
+    const execution = await db.codeExecution.findFirst({ where: { id: String(request.params.id), userId }, include: { user: { select: { name: true, avatarUrl: true } } } });
     if (!execution) return response.status(404).json({ error: "Execution not found" });
-    return response.json(execution);
+    return response.json({ execution });
   } catch (error) { return next(error); }
 });
 
