@@ -59,6 +59,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
   // Check if current view is Workbench mode (Screenshots 1 & 3)
   const isWorkbenchMode = page === "editor" || page === "ai-studio";
+  const isCompactCloudCore = page === "cloud-core";
 
   // Standard platform items
   const platformNavItems: {
@@ -468,11 +469,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
           </aside>
         ) : (
           /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
-          <aside className="w-56 bg-[#0b0b12] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
-            <div className="p-3 space-y-6">
+          <aside className={`${isCompactCloudCore ? "flex w-[68px] md:w-56" : "hidden w-56 md:flex"} bg-[#0b0b12] border-r border-[#1e1e2d] flex-col justify-between shrink-0 font-sans`}>
+            <div className={`space-y-6 ${isCompactCloudCore ? "p-1.5 md:p-3" : "p-3"}`}>
               {/* Platform Section */}
               <div>
-                <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
+                <div className={`px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e] ${isCompactCloudCore ? "hidden md:block" : ""}`}>
                   PLATFORM
                 </div>
                 <nav className="space-y-1">
@@ -488,11 +489,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                           }
                           setPage(item.id);
                         }}
+                        aria-label={isCompactCloudCore ? item.label : undefined}
+                        title={isCompactCloudCore ? item.label : undefined}
                         className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
                           isActive
                             ? "text-white font-semibold shadow-sm"
                             : "text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420]"
-                        }`}
+                        } ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
                         style={
                           isActive
                             ? {
@@ -503,7 +506,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                         }
                       >
                         <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
+                        <span className={isCompactCloudCore ? "hidden md:inline" : ""}>{item.label}</span>
                       </button>
                     );
                   })}
@@ -512,21 +515,23 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
               {/* System Section */}
               <div>
-                <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
+                <div className={`px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e] ${isCompactCloudCore ? "hidden md:block" : ""}`}>
                   SYSTEM
                 </div>
                 <div className="space-y-1">
                   <button
                     onClick={() => setPage("theme")}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors"
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
+                    aria-label={isCompactCloudCore ? "Settings & Theme" : undefined}
+                    title={isCompactCloudCore ? "Settings & Theme" : undefined}
                   >
                     <Settings className="w-4 h-4" />
-                    <span>Settings & Theme</span>
+                    <span className={isCompactCloudCore ? "hidden md:inline" : ""}>Settings & Theme</span>
                   </button>
                 </div>
 
                 {/* Memory usage bar */}
-                <div className="mt-4 px-3 py-2 rounded-xl bg-[#12121d] border border-[#202030] text-[11px] font-mono">
+                <div className={`mt-4 px-3 py-2 rounded-xl bg-[#12121d] border border-[#202030] text-[11px] font-mono ${isCompactCloudCore ? "hidden md:block" : ""}`}>
                   <div className="flex justify-between text-[#8b8ba8] mb-1.5">
                     <span>Memory usage</span>
                     <span className="text-white font-bold">64%</span>
@@ -539,15 +544,16 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </div>
 
             {/* Footer Version Tag */}
-            <div className="p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] font-mono text-[#5b5b75]">
-              <span>v2.4.18-edge</span>
+            <div className={`p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] font-mono text-[#5b5b75] ${isCompactCloudCore ? "justify-center md:justify-between" : ""}`}>
+              <span className={isCompactCloudCore ? "hidden md:inline" : ""}>v2.4.18-edge</span>
               <button
                 onClick={() => logout()}
                 title="Sign out"
+                aria-label="Sign out"
                 className="hover:text-[#e0e0f0] transition-colors flex items-center gap-1 text-[10px]"
               >
                 <LogOut className="w-3 h-3" />
-                <span>Logout</span>
+                <span className={isCompactCloudCore ? "hidden md:inline" : ""}>Logout</span>
               </button>
             </div>
           </aside>
