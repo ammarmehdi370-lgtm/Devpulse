@@ -11,6 +11,7 @@ import { DeploymentsPage } from "./components/DeploymentsPage";
 import { TeamChatPage } from "./components/TeamChatPage";
 import { PricingPage } from "./components/PricingPage";
 import { AppShell } from "./components/AppShell";
+import { CloudCoreDashboard } from "./components/CloudCoreDashboard";
 import { CommandPalette } from "./components/CommandPalette";
 
 const PanelLoading = () => (
@@ -98,6 +99,7 @@ function MainAppContent() {
       {page === "remote-control" && <RemoteControlPage />}
       {page === "ai-studio" && <FullScreenAiPage />}
       {page === "pricing" && <PricingPage />}
+      {page === "cloud-core" && <CloudCoreDashboard />}
     </AppShell>
   );
 }

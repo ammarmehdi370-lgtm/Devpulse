@@ -34,6 +34,7 @@ import {
   Menu,
   X,
   Bell,
+  Gauge,
 } from "lucide-react";
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({
@@ -66,6 +67,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     icon: React.ComponentType<{ className?: string }>;
   }[] = [
     { id: "workspaces", label: "Your Workspaces", icon: Box },
+    { id: "cloud-core", label: "Cloud Core Engine", icon: Gauge },
     { id: "repositories", label: "Your Code Projects", icon: GitFork },
     { id: "editor", label: "Code Editor", icon: Code2 },
     { id: "deployments", label: "Live Releases", icon: Rocket },

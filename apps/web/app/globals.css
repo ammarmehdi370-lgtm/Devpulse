@@ -258,6 +258,48 @@ body {
   animation: pulseGlow 2.5s infinite ease-in-out;
 }
 
+@keyframes liveRingSweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes liveBarSweep {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.65;
+  }
+  82% {
+    opacity: 0.65;
+  }
+  100% {
+    transform: translateX(440%);
+    opacity: 0;
+  }
+}
+
+.live-ring-sweep {
+  animation: liveRingSweep 18s linear infinite;
+}
+
+.live-bar-sheen {
+  position: absolute;
+  inset: -30% auto -30% 0;
+  width: 22%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.42), transparent);
+  animation: liveBarSweep 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-ring-sweep,
+  .live-bar-sheen {
+    animation: none;
+  }
+}
+
 /* Terminal scanline effect */
 .terminal-card {
   box-shadow:

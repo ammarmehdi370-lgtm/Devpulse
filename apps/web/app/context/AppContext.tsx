@@ -12,7 +12,8 @@ export type PageType =
   | "editor"
   | "remote-control"
   | "ai-studio"
-  | "pricing";
+  | "pricing"
+  | "cloud-core";
 
 export interface ThemeConfig {
   id: string;
