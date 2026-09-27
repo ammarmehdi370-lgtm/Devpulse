@@ -4,6 +4,8 @@ node_modules
 dist
 build
 coverage
+playwright-report
+test-results
 .next
 expo-env.d.ts
 *.log

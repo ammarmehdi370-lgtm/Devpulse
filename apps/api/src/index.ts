@@ -18,6 +18,7 @@ const redis = createClient({
   url: process.env.REDIS_URL ?? "redis://localhost:6379",
   socket: { reconnectStrategy: false },
 });
+const testMagicTokens = new Map<string, string>();
 redis.on("error", (error) => console.error("Redis error", error));
 const redisConnection =
   process.env.NODE_ENV === "test"
@@ -70,6 +71,50 @@ app.get("/health", (_request, response) =>
   response.json({ status: "ok", service: "api" }),
 );
 app.get("/ready", (_request, response) => response.json({ status: "ready" }));
+app.get("/health/ready", async (_request, response, next) => {
+  if (process.env.NODE_ENV !== "test")
+    return response.status(503).json({ error: "Test mode is required" });
+  try {
+    const demoUser = await db.user.findUnique({
+      where: { email: "demo@devpulse.local" },
+      select: { id: true },
+    });
+    if (!demoUser)
+      return response.status(503).json({ error: "Database is not seeded" });
+    return response.json({
+      status: "ready",
+      database: "seeded",
+      environment: "test",
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+if (process.env.NODE_ENV === "test") {
+  app.post("/v1/test/cleanup", async (request, response, next) => {
+    const expectedSecret = process.env.TEST_CLEANUP_SECRET ?? "e2e-secret";
+    if (request.headers["x-test-secret"] !== expectedSecret)
+      return response.status(403).json({ error: "Forbidden" });
+
+    try {
+      await db.$transaction(async (transaction) => {
+        await transaction.project.deleteMany({
+          where: { name: { startsWith: "e2e-test-" } },
+        });
+        await transaction.workspace.deleteMany({
+          where: { owner: { email: { startsWith: "e2e-" } } },
+        });
+        await transaction.user.deleteMany({
+          where: { email: { startsWith: "e2e-" } },
+        });
+      });
+      return response.json({ cleaned: true });
+    } catch (error) {
+      return next(error);
+    }
+  });
+}
 
 function sessionToken(userId: string): string {
   return jwt.sign({ sub: userId }, jwtSecret, {
@@ -132,15 +177,15 @@ app.post("/v1/auth/magic-link", async (request, response) => {
   if (!parsed.success) return sendValidationError(response, parsed.error);
   await redisConnection;
   const token = randomBytes(32).toString("hex");
-  if (redis.isReady)
-    await redis.set(
-      `magic:${createHash("sha256").update(token).digest("hex")}`,
-      parsed.data.email,
-      { EX: 600 },
-    );
+  const tokenKey = `magic:${createHash("sha256").update(token).digest("hex")}`;
+  if (redis.isReady) {
+    await redis.set(tokenKey, parsed.data.email, { EX: 600 });
+  } else if (process.env.NODE_ENV === "test") {
+    testMagicTokens.set(tokenKey, parsed.data.email);
+  }
   return response.json({
     message: "Magic link requested",
-    ...(process.env.NODE_ENV === "development"
+    ...(process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
       ? { verificationToken: token }
       : {}),
   });
@@ -154,12 +199,17 @@ app.post("/v1/auth/magic-link/verify", async (request, response, next) => {
   try {
     await redisConnection;
     const key = `magic:${createHash("sha256").update(parsed.data.token).digest("hex")}`;
-    const email = redis.isReady ? await redis.get(key) : null;
+    const email = redis.isReady
+      ? await redis.get(key)
+      : process.env.NODE_ENV === "test"
+        ? testMagicTokens.get(key) ?? null
+        : null;
     if (!email)
       return response
         .status(401)
         .json({ error: "Magic link is invalid or expired" });
-    await redis.del(key);
+    if (redis.isReady) await redis.del(key);
+    else testMagicTokens.delete(key);
     const user = await db.user.upsert({
       where: { email },
       update: {},

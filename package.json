@@ -3,12 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
-  "engines": { "node": ">=20.10.0" },
+  "engines": {
+    "node": ">=20.10.0"
+  },
   "scripts": {
     "dev": "npm --prefix apps/web run dev",
     "dev:turbo": "turbo dev",
     "build": "npm --prefix apps/web run build",
     "test": "turbo test",
+    "setup:e2e": "node scripts/setup-e2e.mjs",
+    "test:e2e": "pnpm --filter @devpulse/web test:e2e",
+    "test:e2e:full": "pnpm setup:e2e && pnpm test:e2e",
+    "test:e2e:ui": "pnpm --filter @devpulse/web test:e2e:ui",
+    "test:e2e:headed": "pnpm --filter @devpulse/web test:e2e:headed",
+    "test:e2e:editor": "pnpm --filter @devpulse/web test:e2e:editor",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "format": "prettier --write .",
