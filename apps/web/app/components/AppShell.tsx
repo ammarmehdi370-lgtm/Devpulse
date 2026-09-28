@@ -30,6 +30,8 @@ import {
   Split,
   Columns,
   Maximize2,
+  PanelLeftClose,
+  PanelLeftOpen,
   ArrowLeft,
   Menu,
   X,
@@ -53,6 +55,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
   const [isRepoMenuOpen, setIsRepoMenuOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [selectedRepoBranch, setSelectedRepoBranch] = useState(
     "devpulse-core / staging",
   );
@@ -136,9 +139,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   return (
     <div className="min-h-screen bg-[#0a0d0e] text-[#f5f6f6] flex flex-col font-sans select-none overflow-x-hidden">
       {/* Top Navigation Bar */}
-      <header className="topbar min-h-14 border-b border-[#1c2224] bg-[#0a0d0e] px-6 py-3 flex items-center gap-[22px] flex-nowrap z-30 sticky top-0 overflow-x-auto font-sans">
+      <header className="topbar min-h-14 w-full min-w-0 border-b border-[#1c2224] bg-[#0a0d0e] px-2 sm:px-4 xl:px-6 py-3 flex items-center gap-1.5 lg:gap-2 flex-nowrap z-30 sticky top-0 overflow-visible font-sans">
         {/* Left: Brand + Info String matching screenshots */}
-        <div className="flex items-center gap-[22px] shrink-0">
+        <div className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3">
           <div
             onClick={() => setPage("workspaces")}
             className="flex items-center gap-2 cursor-pointer group shrink-0"
@@ -151,11 +154,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </span>
           </div>
 
-          <span className="h-6 w-px bg-[#1c2224] shrink-0" aria-hidden="true" />
+          <span
+            className="hidden sm:block h-6 w-px bg-[#1c2224] shrink-0"
+            aria-hidden="true"
+          />
 
           {/* Primary navigation */}
           <nav
-            className="hidden lg:flex items-center gap-1 shrink-0"
+            className="hidden xl:flex min-w-0 flex-1 items-center justify-center gap-0.5"
             aria-label="Primary navigation"
           >
             {[
@@ -180,13 +186,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
           </nav>
 
           {/* Repo / Branch Selector Dropdown */}
-          <div className="relative">
+          <div className="relative min-w-0">
             <button
               onClick={() => setIsRepoMenuOpen(!isRepoMenuOpen)}
               aria-label="Switch repository context"
-              className="topbar-pill flex items-center gap-2 shrink-0"
+              aria-expanded={isRepoMenuOpen}
+              className="topbar-pill flex min-w-0 max-w-[155px] sm:max-w-[185px] xl:max-w-[210px] items-center gap-1.5 shrink"
             >
-              <span>{selectedRepoBranch}</span>
+              <span className="truncate">{selectedRepoBranch}</span>
               <ChevronDown
                 className="w-3.5 h-3.5 text-[#7d8383]"
                 aria-hidden="true"
@@ -237,15 +244,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         </div>
 
         {/* Right: Quick Jump, Status, Profile */}
-        <div className="flex items-center gap-[22px] shrink-0 ml-auto">
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 xl:gap-3 ml-auto">
           {/* Search or jump to... Ctrl+K */}
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
             aria-label="Open command palette"
-            className="topbar-pill flex items-center gap-2"
+            className="topbar-pill flex items-center gap-1.5 px-2 sm:px-2.5"
           >
             <Search className="w-3.5 h-3.5 text-[#7d8383]" aria-hidden="true" />
-            <span className="text-[#9aa0a0]">Search</span>
+            <span className="hidden 2xl:inline text-[#9aa0a0]">Search</span>
             <kbd className="topbar-kbd">
               <span>⌘K</span>
             </kbd>
@@ -279,14 +286,17 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
           </button>
 
           <div
-            className="flex items-center gap-2 text-[12px] text-[#9aa0a0] whitespace-nowrap"
+            className="hidden 2xl:flex items-center gap-2 text-[12px] text-[#9aa0a0] whitespace-nowrap"
             title="Cluster availability"
           >
             <span className="h-2 w-2 rounded-full bg-[#0DF5C4] animate-pulse" />
             <span>Operational</span>
           </div>
 
-          <span className="h-6 w-px bg-[#1c2224] shrink-0" aria-hidden="true" />
+          <span
+            className="hidden sm:block h-6 w-px bg-[#1c2224] shrink-0"
+            aria-hidden="true"
+          />
 
           {/* User Profile avatar */}
           <button
@@ -303,9 +313,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                 .slice(0, 2)
                 .toUpperCase()}
             </span>
-            <span className="hidden xl:inline">{user.name}</span>
+            <span className="hidden 2xl:inline">{user.name}</span>
             <ChevronDown
-              className="h-3.5 w-3.5 text-[#7d8383]"
+              className="hidden sm:block h-3.5 w-3.5 text-[#7d8383]"
               aria-hidden="true"
             />
           </button>
@@ -356,206 +366,289 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
         {/* 1. WORKBENCH MODE SIDEBAR (Matches Screenshot 1 & Screenshot 3 Left Sidebar) */}
         {isWorkbenchMode ? (
-          <aside className="w-56 bg-[#0c0c14] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
+          <aside
+            className={`${isSidebarOpen ? "w-56" : "w-14"} bg-[#0c0c14] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans transition-[width] duration-150`}
+          >
             <div className="p-3 space-y-5">
               {/* Top Header */}
-              <div>
-                <div className="flex items-center justify-between px-2 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
-                  <span>WORKBENCH</span>
-                  <span className="cursor-pointer hover:text-white">•••</span>
-                </div>
-
-                <nav className="space-y-1">
-                  {workbenchNavItems.map((item) => {
-                    const Icon = item.icon;
-                    const isSelected =
-                      item.id === "editor" && page === "editor";
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          if (item.action) item.action();
-                          else setPage(item.id as PageType);
-                        }}
-                        className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
-                          isSelected
-                            ? "text-[#09090e] font-bold shadow-md"
-                            : "text-[#8e8ea6] hover:text-[#d0d0e2] hover:bg-[#141422]"
-                        }`}
-                        aria-current={isSelected ? "page" : undefined}
-                        style={
-                          isSelected ? { backgroundColor: theme.primary } : {}
-                        }
-                      >
-                        <div className="flex items-center gap-2">
-                          <Icon className="w-4 h-4" />
-                          <span>{item.label}</span>
-                        </div>
-
-                        {item.badge && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${item.badgeColor || (isSelected ? "bg-black/20 text-[#09090e]" : "bg-[#181826] text-[#71718c]")}`}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-
-                        {item.dot && (
-                          <span
-                            title="New deployment available"
-                            aria-label="New deployment available"
-                            className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse"
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </nav>
-              </div>
-
-              {/* Return to Platform Link */}
-              <button
-                onClick={() => setPage("workspaces")}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-mono text-[#787896] hover:text-white hover:bg-[#151522] transition-colors"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Exit Workbench</span>
-              </button>
-            </div>
-
-            {/* Bottom Telemetry Gauges (Pixel-Perfect to Screenshot 1 & 3) */}
-            <div className="p-3 border-t border-[#1a1a28] space-y-3 font-mono text-xs">
-              <div className="text-[10px] text-[#63637e] uppercase tracking-wider">
-                TELEMETRY
-              </div>
-
-              {/* CPU gauge */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-[#8e8ea6]">
-                  <span>CPU (8 Cores)</span>
-                  <span className="text-[#0DF5C4] font-bold">18.4%</span>
-                </div>
-                <div className="h-1.5 w-full bg-[#161624] rounded-full overflow-hidden">
-                  <div className="h-full bg-[#0DF5C4] rounded-full w-[18.4%]" />
-                </div>
-              </div>
-
-              {/* Memory gauge */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-[#8e8ea6]">
-                  <span>Memory</span>
-                  <span className="text-white font-bold">1.42 / 4 GB</span>
-                </div>
-                <div className="h-1.5 w-full bg-[#161624] rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-[#6C63FF] to-[#8b82ff] rounded-full w-[35.5%]" />
-                </div>
-              </div>
-
-              {/* Settings Footer */}
-              <div className="pt-2 border-t border-[#1a1a28] flex items-center justify-between text-[#787896]">
-                <button
-                  onClick={() => setPage("theme")}
-                  className="hover:text-white flex items-center gap-1.5 text-xs"
+              <div className="min-w-0">
+                <div
+                  className={`flex items-center ${isSidebarOpen ? "justify-between" : "justify-center"} px-1 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]`}
                 >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Settings</span>
-                </button>
-                <div className="flex items-center gap-2">
-                  <Split className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
-                  <Columns className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
-                </div>
-              </div>
-            </div>
-          </aside>
-        ) : (
-          /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
-          <aside className={`${isCompactCloudCore ? "flex w-[68px] md:w-56" : "hidden w-56 md:flex"} bg-[#0b0b12] border-r border-[#1e1e2d] flex-col justify-between shrink-0 font-sans`}>
-            <div className={`space-y-6 ${isCompactCloudCore ? "p-1.5 md:p-3" : "p-3"}`}>
-              {/* Platform Section */}
-              <div>
-                <div className={`px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e] ${isCompactCloudCore ? "hidden md:block" : ""}`}>
-                  PLATFORM
-                </div>
-                <nav className="space-y-1">
-                  {platformNavItems.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = page === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          if (item.id === "editor") {
-                            setIsEditorProjectOpen(false);
-                          }
-                          setPage(item.id);
-                        }}
-                        aria-label={isCompactCloudCore ? item.label : undefined}
-                        title={isCompactCloudCore ? item.label : undefined}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                          isActive
-                            ? "text-white font-semibold shadow-sm"
-                            : "text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420]"
-                        } ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
-                        style={
-                          isActive
-                            ? {
-                                backgroundColor: theme.primary,
-                                color: "#0b0b12",
-                              }
-                            : {}
-                        }
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span className={isCompactCloudCore ? "hidden md:inline" : ""}>{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </nav>
-              </div>
-
-              {/* System Section */}
-              <div>
-                <div className={`px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e] ${isCompactCloudCore ? "hidden md:block" : ""}`}>
-                  SYSTEM
-                </div>
-                <div className="space-y-1">
+                  {isSidebarOpen && <span>WORKBENCH</span>}
                   <button
-                    onClick={() => setPage("theme")}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
-                    aria-label={isCompactCloudCore ? "Settings & Theme" : undefined}
-                    title={isCompactCloudCore ? "Settings & Theme" : undefined}
+                    onClick={() => setIsSidebarOpen((open) => !open)}
+                    aria-label={
+                      isSidebarOpen
+                        ? "Close workbench sidebar"
+                        : "Open workbench sidebar"
+                    }
+                    aria-expanded={isSidebarOpen}
+                    title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+                    className="topbar-icon-button"
                   >
-                    <Settings className="w-4 h-4" />
-                    <span className={isCompactCloudCore ? "hidden md:inline" : ""}>Settings & Theme</span>
+                    {isSidebarOpen ? (
+                      <PanelLeftClose className="h-4 w-4" />
+                    ) : (
+                      <PanelLeftOpen className="h-4 w-4" />
+                    )}
                   </button>
                 </div>
 
-                {/* Memory usage bar */}
-                <div className={`mt-4 px-3 py-2 rounded-xl bg-[#12121d] border border-[#202030] text-[11px] font-mono ${isCompactCloudCore ? "hidden md:block" : ""}`}>
-                  <div className="flex justify-between text-[#8b8ba8] mb-1.5">
-                    <span>Memory usage</span>
-                    <span className="text-white font-bold">64%</span>
+                {isSidebarOpen && (
+                  <nav className="space-y-1">
+                    {workbenchNavItems.map((item) => {
+                      const Icon = item.icon;
+                      const isSelected =
+                        item.id === "editor" && page === "editor";
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            if (item.action) item.action();
+                            else setPage(item.id as PageType);
+                          }}
+                          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
+                            isSelected
+                              ? "text-[#09090e] font-bold shadow-md"
+                              : "text-[#8e8ea6] hover:text-[#d0d0e2] hover:bg-[#141422]"
+                          }`}
+                          aria-current={isSelected ? "page" : undefined}
+                          style={
+                            isSelected ? { backgroundColor: theme.primary } : {}
+                          }
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon className="w-4 h-4" />
+                            <span>{item.label}</span>
+                          </div>
+
+                          {item.badge && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${item.badgeColor || (isSelected ? "bg-black/20 text-[#09090e]" : "bg-[#181826] text-[#71718c]")}`}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+
+                          {item.dot && (
+                            <span
+                              title="New deployment available"
+                              aria-label="New deployment available"
+                              className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse"
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </nav>
+                )}
+              </div>
+
+              {/* Return to Platform Link */}
+              {isSidebarOpen && (
+                <button
+                  onClick={() => setPage("workspaces")}
+                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-mono text-[#787896] hover:text-white hover:bg-[#151522] transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Exit Workbench</span>
+                </button>
+              )}
+            </div>
+
+            {/* Bottom Telemetry Gauges (Pixel-Perfect to Screenshot 1 & 3) */}
+            {isSidebarOpen && (
+              <div className="p-3 border-t border-[#1a1a28] space-y-3 font-mono text-xs">
+                <div className="text-[10px] text-[#63637e] uppercase tracking-wider">
+                  TELEMETRY
+                </div>
+
+                {/* CPU gauge */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] text-[#8e8ea6]">
+                    <span>CPU (8 Cores)</span>
+                    <span className="text-[#0DF5C4] font-bold">18.4%</span>
                   </div>
-                  <div className="h-1.5 w-full bg-[#1b1b2a] rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-[#0DF5C4] to-[#6C63FF] rounded-full w-[64%]" />
+                  <div className="h-1.5 w-full bg-[#161624] rounded-full overflow-hidden">
+                    <div className="h-full bg-[#0DF5C4] rounded-full w-[18.4%]" />
+                  </div>
+                </div>
+
+                {/* Memory gauge */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] text-[#8e8ea6]">
+                    <span>Memory</span>
+                    <span className="text-white font-bold">1.42 / 4 GB</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-[#161624] rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#6C63FF] to-[#8b82ff] rounded-full w-[35.5%]" />
+                  </div>
+                </div>
+
+                {/* Settings Footer */}
+                <div className="pt-2 border-t border-[#1a1a28] flex items-center justify-between text-[#787896]">
+                  <button
+                    onClick={() => setPage("theme")}
+                    className="hover:text-white flex items-center gap-1.5 text-xs"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Settings</span>
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <Split className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
+                    <Columns className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
                   </div>
                 </div>
               </div>
+            )}
+          </aside>
+        ) : (
+          /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
+          <aside
+            className={`${isSidebarOpen ? (isCompactCloudCore ? "flex w-[68px] md:w-56" : "hidden w-56 md:flex") : "hidden w-14 md:flex"} bg-[#0b0b12] border-r border-[#1e1e2d] flex-col justify-between shrink-0 font-sans transition-[width] duration-150`}
+          >
+            <div
+              className={`space-y-6 ${isSidebarOpen && isCompactCloudCore ? "p-1.5 md:p-3" : "p-3"}`}
+            >
+              {/* Platform Section */}
+              <div>
+                <div
+                  className={`flex items-center ${isSidebarOpen ? "justify-between" : "justify-center"} px-1 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e] ${isSidebarOpen && isCompactCloudCore ? "hidden md:flex" : ""}`}
+                >
+                  {isSidebarOpen && <span>PLATFORM</span>}
+                  <button
+                    onClick={() => setIsSidebarOpen((open) => !open)}
+                    aria-label={
+                      isSidebarOpen
+                        ? "Close platform sidebar"
+                        : "Open platform sidebar"
+                    }
+                    aria-expanded={isSidebarOpen}
+                    title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+                    className="topbar-icon-button"
+                  >
+                    {isSidebarOpen ? (
+                      <PanelLeftClose className="h-4 w-4" />
+                    ) : (
+                      <PanelLeftOpen className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {isSidebarOpen && (
+                  <nav className="space-y-1">
+                    {platformNavItems.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = page === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            if (item.id === "editor") {
+                              setIsEditorProjectOpen(false);
+                            }
+                            setPage(item.id);
+                          }}
+                          aria-label={
+                            isCompactCloudCore ? item.label : undefined
+                          }
+                          title={isCompactCloudCore ? item.label : undefined}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                            isActive
+                              ? "text-white font-semibold shadow-sm"
+                              : "text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420]"
+                          } ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
+                          style={
+                            isActive
+                              ? {
+                                  backgroundColor: theme.primary,
+                                  color: "#0b0b12",
+                                }
+                              : {}
+                          }
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span
+                            className={
+                              isCompactCloudCore ? "hidden md:inline" : ""
+                            }
+                          >
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </nav>
+                )}
+              </div>
+
+              {/* System Section */}
+              {isSidebarOpen && (
+                <div>
+                  <div
+                    className={`px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e] ${isCompactCloudCore ? "hidden md:block" : ""}`}
+                  >
+                    SYSTEM
+                  </div>
+                  <div className="space-y-1">
+                    <button
+                      onClick={() => setPage("theme")}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
+                      aria-label={
+                        isCompactCloudCore ? "Settings & Theme" : undefined
+                      }
+                      title={
+                        isCompactCloudCore ? "Settings & Theme" : undefined
+                      }
+                    >
+                      <Settings className="w-4 h-4" />
+                      <span
+                        className={isCompactCloudCore ? "hidden md:inline" : ""}
+                      >
+                        Settings & Theme
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Memory usage bar */}
+                  <div
+                    className={`mt-4 px-3 py-2 rounded-xl bg-[#12121d] border border-[#202030] text-[11px] font-mono ${isCompactCloudCore ? "hidden md:block" : ""}`}
+                  >
+                    <div className="flex justify-between text-[#8b8ba8] mb-1.5">
+                      <span>Memory usage</span>
+                      <span className="text-white font-bold">64%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-[#1b1b2a] rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-[#0DF5C4] to-[#6C63FF] rounded-full w-[64%]" />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer Version Tag */}
-            <div className={`p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] font-mono text-[#5b5b75] ${isCompactCloudCore ? "justify-center md:justify-between" : ""}`}>
-              <span className={isCompactCloudCore ? "hidden md:inline" : ""}>v2.4.18-edge</span>
-              <button
-                onClick={() => logout()}
-                title="Sign out"
-                aria-label="Sign out"
-                className="hover:text-[#e0e0f0] transition-colors flex items-center gap-1 text-[10px]"
+            {isSidebarOpen && (
+              <div
+                className={`p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] font-mono text-[#5b5b75] ${isCompactCloudCore ? "justify-center md:justify-between" : ""}`}
               >
-                <LogOut className="w-3 h-3" />
-                <span className={isCompactCloudCore ? "hidden md:inline" : ""}>Logout</span>
-              </button>
-            </div>
+                <span className={isCompactCloudCore ? "hidden md:inline" : ""}>
+                  v2.4.18-edge
+                </span>
+                <button
+                  onClick={() => logout()}
+                  title="Sign out"
+                  aria-label="Sign out"
+                  className="hover:text-[#e0e0f0] transition-colors flex items-center gap-1 text-[10px]"
+                >
+                  <LogOut className="w-3 h-3" />
+                  <span
+                    className={isCompactCloudCore ? "hidden md:inline" : ""}
+                  >
+                    Logout
+                  </span>
+                </button>
+              </div>
+            )}
           </aside>
         )}
 

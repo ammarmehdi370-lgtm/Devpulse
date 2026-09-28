@@ -4,15 +4,14 @@ import React, { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import {
   Terminal,
-  Zap,
-  ShieldCheck,
-  Lock,
   KeyRound,
   Mail,
   ArrowRight,
-  CheckCircle2,
   Layers,
   Loader2,
+  Cloud,
+  Code2,
+  GitBranch,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -22,10 +21,8 @@ const emailSchema = z
   .email("Enter a valid work email address.");
 
 export const LoginPage: React.FC = () => {
-  const { login, setPage } = useApp();
+  const { login } = useApp();
   const [email, setEmail] = useState("");
-  const [latency, setLatency] = useState(14);
-  const [instances, setInstances] = useState(1482);
   const [isLoading, setIsLoading] = useState(false);
   const [loginMethod, setLoginMethod] = useState("");
   const [authError, setAuthError] = useState("");
@@ -39,30 +36,21 @@ export const LoginPage: React.FC = () => {
     }
   }, []);
 
-  // Live telemetry pulse
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLatency((prev) => {
-        const delta = Math.floor(Math.random() * 5) - 2;
-        return Math.max(9, Math.min(22, prev + delta));
-      });
-      if (Math.random() > 0.6) {
-        setInstances((prev) => prev + (Math.random() > 0.5 ? 1 : -1));
-      }
-    }, 1800);
-    return () => clearInterval(interval);
-  }, []);
-
   const handleLogin = async (provider: string) => {
     setIsLoading(true);
     setLoginMethod(provider);
     setAuthError("");
 
-    if (provider === "github" || provider === "gitlab" || provider === "sso") {
+    if (
+      provider === "google" ||
+      provider === "github" ||
+      provider === "gitlab" ||
+      provider === "sso"
+    ) {
       // ── DEV BYPASS ────────────────────────────────────────────────────────
       // In development, skip the real OAuth redirect and log in immediately
       // with a mock dev user so you can test the full app flow locally.
-      if (process.env.NODE_ENV === "development") {
+      if (provider !== "google" && process.env.NODE_ENV === "development") {
         const providerLabels: Record<string, string> = {
           github: "GitHub Dev",
           gitlab: "GitLab Dev",
@@ -135,296 +123,306 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <main className="min-h-screen w-full flex items-center justify-center p-4 sm:p-8 bg-[#09090e] bg-grid-pattern relative overflow-hidden font-sans">
-      {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-[#6C63FF]/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-[#0DF5C4]/5 rounded-full blur-[100px] pointer-events-none" />
-
-      <div className="w-full max-w-[1080px] grid grid-cols-1 lg:grid-cols-12 gap-8 items-center z-10">
-        {/* Left Card: Login Form */}
-        <div className="lg:col-span-7 bg-[#111118]/90 backdrop-blur-xl border border-[#232334] rounded-2xl p-8 sm:p-10 shadow-2xl shadow-black/80 relative">
-          {/* Top Brand Header */}
-          <div className="flex items-center justify-between mb-8">
+    <main className="min-h-screen w-full bg-[#080d0d] bg-grid-pattern px-4 py-6 text-white sm:px-8 sm:py-10 font-sans">
+      <div className="mx-auto grid min-h-[min(820px,calc(100vh-3rem))] w-full max-w-[1120px] overflow-hidden rounded-xl border border-[#263130] bg-[#0d1313] shadow-2xl shadow-black/40 lg:grid-cols-[0.92fr_1.08fr]">
+        <section className="flex flex-col justify-center px-6 py-8 sm:px-10 lg:px-12 lg:py-12">
+          <div className="mb-10 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-[#6C63FF] to-[#8F87FF] flex items-center justify-center shadow-lg shadow-[#6C63FF]/30">
-                <Layers className="w-5 h-5 text-white" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0df5c4] text-[#071110]">
+                <Layers className="h-5 w-5" aria-hidden="true" />
               </div>
-              <span className="text-xl font-bold tracking-tight text-white">
+              <span className="text-xl font-semibold tracking-tight">
                 Devpulse
               </span>
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#0DF5C4]/10 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[11px] font-mono font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
-              DEV PREVIEW v2.4
-            </div>
+            <span className="rounded-md border border-[#2a3836] bg-[#121c1b] px-2.5 py-1.5 font-mono text-[10px] text-[#9fb1ae]">
+              CLOUD WORKSPACE
+            </span>
           </div>
 
-          {/* Headline & Description */}
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight mb-3">
-            Build at the speed of thought.
-          </h1>
-          <p className="text-[#8c8ca5] text-sm sm:text-base mb-2 leading-relaxed">
-            Sign in to access your cloud workspaces, ephemeral devboxes, and
-            neural coding agents.
-          </p>
-          <p className="text-[11px] text-[#7e7e98] mb-8 font-mono">
-            This is your secure sign-in screen. Choose the account method that
-            fits you best.
-          </p>
+          <div className="mb-7">
+            <h1 className="mb-2 text-3xl font-semibold leading-tight sm:text-4xl">
+              Welcome back
+            </h1>
+            <p className="text-sm leading-6 text-[#9aa9a7]">
+              Sign in to continue to your projects and workspaces.
+            </p>
+          </div>
+
           {authError && (
-            <div className="mb-5 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+            <div
+              className="mb-5 rounded-lg border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-sm text-[#fca5a5]"
+              role="alert"
+            >
               {authError}
             </div>
           )}
 
-          {/* Auth Providers */}
-          <div className="space-y-3 mb-6">
-            {/* Quick 1-Click Launch Button */}
+          <div className="space-y-3">
             <button
-              onClick={() => {
-                login("alex@devpulse.dev", "Alex");
-                setPage("workspaces");
-              }}
-              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#0DF5C4] to-[#6C63FF] hover:opacity-95 active:scale-[0.99] text-[#09090e] font-bold text-sm flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-[#0DF5C4]/20 group mb-4"
+              onClick={() => handleLogin("google")}
+              disabled={isLoading}
+              className="flex min-h-12 w-full items-center justify-center gap-3 rounded-lg bg-[#f7f9f8] px-4 text-sm font-semibold text-[#18201f] transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0df5c4] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+              {isLoading && loginMethod === "google" ? (
+                <Loader2 className="h-[18px] w-[18px] animate-spin" />
               ) : (
-                <Zap className="w-4 h-4 fill-current text-[#09090e]" />
+                <svg
+                  className="h-[18px] w-[18px]"
+                  viewBox="0 0 48 48"
+                  role="img"
+                  aria-label="Google"
+                >
+                  <path
+                    fill="#4285F4"
+                    d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.6c3.9-3.6 6.1-8.8 6.1-15Z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M24 44c5.5 0 10.1-1.8 13.5-4.8l-6.6-5.1c-1.8 1.2-4.1 2-6.9 2-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20 20 0 0 0 24 44Z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M12.6 27.7a12 12 0 0 1 0-7.4V15H5.8a20 20 0 0 0 0 18l6.8-5.3Z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M24 11.9c3 0 5.7 1 7.8 3.1l5.9-5.9C34.1 5.8 29.5 4 24 4A20 20 0 0 0 5.8 15l6.8 5.3c1.6-4.8 6.1-8.4 11.4-8.4Z"
+                  />
+                </svg>
               )}
-              <span>Instant Access: Launch Devpulse Workspace</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </button>
-            <p className="text-[11px] text-[#777794] text-center">
-              By continuing, you agree to our{" "}
-              <a href="/terms" className="text-[#c4c0ff] underline">
-                Terms of Service
-              </a>{" "}
-              and{" "}
-              <a href="/privacy" className="text-[#c4c0ff] underline">
-                Privacy Policy
-              </a>
-              .
-            </p>
-
-            {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
-            <button
-              onClick={() => handleLogin("github")}
-              disabled={isLoading}
-              className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20"
-            >
-              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                <path
-                  fillRule="evenodd"
-                  clipRule="evenodd"
-                  d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
-                />
-              </svg>
               <span>
-                {isLoading && loginMethod === "github"
-                  ? "Authenticating with GitHub..."
-                  : "Continue with GitHub"}
+                {isLoading && loginMethod === "google"
+                  ? "Connecting to Google..."
+                  : "Continue with Google"}
               </span>
             </button>
-            <div className="text-[10px] text-[#7e7e98] font-mono -mt-1 mb-2">
-              GitHub — sign in with your GitHub account.
-            </div>
 
-            {/* Continue with GitLab */}
-            <button
-              onClick={() => handleLogin("gitlab")}
-              disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
-            >
-              <svg
-                className="w-5 h-5 text-[#FC6D26]"
-                viewBox="0 0 24 24"
-                fill="currentColor"
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => handleLogin("github")}
+                disabled={isLoading}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#33403e] bg-[#131a19] px-3 text-sm font-medium text-[#e2e8e7] transition-colors hover:border-[#52625f] hover:bg-[#192220] disabled:opacity-60"
               >
-                <path d="m23.6 9.57-.03-.08-3.48-8.87a.89.89 0 0 0-1.68 0L15.35 8H8.65L5.59.62a.89.89 0 0 0-1.68 0L.43 9.49l-.03.08a5.9 5.9 0 0 0 2.08 6.74L12 23.4l9.52-7.09a5.9 5.9 0 0 0 2.08-6.74Z" />
-              </svg>
-              <span>
-                {isLoading && loginMethod === "gitlab"
-                  ? "Connecting GitLab..."
-                  : "Continue with GitLab"}
-              </span>
-            </button>
-            <div className="text-[10px] text-[#7e7e98] font-mono -mt-1 mb-2">
-              GitLab — use your GitLab account to keep your projects connected.
+                <svg
+                  className="h-4 w-4 fill-current"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.49v-1.72c-2.78.62-3.37-1.22-3.37-1.22-.45-1.19-1.11-1.51-1.11-1.51-.91-.64.07-.63.07-.63 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.64-1.36-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.04a9.3 9.3 0 0 1 5.01 0c1.91-1.32 2.75-1.04 2.75-1.04.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.94.68 1.9v2.65c0 .27.18.59.69.49A10.25 10.25 0 0 0 22 12.23C22 6.58 17.52 2 12 2Z" />
+                </svg>
+                <span>
+                  {isLoading && loginMethod === "github"
+                    ? "Connecting..."
+                    : "GitHub"}
+                </span>
+              </button>
+              <button
+                onClick={() => handleLogin("gitlab")}
+                disabled={isLoading}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#33403e] bg-[#131a19] px-3 text-sm font-medium text-[#e2e8e7] transition-colors hover:border-[#52625f] hover:bg-[#192220] disabled:opacity-60"
+              >
+                <svg
+                  className="h-4 w-4 text-[#fc6d26]"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="m23.6 9.57-.03-.08-3.48-8.87a.89.89 0 0 0-1.68 0L15.35 8H8.65L5.59.62a.89.89 0 0 0-1.68 0L.43 9.49l-.03.08a5.9 5.9 0 0 0 2.08 6.74L12 23.4l9.52-7.09a5.9 5.9 0 0 0 2.08-6.74Z" />
+                </svg>
+                <span>
+                  {isLoading && loginMethod === "gitlab"
+                    ? "Connecting..."
+                    : "GitLab"}
+                </span>
+              </button>
             </div>
 
-            {/* Single Sign-On (SSO / SAML) */}
             <button
               onClick={() => handleLogin("sso")}
               disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
+              className="flex min-h-10 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm text-[#a6b2b0] transition-colors hover:bg-[#141d1c] hover:text-white disabled:opacity-60"
             >
-              <KeyRound className="w-4 h-4 text-[#8c8ca5]" />
+              <KeyRound className="h-4 w-4" aria-hidden="true" />
               <span>
                 {isLoading && loginMethod === "sso"
-                  ? "Handshaking SAML..."
-                  : "Single Sign-On (SSO / SAML)"}
+                  ? "Connecting..."
+                  : "Sign in with SSO"}
               </span>
             </button>
-            <div className="text-[10px] text-[#7e7e98] font-mono -mt-1 mb-2">
-              SSO — sign in through your company account.
-            </div>
           </div>
 
-          {/* Divider */}
-          <div className="relative flex items-center justify-center my-6">
-            <div className="border-t border-[#232334] w-full" />
-            <span className="bg-[#111118] px-3 font-mono text-[11px] uppercase tracking-wider text-[#666682] absolute">
-              OR CONTINUE WITH WORK EMAIL
+          <div className="my-6 flex items-center gap-3" aria-hidden="true">
+            <div className="h-px flex-1 bg-[#293331]" />
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[#74817f]">
+              or use work email
             </span>
+            <div className="h-px flex-1 bg-[#293331]" />
           </div>
 
-          {/* Email Input & Send Magic Link */}
-          <div className="space-y-3">
+          <form
+            className="space-y-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleLogin("email");
+            }}
+          >
+            <label
+              htmlFor="work-email"
+              className="block text-xs font-medium text-[#c5cfcd]"
+            >
+              Work email
+            </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#666682]">
-                <Mail className="w-4 h-4" />
-              </div>
+              <Mail
+                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#71807d]"
+                aria-hidden="true"
+              />
               <input
+                id="work-email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleLogin("email")}
-                placeholder="dev@company.com"
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#0b0b10] border border-[#27273a] text-white placeholder-[#585870] text-sm focus:outline-none focus:border-[#6C63FF] focus:ring-1 focus:ring-[#6C63FF] transition-all font-mono"
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="name@company.com"
+                autoComplete="email"
+                className="min-h-12 w-full rounded-lg border border-[#34403e] bg-[#0a1010] pl-10 pr-3 text-sm text-white placeholder:text-[#61706d] focus:border-[#0df5c4] focus:outline-none focus:ring-2 focus:ring-[#0df5c4]/15"
+                aria-invalid={Boolean(emailError)}
+                aria-describedby={emailError ? "email-error" : undefined}
               />
             </div>
             {emailError && (
-              <p className="text-xs text-[#fca5a5]" role="alert">
+              <p
+                id="email-error"
+                className="text-xs text-[#fca5a5]"
+                role="alert"
+              >
                 {emailError}
               </p>
             )}
-
             <button
-              onClick={() => handleLogin("email")}
+              type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl bg-[#1c1c28] hover:bg-[#252538] border border-[#31314a] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all group"
+              className="group flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#0df5c4] px-4 text-sm font-semibold text-[#071110] transition-colors hover:bg-[#39f8d0] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span>
                 {isLoading && loginMethod === "email"
-                  ? "Dispatching Magic Link..."
-                  : "Send Magic Link"}
+                  ? "Sending link..."
+                  : "Get sign-in link"}
               </span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+              {isLoading && loginMethod === "email" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              )}
             </button>
+          </form>
+
+          <p className="mt-6 text-center text-[11px] leading-5 text-[#71807d]">
+            By continuing, you agree to our{" "}
+            <a
+              href="/terms"
+              className="text-[#b7c5c2] underline underline-offset-2 hover:text-white"
+            >
+              Terms
+            </a>{" "}
+            and{" "}
+            <a
+              href="/privacy"
+              className="text-[#b7c5c2] underline underline-offset-2 hover:text-white"
+            >
+              Privacy Policy
+            </a>
+            .
+          </p>
+        </section>
+
+        <aside className="relative hidden flex-col justify-between overflow-hidden border-l border-[#263130] bg-[#101817] p-8 lg:flex xl:p-10">
+          <div>
+            <div className="mb-8 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[#8da19d]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#0df5c4]" />
+              Development workspace
+            </div>
+            <h2 className="max-w-md text-3xl font-semibold leading-tight text-[#f3f7f6]">
+              Pick up where your next idea begins.
+            </h2>
+            <p className="mt-4 max-w-md text-sm leading-6 text-[#96a5a2]">
+              Your repositories, cloud environments, and everyday development
+              tools in one workspace.
+            </p>
           </div>
 
-          {/* Footer Security Badges */}
-          <div className="mt-8 pt-6 border-t border-[#1d1d2c] flex flex-wrap items-center justify-center gap-6 text-[12px] font-mono text-[#777794]">
-            <div className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-[#0DF5C4]" />
-              <span>SOC2 Type II</span>
+          <div className="my-10 overflow-hidden rounded-lg border border-[#2d3a38] bg-[#0b1110] shadow-xl shadow-black/20">
+            <div className="flex h-11 items-center justify-between border-b border-[#26312f] px-4">
+              <div className="flex items-center gap-2 text-xs text-[#b2bfbd]">
+                <Terminal
+                  className="h-3.5 w-3.5 text-[#0df5c4]"
+                  aria-hidden="true"
+                />
+                devpulse-core
+              </div>
+              <span className="rounded border border-[#34413f] px-2 py-0.5 font-mono text-[10px] text-[#94a29f]">
+                main
+              </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Lock className="w-4 h-4 text-[#0DF5C4]" />
-              <span>HIPAA Compliant</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#6C63FF]" />
-              <span>Zero Query Retention</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Telemetry Daemon & Feature Badges */}
-        <div className="lg:col-span-5 space-y-6">
-          {/* Telemetry Daemon Box */}
-          <div className="bg-[#0b0b12] border border-[#222234] rounded-2xl p-6 font-mono text-xs shadow-2xl terminal-card relative overflow-hidden">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#1c1c2c]">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
-                <span className="ml-2 text-[#8b8ba8] flex items-center gap-1">
-                  <Terminal className="w-3.5 h-3.5" />
-                  telemetry.daemon
-                </span>
+            <div className="grid grid-cols-[112px_1fr]">
+              <div className="space-y-3 border-r border-[#26312f] p-3 text-[10px] text-[#82918e]">
+                <div className="flex items-center gap-2 text-[#d0d9d7]">
+                  <Cloud className="h-3.5 w-3.5 text-[#0df5c4]" /> Workspaces
+                </div>
+                <div className="flex items-center gap-2">
+                  <GitBranch className="h-3.5 w-3.5" /> Repositories
+                </div>
+                <div className="flex items-center gap-2">
+                  <Code2 className="h-3.5 w-3.5" /> Editor
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0DF5C4]/10 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[10px] font-semibold tracking-wider">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-ping" />
-                LIVE
-              </div>
-            </div>
-
-            {/* Terminal Lines */}
-            <div className="space-y-2.5 leading-relaxed">
-              <div className="flex justify-between">
-                <span className="text-[#6C63FF]">[HOST]</span>
-                <span className="text-[#a4a4c4]">node-alpha-71</span>
-                <span className="text-[#FF9E64] font-semibold">READY</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#6C63FF]">[AUTH]</span>
-                <span className="text-[#a4a4c4]">handshake protocol:</span>
-                <span className="text-white font-medium">mTLS-v1.3</span>
-              </div>
-              <div className="text-[#0DF5C4] pt-1">
-                ☁ Connecting to cluster:{" "}
-                <span className="underline">us-east-1a</span>
-              </div>
-              <div className="flex items-center justify-between text-[#8c8ca5] bg-[#13131f] p-2 rounded-lg border border-[#1f1f30]">
-                <span>round-trip latency:</span>
-                <span className="text-[#0DF5C4] font-bold text-sm font-mono">
-                  {latency}ms
-                </span>
-              </div>
-              <div className="text-[#b5afff] pt-1 flex items-center gap-2">
-                <span>λ orchestrator ephemeral instances available:</span>
-                <span className="text-white font-bold">
-                  {instances.toLocaleString()}
-                </span>
+              <div className="overflow-hidden p-4 font-mono text-[11px] leading-6">
+                <div className="mb-2 text-[#71807d]">src / index.ts</div>
+                <div>
+                  <span className="mr-4 text-[#5b6966]">01</span>
+                  <span className="text-[#91a7ff]">
+                    export async function
+                  </span>{" "}
+                  <span className="text-[#f4d58d]">startRuntime</span>() {"{"}
+                </div>
+                <div>
+                  <span className="mr-4 text-[#5b6966]">02</span>{" "}
+                  <span className="text-[#91a7ff]">const</span> workspace ={" "}
+                  <span className="text-[#a7d9c2]">await</span> connect();
+                </div>
+                <div>
+                  <span className="mr-4 text-[#5b6966]">03</span>{" "}
+                  <span className="text-[#b4c1bf]">return</span>{" "}
+                  workspace.ready;
+                </div>
+                <div>
+                  <span className="mr-4 text-[#5b6966]">04</span>
+                  {"}"}
+                </div>
+                <div className="mt-3 h-px w-full bg-[#26312f]" />
+                <div className="mt-3 flex items-center gap-2 text-[#869591]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#0df5c4]" />
+                  Ready for your next session
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Sub-Second Spinup Card */}
-          <div className="bg-[#12121c] border border-[#222232] rounded-2xl p-5 flex items-start gap-4">
-            <div className="w-10 h-10 rounded-xl bg-[#6C63FF]/15 border border-[#6C63FF]/30 flex items-center justify-center shrink-0">
-              <Zap className="w-5 h-5 text-[#6C63FF]" />
+          <div className="grid grid-cols-3 gap-4 border-t border-[#293532] pt-5 text-[11px] text-[#84928f]">
+            <div>
+              <span className="mb-1 block text-[#e0e8e6]">Workspaces</span>Cloud
+              environments
             </div>
             <div>
-              <h2 className="text-white text-sm font-semibold mb-1">
-                Sub-second Spinup
-              </h2>
-              <p className="text-[#8c8ca5] text-xs leading-relaxed">
-                Warm pre-provisioned Linux kernels resume in &lt;350ms globally.
-              </p>
+              <span className="mb-1 block text-[#e0e8e6]">Projects</span>
+              Repository context
+            </div>
+            <div>
+              <span className="mb-1 block text-[#e0e8e6]">Tooling</span>Code and
+              releases
             </div>
           </div>
-
-          {/* System Footer Links */}
-          <div className="flex items-center justify-between text-xs text-[#5e5e78] font-mono px-2">
-            <span>© Devpulse Cloud Inc.</span>
-            <div className="flex gap-4">
-              <button
-                onClick={() => login("alex@devpulse.dev", "Alex")}
-                className="hover:text-[#a0a0c0] transition-colors"
-              >
-                Privacy
-              </button>
-              <span>/</span>
-              <button
-                onClick={() => login("alex@devpulse.dev", "Alex")}
-                className="hover:text-[#a0a0c0] transition-colors"
-              >
-                Terms
-              </button>
-              <span>/</span>
-              <button
-                onClick={() => login("alex@devpulse.dev", "Alex")}
-                className="hover:text-[#a0a0c0] transition-colors"
-              >
-                System
-              </button>
-            </div>
-          </div>
-        </div>
+        </aside>
       </div>
     </main>
   );

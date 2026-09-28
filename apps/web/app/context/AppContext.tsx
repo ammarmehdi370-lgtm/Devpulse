@@ -407,7 +407,22 @@ const EMPTY_WORKSPACES: WorkspaceDevbox[] = [];
 const EMPTY_DEPLOYMENTS: Deployment[] = [];
 const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
+const WORKSPACES_STORAGE_KEY = "devpulse_workspaces";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+const readStoredWorkspaces = (): WorkspaceDevbox[] => {
+  if (typeof window === "undefined") return EMPTY_WORKSPACES;
+  try {
+    const storedWorkspaces = JSON.parse(
+      window.localStorage.getItem(WORKSPACES_STORAGE_KEY) || "[]",
+    ) as unknown;
+    return Array.isArray(storedWorkspaces)
+      ? (storedWorkspaces as WorkspaceDevbox[])
+      : EMPTY_WORKSPACES;
+  } catch {
+    return EMPTY_WORKSPACES;
+  }
+};
 
 const INITIAL_REPOSITORIES: Repository[] = [
   {
@@ -473,37 +488,6 @@ const INITIAL_REPOSITORIES: Repository[] = [
     isStarred: true,
     deployStatus: "none",
     devboxReady: true,
-  },
-];
-
-const INITIAL_WORKSPACES: WorkspaceDevbox[] = [
-  {
-    id: "ws-1",
-    name: "devpulse-core-staging",
-    repo: "devpulse-core",
-    branch: "staging",
-    template: "Next.js 15 (Turbopack)",
-    status: "Running",
-    uptime: "4h 12m",
-    vCpu: 8,
-    ram: "32 GB ECC",
-    storage: "100 GB NVMe",
-    port: 3000,
-    url: "https://ws-alpha-71.devpulse.dev",
-  },
-  {
-    id: "ws-2",
-    name: "fastapi-neural-agent",
-    repo: "neural-coder-daemon",
-    branch: "main",
-    template: "FastAPI Python (Uvicorn)",
-    status: "Running",
-    uptime: "1h 05m",
-    vCpu: 8,
-    ram: "32 GB ECC",
-    storage: "100 GB NVMe",
-    port: 8000,
-    url: "https://ws-agent-04.devpulse.dev",
   },
 ];
 
@@ -699,7 +683,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [repoFilter, setRepoFilter] = useState("all");
 
   const [workspaces, setWorkspaces] =
-    useState<WorkspaceDevbox[]>(INITIAL_WORKSPACES);
+    useState<WorkspaceDevbox[]>(readStoredWorkspaces);
   const [deployments, setDeployments] =
     useState<Deployment[]>(INITIAL_DEPLOYMENTS);
   const [isDataLoading, setIsDataLoading] = useState(true);
@@ -757,6 +741,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   });
   const [tourStep, setTourStep] = useState(0);
   const TOTAL_TOUR_STEPS = 3;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        WORKSPACES_STORAGE_KEY,
+        JSON.stringify(workspaces),
+      );
+    } catch {
+      // Keep workspace actions usable when browser storage is unavailable.
+    }
+  }, [workspaces]);
 
   const nextTourStep = () => {
     if (tourStep >= TOTAL_TOUR_STEPS - 1) {
