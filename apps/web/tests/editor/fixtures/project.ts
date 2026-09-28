@@ -1,50 +1,103 @@
-import { randomUUID } from "node:crypto";
-import { expect, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 const apiURL = process.env.PLAYWRIGHT_API_URL ?? "http://localhost:4000";
 
+export interface TestFile {
+  id: string;
+  name: string;
+  path: string;
+  content: string;
+}
+
+export interface TestProject {
+  id: string;
+  name: string;
+  files: TestFile[];
+}
+
 export type SeedFile = {
+  name?: string;
   path: string;
   content: string;
   language?: string;
 };
 
-export type TestProject = {
-  id: string;
-  name: string;
-};
+export interface CreateTestProjectOptions {
+  name?: string;
+  files?: SeedFile[];
+}
 
 export async function createTestProject(
   page: Page,
-  seedFiles: SeedFile[] = [
-    {
-      path: "src/index.ts",
-      content: "export const answer: number = 42;\n",
-      language: "typescript",
-    },
-  ],
+  options: CreateTestProjectOptions | SeedFile[] = {},
 ): Promise<TestProject> {
-  const name = `e2e-test-${randomUUID()}`;
+  const projectOptions = Array.isArray(options) ? { files: options } : options;
+  const name = projectOptions.name ?? `e2e-test-${Date.now()}`;
   const projectResponse = await page.request.post(`${apiURL}/v1/projects`, {
-    data: { name },
+    data: { name, template: "blank" },
   });
-  expect(projectResponse.status()).toBe(201);
-  const project = (await projectResponse.json()) as TestProject;
+  const projectBody = (await projectResponse.json()) as {
+    id?: string;
+    project?: { id: string };
+  };
+  const projectId = projectBody.project?.id ?? projectBody.id;
+  if (!projectResponse.ok() || !projectId)
+    throw new Error(`Project creation failed: ${projectResponse.status()}`);
 
-  for (const file of seedFiles) {
+  const filesToCreate = projectOptions.files ?? [
+    {
+      name: "index.ts",
+      path: "index.ts",
+      content: 'console.log("Hello from Devpulse")',
+    },
+    {
+      name: "utils.ts",
+      path: "utils.ts",
+      content: "export const add = (a: number, b: number) => a + b",
+    },
+  ];
+  const files: TestFile[] = [];
+
+  for (const file of filesToCreate) {
+    const path = file.path.replace(/^\/+/, "");
     const fileResponse = await page.request.post(
-      `${apiURL}/v1/projects/${project.id}/files`,
+      `${apiURL}/v1/projects/${projectId}/files`,
       {
-        data: {
-          ...file,
-          language: file.language ?? "plaintext",
-        },
+        data: { ...file, path },
       },
     );
-    expect(fileResponse.status()).toBe(201);
+    const fileBody = (await fileResponse.json()) as {
+      id?: string;
+      file?: { id: string };
+    };
+    const fileId = fileBody.file?.id ?? fileBody.id;
+    if (!fileResponse.ok() || !fileId)
+      throw new Error(`File creation failed: ${fileResponse.status()}`);
+    files.push({
+      id: fileId,
+      name: file.name ?? path.split("/").pop() ?? path,
+      path,
+      content: file.content,
+    });
   }
 
-  return project;
+  return { id: projectId, name, files };
+}
+
+export async function navigateToEditor(
+  page: Page,
+  projectId: string,
+): Promise<void> {
+  await page.goto(`/editor?project=${encodeURIComponent(projectId)}`);
+  await page.waitForFunction(
+    () =>
+      Boolean(document.querySelector(".monaco-editor")) ||
+      Array.from(document.querySelectorAll("h1, h2, h3")).some((heading) =>
+        heading.textContent?.includes("No files yet"),
+      ),
+    undefined,
+    { timeout: 15_000 },
+  );
 }
 
 export async function openProjectInEditor(
@@ -52,21 +105,6 @@ export async function openProjectInEditor(
   project: TestProject,
   beforeNavigate?: () => Promise<void>,
 ): Promise<void> {
-  await page.route("**/v1/projects", async (route) => {
-    if (route.request().method() !== "GET") {
-      await route.continue();
-      return;
-    }
-    await route.fulfill({
-      json: { projects: [{ id: project.id, name: project.name }] },
-    });
-  });
-
   await beforeNavigate?.();
-  await page
-    .getByRole("button", { name: "Editor", exact: true })
-    .first()
-    .click();
-  await expect(page.getByRole("tree", { name: "Project files" })).toBeVisible();
-  await expect(page.getByText(project.name, { exact: true })).toBeVisible();
+  await navigateToEditor(page, project.id);
 }

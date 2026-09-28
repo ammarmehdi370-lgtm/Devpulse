@@ -32,10 +32,11 @@ export default defineConfig({
     {
       command: "pnpm --filter @devpulse/api dev",
       url: `${apiURL}/health/ready`,
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       env: {
         NODE_ENV: "test",
+        API_START_SERVER: "true",
         DATABASE_URL:
           process.env.DATABASE_URL ??
           "postgresql://devpulse:devpulse@localhost:5433/devpulse?schema=public",

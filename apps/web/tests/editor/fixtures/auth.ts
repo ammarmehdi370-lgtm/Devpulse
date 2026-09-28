@@ -2,21 +2,14 @@ import { expect, type Page } from "@playwright/test";
 
 const apiURL = process.env.PLAYWRIGHT_API_URL ?? "http://localhost:4000";
 
-export async function loginAsDev(page: Page): Promise<void> {
-  const magicLink = await page.request.post(`${apiURL}/v1/auth/magic-link`, {
-    data: { email: "demo@devpulse.local" },
-  });
-  expect(magicLink.ok()).toBeTruthy();
-  const { verificationToken } = (await magicLink.json()) as {
-    verificationToken?: string;
-  };
-  expect(verificationToken, "development magic-link token").toBeTruthy();
-
-  const verified = await page.request.post(
-    `${apiURL}/v1/auth/magic-link/verify`,
-    { data: { token: verificationToken } },
+export async function loginAsDev(
+  page: Page,
+  email = "demo@devpulse.local",
+): Promise<void> {
+  const bypass = await page.request.get(
+    `${apiURL}/api/auth/dev-bypass?email=${encodeURIComponent(email)}`,
   );
-  expect(verified.ok()).toBeTruthy();
+  expect(bypass.ok(), "development bypass authentication").toBeTruthy();
 
   await page.goto("/");
   const continueButton = page.getByRole("button", {

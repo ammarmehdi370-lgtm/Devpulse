@@ -64,7 +64,7 @@ async function startApiIfNeeded() {
   console.log("Starting API service for the E2E environment...");
   const child = spawn(pnpm, ["--filter", "@devpulse/api", "dev"], {
     cwd: root,
-    env: { ...process.env, NODE_ENV: "test" },
+    env: { ...process.env, NODE_ENV: "test", API_START_SERVER: "true" },
     detached: !isWindows,
     stdio: "ignore",
     shell: isWindows,
@@ -143,8 +143,12 @@ try {
   console.log("Seeding database...");
   run(pnpm, ["seed"]);
 
-  await startApiIfNeeded();
-  console.log("API is healthy");
+  if (process.env.CI) {
+    console.log("Playwright will start the API and web services in CI.");
+  } else {
+    await startApiIfNeeded();
+    console.log("API is healthy");
+  }
   console.log("\nE2E environment ready. Run tests with: pnpm test:e2e:editor");
 } catch (error) {
   console.error(

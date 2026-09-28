@@ -138,6 +138,39 @@ app.post("/v1/auth/logout", (_request, response) => {
   return response.status(204).send();
 });
 
+if (process.env.NODE_ENV !== "production") {
+  app.get("/api/auth/dev-bypass", async (request, response, next) => {
+    if (process.env.NODE_ENV === "production")
+      return response.status(404).json({ error: "Not found" });
+    const email =
+      (typeof request.query.email === "string" && request.query.email) ||
+      "demo@devpulse.local";
+    try {
+      const user = await db.user.findUnique({
+        where: { email },
+        include: { memberships: { include: { workspace: true } } },
+      });
+      if (!user)
+        return response
+          .status(404)
+          .json({ error: "Dev user not found. Run: pnpm seed" });
+      const accessToken = sessionToken(user.id);
+      setSessionCookie(response, accessToken);
+      response.append(
+        "Set-Cookie",
+        `refresh_token=${accessToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`,
+      );
+      return response.json({
+        user: { id: user.id, email: user.email, name: user.name },
+        accessToken,
+        workspaceId: user.memberships[0]?.workspace.id,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+}
+
 app.get("/v1/me", async (request, response, next) => {
   try {
     const cookie = request.headers.cookie?.match(
@@ -563,9 +596,15 @@ app.get("/v1/projects/:projectId/contributors", async (request, response, next) 
 app.post("/v1/projects", async (request, response, next) => {
   const parsed = z
     .object({
-      name: z.string().trim().min(1).max(120),
+      name: z.string().trim().min(1).max(100),
+      description: z.string().optional(),
       workspaceId: z.string().cuid().optional(),
       defaultBranch: z.string().trim().min(1).max(120).default("main"),
+      template: z
+        .enum(["blank", "nextjs", "fastapi", "rust", "go", "pytorch"])
+        .optional()
+        .default("blank"),
+      isPrivate: z.boolean().optional().default(false),
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
@@ -580,7 +619,10 @@ app.post("/v1/projects", async (request, response, next) => {
     const project = await db.project.create({
       data: {
         name: parsed.data.name,
+        description: parsed.data.description,
         defaultBranch: parsed.data.defaultBranch,
+        template: parsed.data.template,
+        isPrivate: parsed.data.isPrivate,
         workspaceId: workspace.id,
       },
     });
@@ -1605,6 +1647,6 @@ app.delete("/v1/editor/session/:projectId", async (request, response, next) => {
 
 export { app };
 
-if (process.env.NODE_ENV !== "test") {
+if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") {
   app.listen(port, () => console.log(`Devpulse API listening on :${port}`));
 }

@@ -489,7 +489,7 @@ const ConflictModal: React.FC<{ file: EditorFile; projectId: string; mine: strin
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="w-full max-w-lg border border-amber-400/40 bg-[#161624] p-5 shadow-2xl"><h2 id="conflict-title" className="text-sm font-bold text-amber-200">Save Conflict</h2><p className="mt-3 text-xs leading-5 text-slate-300"><strong>{file.name}</strong> was changed by {details.lastEditedBy || "another collaborator"} • {formattedEditedAt}.</p><p className="mt-2 text-xs leading-5 text-slate-400">Your changes and their changes cannot be merged automatically.</p><p className="mt-4 text-xs text-slate-300">Choose what to do:</p><div className="mt-4 flex justify-end gap-2 text-xs"><button onClick={() => void onKeepTheirs()} className="border border-[#332b50] px-3 py-2 text-slate-300">Keep Theirs</button><button disabled={serverContent === null} onClick={() => setCompare(true)} className="border border-[#332b50] px-3 py-2 text-slate-300 disabled:opacity-40">Compare</button><button onClick={() => void onKeepMine()} className="bg-amber-500/20 px-3 py-2 text-amber-100">Keep Mine</button><button onClick={onClose} className="px-3 py-2 text-slate-500">Cancel</button></div>{serverVersion !== null && <div className="mt-3 text-[10px] text-slate-600">Server version: {serverVersion}</div>}</div></div>;
 };
 
-export const EditorWorkbench: React.FC = () => {
+export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ projectId }) => {
   const { user, isEditorProjectOpen, setIsEditorProjectOpen, editorProjectId, isEditorLoading, editorError, loadEditorProject, loadedProjectName, treeFiles, openFiles, activeFileId, setActiveFileId, fileContents, updateFileContent, saveFileContent, saveLocalFileToProject, openFileInEditor, closeFileFromEditor, createNewFile, deleteFile, loadUserLocalFiles, loadSingleLocalFile, isAiDrawerOpen, setIsAiDrawerOpen, applyDiffToActiveFile: applyDiffToActiveFileRemote, setIsCommandPaletteOpen } = useApp();
   const editorRef = useRef<EditorHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -653,7 +653,7 @@ export const EditorWorkbench: React.FC = () => {
 
   useEffect(() => { if (sessionReadyRef.current) queueSessionSave(); }, [openFiles, activeFileId, queueSessionSave]);
 
-  useEffect(() => { if (!editorProjectId && !isOfflineMode) void loadEditorProject(); }, [editorProjectId, isOfflineMode, loadEditorProject]);
+  useEffect(() => { if (isEditorLoading || isOfflineMode) return; if (projectId && editorProjectId !== projectId) void loadEditorProject(projectId); else if (!projectId && !editorProjectId) void loadEditorProject(); }, [projectId, editorProjectId, isEditorLoading, isOfflineMode, loadEditorProject]);
   useEffect(() => {
     if (!editorProjectId) return;
     const client = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4001", { transports: ["websocket"] });

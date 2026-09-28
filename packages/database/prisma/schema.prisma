@@ -92,8 +92,10 @@ model Project {
   id            String        @id @default(cuid())
   workspaceId   String
   name          String
+  template      String        @default("blank")
   defaultBranch String        @default("main")
   description   String        @default("")
+  isPrivate     Boolean       @default(false)
   language      String        @default("TypeScript")
   stars         Int           @default(0)
   forks         Int           @default(0)

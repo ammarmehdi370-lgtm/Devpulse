@@ -171,7 +171,7 @@ interface AppContextType {
   editorProjectId: string;
   isEditorLoading: boolean;
   editorError: string;
-  loadEditorProject: () => Promise<void>;
+  loadEditorProject: (projectId?: string) => Promise<void>;
   loadedProjectName: string;
   setLoadedProjectName: (name: string) => void;
   treeFiles: EditorFile[];
@@ -1088,14 +1088,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     modified: false,
   });
 
-  const loadEditorProject = async () => {
+  const loadEditorProject = async (requestedProjectId?: string) => {
     setIsEditorLoading(true);
     setEditorError("");
     try {
-      const projectResponse = await apiJson<{
-        projects: { id: string; name: string }[];
-      }>("/v1/projects");
-      let project = projectResponse.projects[0];
+      const projectResponse = requestedProjectId
+        ? null
+        : await apiJson<{ projects: { id: string; name: string }[] }>(
+            "/v1/projects",
+          );
+      let project = requestedProjectId
+        ? { id: requestedProjectId, name: "" }
+        : projectResponse?.projects[0];
       if (!project) {
         project = await apiJson<{ id: string; name: string }>("/v1/projects", {
           method: "POST",

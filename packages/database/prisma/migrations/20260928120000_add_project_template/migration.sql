@@ -1,0 +1,3 @@
+ALTER TABLE "Project"
+ADD COLUMN "template" TEXT NOT NULL DEFAULT 'blank',
+ADD COLUMN "isPrivate" BOOLEAN NOT NULL DEFAULT false;
