@@ -36,7 +36,23 @@ test("AI input is disabled at the monthly usage limit", async ({ page }) => {
   await expect(input).toHaveValue("");
 });
 
-test("unauthenticated usage request shows an authentication prompt", async ({ page }) => {
-  await openWithUsage(page, 0, 100, 401);
-  await expect(page.getByText(/re-authenticate|sign in again/i)).toBeVisible();
+test("shows re-auth prompt when usage returns 401", async ({ page }) => {
+  await startEditor(page, undefined, async () => {
+    await page.route("**/v1/ai/usage", (route) =>
+      route.fulfill({
+        status: 401,
+        body: JSON.stringify({ error: "Unauthorized" }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
+
+  await page.keyboard.press("Control+i");
+
+  await expect(page.getByText("Session expired")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in again →" })).toBeVisible();
+
+  const textarea = page.getByPlaceholder("Sign in again to use Devpulse AI");
+  await expect(textarea).toBeVisible();
+  await expect(textarea).toHaveAttribute("aria-disabled", "true");
 });

@@ -19,7 +19,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type SelectionSnapshot = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; selectedText: string };
 type AiCommand = "/fix" | "/explain" | "/test" | "/comment" | "/refactor" | "/optimize";
-type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
+type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; isError?: boolean; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
 type AiConversationSummary = { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: string; preview?: string };
 type AiDbMessage = { id: string; role: "USER" | "ASSISTANT"; content: string; command?: string | null; hasCode?: boolean; codeLanguage?: string | null; appliedToFileId?: string | null; createdAt: string };
 type OutputTab = "terminal" | "output" | "problems" | "history";
@@ -32,7 +32,12 @@ type SessionState = { openFiles: EditorFile[]; activeFile?: EditorFile; scrollPo
 type SessionResponse = { session: { openFileIds: string[]; activeFileId: string | null; scrollPositions?: Record<string, number> | null; cursorPositions?: Record<string, SessionCursorPosition> | null } | null };
 type EditorHandle = { trigger: (source: string, action: string, payload: unknown) => void; getSelection: () => SelectionSnapshot | null };
 type ApplyTarget = "selection" | "cursor" | "file";
-type AiUsage = { used: number; limit: number; plan?: string };
+type UsageState =
+  | { status: "loading" }
+  | { status: "loaded"; used: number; limit: number; plan: string; resetDate: string }
+  | { status: "unauthenticated" }
+  | { status: "error"; message: string }
+  | { status: "unconfigured" };
 type AiApplyRequest = { fileId: string; code: string; language: string; range?: { startLine: number; endLine: number }; aiMessageId?: string; expectedVersion: number; skipCheck?: boolean };
 type AiApplyResponse = { file: { id: string; version: number; sizeBytes: number | null; updatedAt: string }; revisionId: string; linesReplaced: number; appliedFromAI: true };
 type AiApplyError = { error?: string; message?: string; currentVersion?: number };
@@ -192,17 +197,43 @@ const useRecentFiles = (projectId: string, activeFile?: EditorFile) => {
   return recentPaths;
 };
 
-const useAiUsage = (enabled: boolean) => {
-  const [usage, setUsage] = useState<AiUsage | null>(null);
+const useAIUsage = (enabled: boolean) => {
+  const [usage, setUsage] = useState<UsageState>({ status: "loading" });
+  const fetchUsage = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/v1/ai/usage`, { credentials: "include" });
+      if (response.status === 401) { setUsage({ status: "unauthenticated" }); return; }
+      if (response.status === 503) { setUsage({ status: "unconfigured" }); return; }
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { message?: string };
+        setUsage({ status: "error", message: body.message ?? `Failed to load usage (${response.status})` });
+        return;
+      }
+      const data = await response.json() as { used: number; limit: number; plan: string; resetDate: string };
+      setUsage({ status: "loaded", used: data.used, limit: data.limit, plan: data.plan, resetDate: data.resetDate });
+    } catch {
+      setUsage({ status: "error", message: "Could not reach usage service" });
+    }
+  }, []);
   useEffect(() => {
     if (!enabled) return;
-    let cancelled = false;
-    const load = async () => { try { const response = await fetch(`${API_BASE}/v1/ai/usage`, { credentials: "include" }); if (!response.ok) return; const next = await response.json() as AiUsage; if (!cancelled) setUsage(next); } catch { /* usage is optional UI */ } };
-    void load();
-    const timer = window.setInterval(() => void load(), 300000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [enabled]);
-  return usage;
+    void fetchUsage();
+    const timer = window.setInterval(() => void fetchUsage(), 300000);
+    return () => window.clearInterval(timer);
+  }, [enabled, fetchUsage]);
+  useEffect(() => {
+    if (!enabled) return;
+    const handleRetry = () => { void fetchUsage(); };
+    window.addEventListener("devpulse-ai-usage-retry", handleRetry);
+    return () => window.removeEventListener("devpulse-ai-usage-retry", handleRetry);
+  }, [enabled, fetchUsage]);
+  useEffect(() => {
+    if (usage.status !== "unauthenticated") return;
+    const handleFocus = () => { void fetchUsage(); };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [usage.status, fetchUsage]);
+  return { usage, refetch: fetchUsage, setUsage };
 };
 
 export const DEVPULSE_MONACO_THEME = {
@@ -352,7 +383,13 @@ const ApplyPreview: React.FC<{ message: AiMessage; activeFile?: EditorFile; cont
 
 const ContextIndicator: React.FC<{ file?: EditorFile; cursor: CursorPosition; selection: SelectionSnapshot | null; onClear: () => void; enabled: boolean }> = ({ file, cursor, selection, onClear, enabled }) => !enabled ? <div className="mb-2 text-[10px] text-slate-600">Context cleared</div> : <div className="mb-2 border border-[#28243c] bg-[#0d0d16] p-2 text-[10px] text-slate-400"><div className="mb-1 flex items-center justify-between uppercase tracking-wider text-slate-500"><span>Context</span><button onClick={onClear} aria-label="Clear context"><X className="h-3 w-3" /></button></div><div className="text-cyan-300">📄 {file?.name || "No file"} ({languageLabel(file?.language || "plaintext")})</div><div>📍 Line {cursor.lineNumber}, Col {cursor.column}</div>{selection?.selectedText && <div>🔲 {selection.selectedText.split("\n").length} lines selected</div>}<div>🌿 main branch</div></div>;
 
-const UsageMeter: React.FC<{ usage: AiUsage | null }> = ({ usage }) => { if (!usage) return <div className="mt-2 text-[10px] text-slate-600">Loading usage...</div>; const percentage = Math.min(100, Math.round((usage.used / usage.limit) * 100)); const warning = percentage >= 80 && percentage < 100; const exhausted = percentage >= 100; return <div className="mt-2"><div className="flex justify-between text-[10px] text-slate-500"><span>{usage.used.toLocaleString()} / {usage.limit.toLocaleString()} requests this month</span>{exhausted && <span className="text-red-300">Monthly limit reached</span>}</div><div className="mt-1 h-1.5 bg-[#28243c]"><div className={`h-full ${exhausted ? "bg-red-400" : warning ? "bg-amber-400" : "bg-purple-400"}`} style={{ width: `${percentage}%` }} /></div>{warning && <div className="mt-1 text-[10px] text-amber-300">Running low on AI requests</div>}{exhausted && <><div id="ai-limit-message" role="status" className="mt-1 text-[10px] text-red-300">Monthly AI request limit reached. Upgrade to Pro for more requests.</div><button aria-label="Upgrade to Pro to get more AI requests" className="mt-2 text-[10px] text-cyan-300">Upgrade to Pro →</button></>}</div>; };
+const UsageMeter: React.FC<{ usage: UsageState }> = ({ usage }) => {
+  if (usage.status === "loading") return <div className="mt-2"><div className="mb-1 h-2 animate-pulse rounded bg-[var(--dp-surface2)]" /><p className="text-xs text-slate-500">Loading usage...</p></div>;
+  if (usage.status === "unauthenticated") return <div className="flex items-center gap-2 rounded border border-red-400/20 bg-red-500/10 p-2"><AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-300" /><div className="min-w-0 flex-1"><p className="text-xs font-medium text-red-300">Session expired</p><p className="text-[10px] text-slate-500">Your login session has ended</p></div><button onClick={() => { window.location.href = "/login"; }} className="whitespace-nowrap text-[10px] font-medium text-purple-300 hover:text-purple-200">Sign in again →</button></div>;
+  if (usage.status === "unconfigured") return <div className="flex items-center gap-2 rounded border border-amber-400/20 bg-amber-500/10 p-2"><AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300" /><p className="text-xs text-slate-500">AI service not configured</p></div>;
+  if (usage.status === "error") return <div className="flex items-center gap-2"><p className="min-w-0 flex-1 text-[10px] text-slate-500">{usage.message}</p><button onClick={() => window.dispatchEvent(new Event("devpulse-ai-usage-retry"))} className="text-[10px] text-purple-300 hover:text-purple-200">Retry</button></div>;
+  const percentage = Math.min(100, Math.round((usage.used / usage.limit) * 100)); const warning = percentage >= 80 && percentage < 100; const exhausted = percentage >= 100; return <div className="mt-2"><div className="flex justify-between text-[10px] text-slate-500"><span>{usage.used.toLocaleString()} / {usage.limit.toLocaleString()} requests this month</span>{exhausted && <span className="text-red-300">Monthly limit reached</span>}</div><div className="mt-1 h-1.5 bg-[#28243c]"><div className={`h-full ${exhausted ? "bg-red-400" : warning ? "bg-amber-400" : "bg-purple-400"}`} style={{ width: `${percentage}%` }} /></div>{warning && <div className="mt-1 text-[10px] text-amber-300">Running low on AI requests</div>}{exhausted && <><div id="ai-limit-message" role="status" className="mt-1 text-[10px] text-red-300">Monthly AI request limit reached. Upgrade to Pro for more requests.</div><button aria-label="Upgrade to Pro to get more AI requests" className="mt-2 text-[10px] text-cyan-300">Upgrade to Pro →</button></>}</div>;
+};
 
 const PreviousConversations: React.FC<{ conversations: AiConversationSummary[]; onLoad: (conversation: AiConversationSummary) => void }> = ({ conversations, onLoad }) => {
   const [expanded, setExpanded] = useState(false);
@@ -364,7 +401,7 @@ const AiPanel: React.FC<{
   messages: AiMessage[]; input: string; setInput: (value: string) => void;
   onSubmit: (event: React.FormEvent) => void; onClose: () => void;
   onCopy: (message: AiMessage) => void; copiedId: string | null;
-  onApply: (message: AiMessage) => void; activeFile?: EditorFile; activeContent: string; cursor: CursorPosition; selection: SelectionSnapshot | null; isStreaming: boolean; usage: AiUsage | null; usageExhausted: boolean; onClearHistory: () => void; historyCount: number;
+  onApply: (message: AiMessage) => void; activeFile?: EditorFile; activeContent: string; cursor: CursorPosition; selection: SelectionSnapshot | null; isStreaming: boolean; usage: UsageState; usageExhausted: boolean; onClearHistory: () => void; historyCount: number;
   conversation?: AiConversationSummary | null; previousConversations?: AiConversationSummary[]; onLoadConversation?: (conversation: AiConversationSummary) => void; onExportConversation?: () => void;
 }> = ({ messages, input, setInput, onSubmit, onClose, onCopy, copiedId, onApply, activeFile, activeContent, cursor, selection, isStreaming, usage, usageExhausted, onClearHistory, historyCount, conversation, previousConversations = [], onLoadConversation, onExportConversation }) => {
   const [commandIndex, setCommandIndex] = useState(0);
@@ -390,7 +427,7 @@ const AiPanel: React.FC<{
   return <aside className="flex w-[320px] shrink-0 flex-col border-l border-[#28243c] bg-[#11111a]">
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[#28243c] px-3"><Zap className={`h-4 w-4 text-purple-400 ${isStreaming ? "animate-pulse" : ""}`} /><span className="font-bold text-white">Devpulse AI</span><span className="ml-auto text-[9px] text-slate-500">This conversation · {conversation?.messageCount ?? messages.length} messages</span>{conversation && <button onClick={onExportConversation} title="Export conversation" className="text-[10px] text-cyan-300">Export ↓</button>}<button onClick={onClearHistory} title="Clear conversation history" className="text-[10px] text-slate-500">Clear</button><button onClick={onClose} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button></div>
     <PreviousConversations conversations={previousConversations} onLoad={(selected) => onLoadConversation?.(selected)} /><div className="flex-1 space-y-3 overflow-y-auto p-3">{historyCount > 0 && <button onClick={() => setHistoryExpanded((expanded) => !expanded)} className="text-[10px] text-slate-600">[{historyCount} previous messages] {historyExpanded ? "Hide" : "Show"}</button>}{visibleMessages.map((message) => <div key={message.id} className={message.role === "user" ? "ml-6" : "mr-2 border-l-2 border-purple-500 pl-2"}><div className={message.role === "user" ? "bg-[#5B21B6] p-2 text-white" : "bg-[#191923] p-2 text-slate-300"}>{message.role === "user" && message.command && <span className="mb-1 inline-block bg-purple-300/20 px-1.5 py-0.5 text-[9px] text-purple-200">{message.command}</span>}<div className="whitespace-pre-wrap text-[11px] leading-5">{message.text || (message.streaming ? "Thinking..." : "")}{message.streaming && <span className="ml-1 animate-pulse text-purple-300">▌</span>}{message.streaming && !message.text && <ShimmerLines count={3} className="mt-3 w-4/5" />}</div>{message.role === "assistant" && message.text && !message.streaming && <><div className="mt-2 flex items-center justify-between text-[9px] text-slate-500"><span>{extractCodeLanguage(message.text).toUpperCase()}</span><button onClick={() => onCopy(message)}>{copiedId === message.id ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}</button></div><ApplyPreview message={message} activeFile={activeFile} content={activeContent} cursor={cursor} onApply={(nextContent) => { onApply({ ...message, text: nextContent }); }} /></>}</div></div>)}</div>
-    <div className="border-t border-[#28243c] p-3"><ContextIndicator file={activeFile} cursor={cursor} selection={selection} enabled={contextVisible} onClear={() => { setContextVisible(false); window.dispatchEvent(new Event("devpulse-ai-clear-context")); }} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div id="ai-command-listbox" role="listbox" aria-label="AI commands" className="mb-2 border border-[#44346d] bg-[#161624] p-1">{commandMatches.map((command, index) => <button id={`ai-command-${command.value.slice(1)}`} role="option" aria-selected={index === commandIndex} key={command.value} onClick={() => { setInput(`${command.value} `); setCommandMenuDismissed(true); announce(`${command.label} selected — ${command.description}`); }} className={`flex w-full justify-between px-2 py-1 text-left text-[10px] ${index === commandIndex ? "bg-purple-500/20 text-white" : "text-slate-400"}`}><span>{command.label}</span><span>{command.description}</span></button>)}</div>}<form onSubmit={onSubmit} className="flex items-end gap-2"><textarea disabled={isStreaming || usageExhausted} aria-disabled={usageExhausted ? "true" : undefined} aria-describedby={usageExhausted ? "ai-limit-message" : undefined} aria-expanded={Boolean(commandQuery && commandMatches.length && !commandMenuDismissed)} aria-controls="ai-command-listbox" aria-activedescendant={commandQuery && commandMatches.length && !commandMenuDismissed && (commandMatches[commandIndex] || commandMatches[0]) ? `ai-command-${(commandMatches[commandIndex] || commandMatches[0])!.value.slice(1)}` : undefined} value={input} onChange={(event) => { setInput(event.target.value); setCommandIndex(0); setCommandMenuDismissed(false); }} onKeyDown={handleInputKeyDown} rows={2} placeholder="Ask Devpulse AI... /fix" className="min-w-0 flex-1 resize-none border border-[#332b50] bg-[#0d0d16] p-2 text-[11px] text-white outline-none disabled:opacity-50" /> <button disabled={isStreaming || usageExhausted} className="bg-[#7C3AED] p-2 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form><div className="mt-2 text-[9px] text-slate-600">/fix /explain /test /comment /refactor /optimize</div><UsageMeter usage={usage} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div className="sr-only" role="status">{commandMatches.length} commands available. Use arrow keys.</div>}{liveRegion}</div>
+    <div className="border-t border-[#28243c] p-3"><ContextIndicator file={activeFile} cursor={cursor} selection={selection} enabled={contextVisible} onClear={() => { setContextVisible(false); window.dispatchEvent(new Event("devpulse-ai-clear-context")); }} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div id="ai-command-listbox" role="listbox" aria-label="AI commands" className="mb-2 border border-[#44346d] bg-[#161624] p-1">{commandMatches.map((command, index) => <button id={`ai-command-${command.value.slice(1)}`} role="option" aria-selected={index === commandIndex} key={command.value} onClick={() => { setInput(`${command.value} `); setCommandMenuDismissed(true); announce(`${command.label} selected — ${command.description}`); }} className={`flex w-full justify-between px-2 py-1 text-left text-[10px] ${index === commandIndex ? "bg-purple-500/20 text-white" : "text-slate-400"}`}><span>{command.label}</span><span>{command.description}</span></button>)}</div>}<form onSubmit={onSubmit} className="flex items-end gap-2"><textarea disabled={isStreaming || usageExhausted || usage.status === "unauthenticated"} aria-disabled={usageExhausted || usage.status === "unauthenticated" ? "true" : undefined} aria-describedby={usageExhausted ? "ai-limit-message" : undefined} aria-expanded={Boolean(commandQuery && commandMatches.length && !commandMenuDismissed)} aria-controls="ai-command-listbox" aria-activedescendant={commandQuery && commandMatches.length && !commandMenuDismissed && (commandMatches[commandIndex] || commandMatches[0]) ? `ai-command-${(commandMatches[commandIndex] || commandMatches[0])!.value.slice(1)}` : undefined} value={input} onChange={(event) => { setInput(event.target.value); setCommandIndex(0); setCommandMenuDismissed(false); }} onKeyDown={handleInputKeyDown} rows={2} placeholder={usage.status === "unauthenticated" ? "Sign in again to use Devpulse AI" : "Ask Devpulse AI... /fix"} className="min-w-0 flex-1 resize-none border border-[#332b50] bg-[#0d0d16] p-2 text-[11px] text-white outline-none disabled:opacity-50" /> <button disabled={isStreaming || usageExhausted || usage.status === "unauthenticated"} className="bg-[#7C3AED] p-2 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form><div className="mt-2 text-[9px] text-slate-600">/fix /explain /test /comment /refactor /optimize</div><UsageMeter usage={usage} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div className="sr-only" role="status">{commandMatches.length} commands available. Use arrow keys.</div>}{liveRegion}</div>
   </aside>;
 };
 
@@ -557,8 +594,8 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
   const recentFiles = recentPaths.map((path) => treeFiles.find((file) => file.path === path)).filter((file): file is EditorFile => Boolean(file));
   const isLargeFile = Boolean(activeFile && (activeFile.sizeBytes ?? new TextEncoder().encode(activeContent).length) > LARGE_FILE_LIMIT);
   const isLargeFileBlocked = isLargeFile && !largeFileOverrides[activeFile?.id || ""];
-  const usage = useAiUsage(isAiDrawerOpen);
-  const usageExhausted = Boolean(usage && usage.used >= usage.limit);
+  const { usage, setUsage } = useAIUsage(isAiDrawerOpen);
+  const usageExhausted = usage.status === "loaded" && usage.used >= usage.limit;
   const { announce: announceProject, liveRegion: projectLiveRegion } = useAnnounce();
   const loadExecutionHistory = useCallback(async (fileId: string) => {
     setExecutionHistoryLoading(true);
@@ -832,6 +869,11 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     setMessages((previous) => [...previous, { id: assistantId, role: "assistant", text: "", streaming: true, fileId: activeFile?.id, command, selection: messageSelection || undefined }]); setIsStreaming(true);
     try {
       const response = await fetch(`${API_BASE}/v1/ai/chat`, { method: "POST", credentials: "include", signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify({ projectId: editorProjectId, fileId: activeFile?.apiFileId || activeFile?.id, conversationId: conversation?.id, command, context: { projectName: loadedProjectName, selectedCode: contextEnabled ? messageSelection?.selectedText || "" : "", fileName: contextEnabled ? activeFile?.name : undefined, language: contextEnabled ? activeFile?.language : undefined, surroundingCode: contextEnabled ? getSurroundingCode() : "" }, messages: [{ role: "user", content: prompt }] }) });
+      if (response.status === 401) {
+        setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text: "Your session has expired. Please sign in again to continue.", streaming: false, isError: true } : message));
+        setUsage({ status: "unauthenticated" });
+        return;
+      }
       if (!response.ok) throw new Error((await response.text()) || "AI request failed");
       if ((response.headers.get("content-type") || "").includes("text/event-stream") && response.body) {
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
