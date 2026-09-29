@@ -6,18 +6,13 @@ import { useApp } from "../context/AppContext";
 import {
   Hash,
   Send,
-  Paperclip,
-  Smile,
   Users,
-  Pin,
   FileText,
   Download,
   Code2,
-  Heart,
-  ThumbsUp,
   Plus,
-  Search,
   Bot,
+  ChevronDown,
 } from "lucide-react";
 import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
 import { ChatListSkeleton } from "./SkeletonLoaders";
@@ -41,9 +36,17 @@ interface ChatMessage {
   reactions?: { emoji: string; count: number }[];
 }
 
+const channelDescriptions: Record<string, string> = {
+  general: "Team updates and announcements",
+  frontend: "Client-side architecture & review",
+  bugs: "Bug triage and fixes",
+  random: "Off-topic team conversation",
+};
+
 export const TeamChatPage: React.FC = () => {
   const { theme, user } = useApp();
   const [activeChannel, setActiveChannel] = useState("frontend");
+  const [isChannelDetailsOpen, setIsChannelDetailsOpen] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(true);
   const [messageInput, setMessageInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -120,27 +123,26 @@ export const TeamChatPage: React.FC = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col md:flex-row overflow-hidden font-sans">
-      <div className="w-full border-b border-[#1c1c2b] bg-[#0b0b12] p-3 md:hidden">
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden font-sans md:flex-row">
+      <div className="w-full border-b border-[#1c1c2b] bg-[#0b0b12] px-4 py-2 md:hidden">
         <FriendlyHint
           title="Team chat"
           body="Use this space to comment, share updates, and keep the team aligned on the project."
         />
       </div>
-      {/* Column 1: Channels & DMs (Matching Screenshot 5 Left Pane) */}
-      <div className="w-64 bg-[#0d0d16] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 p-3">
-        <div className="space-y-6">
+      <aside className="order-1 flex max-h-52 w-full shrink-0 flex-col overflow-y-auto border-b border-[#1e1e2d] bg-[#0d0d16] p-3 md:order-2 md:max-h-none md:w-60 md:border-b-0 md:border-l md:border-r-0 xl:w-64">
+        <div className="space-y-4 md:space-y-6">
           {/* Workspace Title */}
-          <div className="flex items-center justify-between px-2 py-1.5 bg-[#141422] rounded-xl border border-[#242436]">
+          <div className="flex items-center justify-between rounded-xl border border-[#242436] bg-[#141422] px-3 py-2.5">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-[#6C63FF] flex items-center justify-center font-bold text-xs text-white">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#6C63FF] text-xs font-bold text-white">
                 M
               </div>
               <div>
-                <div className="text-xs font-bold text-white leading-tight">
+                <div className="text-sm font-semibold leading-tight text-white">
                   MyStartup
                 </div>
-                <div className="text-[10px] text-[#0DF5C4] font-mono">
+                <div className="mt-1 flex items-center gap-1.5 font-mono text-[10px] text-[#0DF5C4]">
                   ● PRO Tier · 14 Devs
                 </div>
               </div>
@@ -150,35 +152,197 @@ export const TeamChatPage: React.FC = () => {
 
           {/* Channels */}
           <div>
-            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[#63637e] px-2 mb-1.5">
-              <span>CHANNELS (4)</span>
-              <Plus className="w-3 h-3 text-[#7a7a98] cursor-pointer hover:text-white" />
+            <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-mono uppercase tracking-wider text-[#777791]">
+              <span>Channels · 4</span>
+              <button
+                type="button"
+                aria-label="Add channel"
+                className="rounded p-1 text-[#8d8da5] transition hover:bg-[#20202d] hover:text-white"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="space-y-0.5">
-              {["general", "frontend", "bugs", "random"].map((ch) => (
-                <button
-                  key={ch}
-                  onClick={() => setActiveChannel(ch)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-                    activeChannel === ch
-                      ? "bg-[#1a1a2a] text-white font-medium"
-                      : "text-[#85859e] hover:bg-[#141420] hover:text-[#c4c4dc]"
-                  }`}
-                >
-                  <Hash className="w-3.5 h-3.5 text-[#6c6c88]" />
-                  <span>{ch}</span>
-                </button>
-              ))}
+            <div className="space-y-1">
+              {["general", "frontend", "bugs", "random"].map((ch) => {
+                const isActive = activeChannel === ch;
+                return (
+                  <div key={ch}>
+                    <div
+                      className={`flex items-center rounded-lg text-xs transition-colors ${
+                        isActive
+                          ? "bg-[#1a1a2a] font-medium text-white ring-1 ring-inset ring-[#2c2c40]"
+                          : "text-[#9292a9] hover:bg-[#141420] hover:text-[#e0e0ed]"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveChannel(ch);
+                          setIsChannelDetailsOpen(false);
+                        }}
+                        aria-current={isActive ? "page" : undefined}
+                        className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+                      >
+                        <Hash className="h-3.5 w-3.5 shrink-0 text-[#8b8ba3]" />
+                        <span className="truncate">{ch}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`${isChannelDetailsOpen && isActive ? "Hide" : "Show"} #${ch} details`}
+                        aria-expanded={isActive && isChannelDetailsOpen}
+                        onClick={() => {
+                          setActiveChannel(ch);
+                          setIsChannelDetailsOpen(
+                            isActive ? !isChannelDetailsOpen : true,
+                          );
+                        }}
+                        className="mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#85859e] transition hover:bg-[#29293a] hover:text-white"
+                      >
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${isActive && isChannelDetailsOpen ? "rotate-180" : ""}`}
+                        />
+                      </button>
+                    </div>
+                    {isActive && isChannelDetailsOpen && (
+                      <div className="mx-1 mt-2 space-y-4 rounded-lg border border-[#29293a] bg-[#11111a] p-3 text-[11px]">
+                        <section>
+                          <div className="mb-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-[#85859e]">
+                            <span className="flex items-center gap-1.5">
+                              <Users className="h-3 w-3" /> Team · 14
+                            </span>
+                            <span className="text-[#0DF5C4]">4 active</span>
+                          </div>
+                          <div className="space-y-2">
+                            {[
+                              {
+                                name: "Sarah Lin",
+                                role: "Staff Frontend",
+                                status: "online",
+                              },
+                              {
+                                name: "Marcus Vance",
+                                role: "Infrastructure",
+                                status: "online",
+                              },
+                              {
+                                name: "Elena Rostova",
+                                role: "Systems & Kernels",
+                                status: "idle",
+                              },
+                              {
+                                name: "DevAIX",
+                                role: "Platform Copilot",
+                                status: "bot",
+                              },
+                              {
+                                name: "Devpulse Bot",
+                                role: "Automation CI",
+                                status: "bot",
+                              },
+                            ].map((member) => (
+                              <div
+                                key={member.name}
+                                className="flex min-w-0 items-center justify-between gap-2"
+                              >
+                                <span className="flex min-w-0 items-center gap-2 font-medium text-white">
+                                  <span
+                                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${member.status === "online" ? "bg-[#0DF5C4]" : member.status === "bot" ? "bg-[#6C63FF]" : "bg-[#FF9E64]"}`}
+                                  />
+                                  <span className="truncate">
+                                    {member.name}
+                                  </span>
+                                </span>
+                                <span className="shrink-0 text-right text-[9px] text-[#85859e]">
+                                  {member.role}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                        <section className="border-t border-[#29293a] pt-3">
+                          <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-[#85859e]">
+                            Pinned · 2
+                          </div>
+                          <div className="space-y-2">
+                            <div className="rounded-md border border-[#29293a] bg-[#171722] p-2">
+                              <div className="mb-1 text-[10px] text-[#85859e]">
+                                Sarah Lin · 1d ago
+                              </div>
+                              <div className="leading-relaxed text-[#d8d8e5]">
+                                Frontend deployment guidelines &amp; PR
+                                checklist
+                              </div>
+                            </div>
+                            <div className="rounded-md border border-[#29293a] bg-[#171722] p-2">
+                              <div className="mb-1 text-[10px] text-[#85859e]">
+                                Marcus Vance · 3d ago
+                              </div>
+                              <div className="leading-relaxed text-[#d8d8e5]">
+                                Figma design system release reference
+                              </div>
+                            </div>
+                          </div>
+                        </section>
+                        <section className="border-t border-[#29293a] pt-3">
+                          <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-[#85859e]">
+                            Shared files · 18
+                          </div>
+                          <div className="space-y-2 text-[#b0b0c4]">
+                            {[
+                              {
+                                name: "edge-benchmarks-v2.4.json",
+                                size: "142 KB",
+                                color: "text-[#FF9E64]",
+                              },
+                              {
+                                name: "ui-layout-specs-v3.png",
+                                size: "1.4 MB",
+                                color: "text-[#0DF5C4]",
+                              },
+                              {
+                                name: "tailwind-tokens.json",
+                                size: "26 KB",
+                                color: "text-[#6C63FF]",
+                              },
+                            ].map((file) => (
+                              <div
+                                key={file.name}
+                                className="flex items-center justify-between gap-2"
+                              >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  <FileText
+                                    className={`h-3.5 w-3.5 shrink-0 ${file.color}`}
+                                  />
+                                  <span className="truncate">{file.name}</span>
+                                </span>
+                                <span className="shrink-0 text-[9px] text-[#777791]">
+                                  {file.size}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {/* Direct Messages */}
-          <div>
-            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-[#63637e] px-2 mb-1.5">
-              <span>DIRECT MESSAGES</span>
-              <Plus className="w-3 h-3 text-[#7a7a98] cursor-pointer hover:text-white" />
+          <div className="hidden md:block">
+            <div className="mb-2 flex items-center justify-between px-2 text-[10px] font-mono uppercase tracking-wider text-[#777791]">
+              <span>Direct messages</span>
+              <button
+                type="button"
+                aria-label="Add direct message"
+                className="rounded p-1 text-[#8d8da5] transition hover:bg-[#20202d] hover:text-white"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="space-y-0.5 text-xs">
+            <div className="space-y-1 text-xs">
               {[
                 { name: "Sarah Lin", status: "online" },
                 { name: "Marcus Vance", status: "online" },
@@ -187,13 +351,13 @@ export const TeamChatPage: React.FC = () => {
               ].map((dm) => (
                 <div
                   key={dm.name}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[#85859e] hover:bg-[#141420] hover:text-[#c4c4dc] cursor-pointer"
+                  className="flex items-center justify-between rounded-lg px-3 py-2 text-[#9292a9] transition-colors hover:bg-[#141420] hover:text-[#e0e0ed]"
                 >
                   <div className="flex items-center gap-2">
                     {dm.isBot ? (
-                      <Bot className="w-3.5 h-3.5 text-[#6C63FF]" />
+                      <Bot className="h-3.5 w-3.5 text-[#6C63FF]" />
                     ) : (
-                      <span className="w-2 h-2 rounded-full bg-[#0DF5C4]" />
+                      <span className="h-2 w-2 rounded-full bg-[#0DF5C4]" />
                     )}
                     <span>{dm.name}</span>
                   </div>
@@ -202,252 +366,167 @@ export const TeamChatPage: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+      </aside>
 
-      {/* Column 2: Active Chat Feed (Matching Screenshot 5 Center Pane) */}
-      <div className="flex-1 flex flex-col bg-[#09090e] overflow-hidden">
+      <main className="order-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#09090e] md:order-1">
         {/* Chat Header */}
-        <div className="h-12 border-b border-[#1c1c2b] px-5 flex items-center justify-between shrink-0 bg-[#0c0c13]">
-          <div className="flex items-center gap-2 font-mono text-xs">
-            <Hash className="w-4 h-4 text-[#8c8ca5]" />
-            <strong className="text-white font-bold">{activeChannel}</strong>
-            <span className="text-[#62627e] hidden sm:inline">
-              | Client-side architecture & review
-            </span>
-          </div>
-          <div className="flex items-center gap-3 text-xs text-[#7e7e9a]">
-            <div className="flex items-center gap-1">
-              <Users className="w-3.5 h-3.5" />
-              <span>14</span>
+        <div className="flex min-h-[4.25rem] shrink-0 items-center justify-between border-b border-[#242432] bg-[#0d0d15] px-4 sm:px-7">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Hash className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
+              <h1 className="truncate text-base font-semibold text-white">
+                {activeChannel}
+              </h1>
             </div>
+            <div className="mt-1 truncate pl-6 text-xs text-[#9292a9]">
+              {channelDescriptions[activeChannel]}
+            </div>
+          </div>
+          <div className="ml-3 flex shrink-0 items-center gap-2 rounded-lg border border-[#29293a] bg-[#15151f] px-3 py-2 text-xs text-[#b5b5c8]">
+            <Users className="h-3.5 w-3.5 text-[#8d8da5]" />
+            <span>14</span>
+            <span className="hidden text-[#777791] sm:inline">members</span>
           </div>
         </div>
 
         {/* Messages List */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5 select-text">
-          <div className="text-center">
-            <span className="px-3 py-1 rounded-full bg-[#141420] border border-[#222234] text-[10px] font-mono text-[#6c6c88]">
-              TODAY
+        <div className="flex-1 space-y-5 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 lg:px-8">
+          <div className="flex items-center gap-3" aria-label="Today">
+            <span className="h-px flex-1 bg-[#20202d]" />
+            <span className="rounded-full border border-[#29293a] bg-[#141420] px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-[#a1a1b5]">
+              Today
             </span>
+            <span className="h-px flex-1 bg-[#20202d]" />
           </div>
 
           {isChatLoading ? (
             <ChatListSkeleton />
           ) : messages.length === 0 ? (
-            <div className="py-12 text-center text-xs text-[#8b8ba8]">
+            <div className="py-12 text-center text-sm text-[#8b8ba8]">
               No messages yet. Start the conversation.
             </div>
           ) : (
             messages.map((msg) => (
-              <div key={msg.id} className="flex items-start gap-3 group">
+              <article
+                key={msg.id}
+                className="group mx-auto flex w-full max-w-5xl items-start gap-3 rounded-lg border border-transparent px-3 py-4 transition-colors hover:border-[#242432] hover:bg-[#0f0f17] sm:gap-4 sm:px-4"
+              >
                 <Image
                   src={msg.avatar}
                   alt={msg.sender}
-                  width={36}
-                  height={36}
+                  width={40}
+                  height={40}
                   unoptimized
-                  className="w-9 h-9 rounded-xl object-cover ring-1 ring-[#28283a] shrink-0 mt-0.5"
+                  className="mt-0.5 h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-[#343444]"
                 />
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2 text-xs font-mono">
-                    <span className="font-bold text-white">{msg.sender}</span>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-sm font-semibold text-[#f2f2f7]">
+                      {msg.sender}
+                    </span>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] border ${msg.roleColor}`}
+                      className={`rounded-md border px-2 py-0.5 text-[10px] ${msg.roleColor}`}
                     >
                       {msg.role}
                     </span>
-                    <span className="text-[#656580] text-[11px]">
+                    <span className="font-mono text-[11px] text-[#777791]">
                       {msg.time}
                     </span>
                   </div>
 
-                  <p className="text-xs text-[#d0d0e2] leading-relaxed max-w-3xl">
+                  <p className="max-w-4xl text-sm leading-6 text-[#d3d3e1]">
                     {msg.text}
                   </p>
 
                   {/* Embedded Syntax Code Block */}
                   {msg.hasCode && (
-                    <div className="mt-3 max-w-2xl bg-[#0e0e16] border border-[#222234] rounded-xl overflow-hidden font-mono text-xs">
-                      <div className="bg-[#141420] px-4 py-2 border-b border-[#222234] flex items-center justify-between text-[#8c8ca5] text-[11px]">
-                        <div className="flex items-center gap-2">
-                          <Code2 className="w-3.5 h-3.5 text-[#0DF5C4]" />
-                          <span>{msg.codeFilename}</span>
+                    <details
+                      open
+                      className="group mt-3 max-w-4xl overflow-hidden rounded-lg border border-[#303040] bg-[#0d0d15] shadow-sm shadow-black/20"
+                    >
+                      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-[#141420] px-3 py-2.5 text-[#a0a0b6] transition-colors hover:bg-[#191925] sm:px-4 [&::-webkit-details-marker]:hidden">
+                        <div className="flex min-w-0 items-center gap-2 font-mono text-[11px]">
+                          <Code2 className="h-3.5 w-3.5 shrink-0 text-[#0DF5C4]" />
+                          <span className="truncate">{msg.codeFilename}</span>
                         </div>
-                        <span className="text-[10px] text-[#6b6b85]">
+                        <span className="flex shrink-0 items-center gap-2 text-[10px] text-[#85859e]">
                           TypeScript
+                          <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
                         </span>
-                      </div>
-                      <pre className="p-4 text-[#c4c4dc] overflow-x-auto text-[11px] leading-relaxed">
+                      </summary>
+                      <pre className="max-h-56 overflow-auto overscroll-contain border-t border-[#29293a] p-4 font-mono text-[11px] leading-5 text-[#c4c4dc]">
                         <code>{msg.codeSnippet}</code>
                       </pre>
-                    </div>
+                    </details>
                   )}
 
                   {/* Attachment */}
                   {msg.attachment && (
-                    <div className="mt-2 max-w-sm bg-[#12121c] border border-[#222234] hover:border-[#2f2f45] rounded-xl p-3 flex items-center justify-between cursor-pointer transition-colors">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-[#FF9E64]/15 border border-[#FF9E64]/30 flex items-center justify-center text-[#FF9E64]">
-                          <FileText className="w-4 h-4" />
+                    <div className="mt-2 flex max-w-md items-center justify-between gap-3 rounded-lg border border-[#303040] bg-[#13131d] p-3 transition-colors hover:border-[#454558]">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#FF9E64]/30 bg-[#FF9E64]/15 text-[#FF9E64]">
+                          <FileText className="h-4 w-4" />
                         </div>
-                        <div className="font-mono text-xs">
-                          <div className="text-white font-medium">
+                        <div className="min-w-0 font-mono text-xs">
+                          <div className="truncate font-medium text-white">
                             {msg.attachment.name}
                           </div>
-                          <div className="text-[10px] text-[#71718c]">
+                          <div className="mt-1 text-[10px] text-[#85859e]">
                             {msg.attachment.size} · {msg.attachment.sub}
                           </div>
                         </div>
                       </div>
-                      <Download className="w-4 h-4 text-[#7e7e9a] hover:text-white" />
+                      <Download className="h-4 w-4 shrink-0 text-[#8f8fa8]" />
                     </div>
                   )}
 
                   {/* Reactions */}
                   {msg.reactions && msg.reactions.length > 0 && (
-                    <div className="flex items-center gap-1.5 pt-1">
-                      {msg.reactions.map((r, i) => (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      {msg.reactions.map((reaction, index) => (
                         <span
-                          key={i}
-                          className="px-2 py-0.5 rounded-lg bg-[#151522] border border-[#242436] text-xs flex items-center gap-1 text-[#a0a0ba]"
+                          key={index}
+                          className="flex items-center gap-1.5 rounded-full border border-[#29293a] bg-[#151522] px-2.5 py-1 text-xs text-[#b2b2c6]"
                         >
-                          <span>{r.emoji}</span>
-                          <span className="text-[11px] font-mono">
-                            {r.count}
+                          <span>{reaction.emoji}</span>
+                          <span className="font-mono text-[10px]">
+                            {reaction.count}
                           </span>
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
-              </div>
+              </article>
             ))
           )}
         </div>
 
         {/* Chat Input */}
-        <div className="p-4 border-t border-[#1c1c2b] bg-[#0c0c13]">
-          <form onSubmit={handleSendMessage} className="relative">
-            <input
-              type="text"
-              value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
-              placeholder={`Message #${activeChannel} (Type @ to mention, / for commands, ESC for actions...)`}
-              className="w-full pl-4 pr-24 py-3 bg-[#13131e] border border-[#242436] rounded-xl text-xs text-white placeholder-[#585874] focus:outline-none focus:border-[#6C63FF]"
-            />
-            <div className="absolute right-2 top-2 flex items-center gap-1.5">
+        <div className="shrink-0 border-t border-[#1c1c2b] bg-[#0c0c13] px-3 py-3 sm:px-6 sm:py-4">
+          <form onSubmit={handleSendMessage} className="mx-auto max-w-5xl">
+        <div className="flex items-center gap-2 rounded-lg border border-[#343444] bg-[#14141e] p-1.5 transition-colors focus-within:border-[#0DF5C4]/70 focus-within:shadow-[0_0_0_3px_rgba(13,245,196,0.06)]">
+              <input
+                type="text"
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                placeholder={`Message #${activeChannel}...`}
+                aria-label={`Message #${activeChannel}`}
+                className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-[#777791] focus:outline-none"
+              />
               <button
                 type="submit"
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-[#09090e] flex items-center gap-1 transition-transform active:scale-95"
+                disabled={!messageInput.trim()}
+                className="flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold text-[#09090e] transition-opacity active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 sm:px-4"
                 style={{ backgroundColor: theme.primary }}
               >
                 <span>Send</span>
-                <Send className="w-3 h-3 text-[#09090e]" />
+                <Send className="h-3.5 w-3.5" />
               </button>
             </div>
           </form>
         </div>
-      </div>
-
-      {/* Column 3: Channel Details & Pinned (Matching Screenshot 5 Right Pane) */}
-      <div className="w-72 bg-[#0c0c14] border-l border-[#1e1e2d] hidden xl:flex flex-col justify-between p-4 font-mono text-xs overflow-y-auto">
-        <div className="space-y-6">
-          <div className="flex items-center justify-between pb-2 border-b border-[#1c1c2a]">
-            <span className="text-white font-bold">Channel Details</span>
-            <span className="text-[#656580] cursor-pointer">✕</span>
-          </div>
-
-          {/* Team Members */}
-          <div>
-            <div className="flex items-center justify-between text-[10px] text-[#63637e] uppercase tracking-wider mb-2">
-              <span>TEAM MEMBERS (14)</span>
-              <span className="text-[#0DF5C4]">4 active</span>
-            </div>
-            <div className="space-y-2 text-xs">
-              {[
-                { name: "Sarah Lin", role: "Staff Frontend", status: "online" },
-                {
-                  name: "Marcus Vance",
-                  role: "Infrastructure",
-                  status: "online",
-                },
-                {
-                  name: "Elena Rostova",
-                  role: "Systems & Kernels",
-                  status: "idle",
-                },
-                { name: "DevAIX", role: "Platform Copilot", status: "bot" },
-                { name: "Devpulse Bot", role: "Automation CI", status: "bot" },
-              ].map((m) => (
-                <div key={m.name} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full ${m.status === "online" ? "bg-[#0DF5C4]" : m.status === "bot" ? "bg-[#6C63FF]" : "bg-[#FF9E64]"}`}
-                    />
-                    <span className="text-white font-medium">{m.name}</span>
-                  </div>
-                  <span className="text-[10px] text-[#6c6c88]">{m.role}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Pinned Messages */}
-          <div>
-            <div className="text-[10px] text-[#63637e] uppercase tracking-wider mb-2">
-              PINNED MESSAGES (2)
-            </div>
-            <div className="space-y-2 text-[11px]">
-              <div className="p-2.5 rounded-lg bg-[#141420] border border-[#222232] space-y-1">
-                <div className="text-[#757592] text-[10px]">
-                  Sarah Lin · 1d ago
-                </div>
-                <div className="text-[#cfcfdf] font-medium">
-                  Frontend deployment guidelines & PR checklist
-                </div>
-              </div>
-              <div className="p-2.5 rounded-lg bg-[#141420] border border-[#222232] space-y-1">
-                <div className="text-[#757592] text-[10px]">
-                  Marcus Vance · 3d ago
-                </div>
-                <div className="text-[#cfcfdf] font-medium">
-                  Figma design system release reference
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Files Shared */}
-          <div>
-            <div className="text-[10px] text-[#63637e] uppercase tracking-wider mb-2">
-              FILES SHARED (18)
-            </div>
-            <div className="space-y-1.5 text-[11px] text-[#a0a0be]">
-              <div className="flex items-center justify-between p-1.5 hover:bg-[#141420] rounded-lg">
-                <div className="flex items-center gap-1.5 truncate">
-                  <FileText className="w-3.5 h-3.5 text-[#FF9E64]" />
-                  <span className="truncate">edge-benchmarks-v2.4.json</span>
-                </div>
-                <span className="text-[10px] text-[#6c6c88]">142 KB</span>
-              </div>
-              <div className="flex items-center justify-between p-1.5 hover:bg-[#141420] rounded-lg">
-                <div className="flex items-center gap-1.5 truncate">
-                  <FileText className="w-3.5 h-3.5 text-[#0DF5C4]" />
-                  <span className="truncate">ui-layout-specs-v3.png</span>
-                </div>
-                <span className="text-[10px] text-[#6c6c88]">1.4 MB</span>
-              </div>
-              <div className="flex items-center justify-between p-1.5 hover:bg-[#141420] rounded-lg">
-                <div className="flex items-center gap-1.5 truncate">
-                  <FileText className="w-3.5 h-3.5 text-[#6C63FF]" />
-                  <span className="truncate">tailwind-tokens.json</span>
-                </div>
-                <span className="text-[10px] text-[#6c6c88]">26 KB</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      </main>
     </div>
   );
 };

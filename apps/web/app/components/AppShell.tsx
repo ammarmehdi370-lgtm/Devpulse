@@ -75,7 +75,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     { id: "repositories", label: "Your Code Projects", icon: GitFork },
     { id: "editor", label: "Code Editor", icon: Code2 },
     { id: "deployments", label: "Live Releases", icon: Rocket },
-    { id: "remote-control", label: "Remote Help", icon: Monitor },
+    { id: "remote-control", label: "Pulse Pilot", icon: Monitor },
     { id: "ai-studio", label: "AI Assistant", icon: Sparkles },
     { id: "pricing", label: "Plans & Billing", icon: CreditCard },
     { id: "chat", label: "Team Chat", icon: MessageSquare },
@@ -337,7 +337,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             <nav className="space-y-1" aria-label="Mobile platform navigation">
               {platformNavItems.map((item) => {
                 const Icon = item.icon;
-                const isActive = page === item.id;
+                const isActive =
+                  page === item.id ||
+                  (item.id === "pricing" && page === "custom-plan");
                 return (
                   <button
                     key={item.id}
@@ -539,7 +541,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                   <nav className="space-y-1">
                     {platformNavItems.map((item) => {
                       const Icon = item.icon;
-                      const isActive = page === item.id;
+                      const isActive =
+                        page === item.id ||
+                        (item.id === "pricing" && page === "custom-plan");
                       return (
                         <button
                           key={item.id}

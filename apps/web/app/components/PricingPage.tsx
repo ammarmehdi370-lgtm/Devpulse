@@ -9,13 +9,11 @@ import {
   ShieldCheck,
   Lock,
   Globe,
-  Cpu,
-  Server,
-  HelpCircle,
   ChevronDown,
   ChevronUp,
   Sparkles,
   Users,
+  SlidersHorizontal,
 } from "lucide-react";
 import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
 
@@ -97,7 +95,7 @@ export const PricingPage: React.FC = () => {
       </div>
 
       {/* 3 Pricing Tier Cards Grid (Pixel-Perfect to Screenshot 4) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+      <div className="grid grid-cols-1 items-stretch gap-5 md:grid-cols-2 2xl:grid-cols-4">
         {/* Tier 1: Free */}
         <div className="bg-[#111119] border border-[#20202e] rounded-3xl p-7 flex flex-col justify-between shadow-xl space-y-6">
           <div className="space-y-4">
@@ -230,6 +228,40 @@ export const PricingPage: React.FC = () => {
           >
             <Zap className="w-4 h-4 fill-current text-[#09090e]" />
             <span>Start Free Trial ⚡</span>
+          </button>
+        </div>
+
+        {/* Customizable plan */}
+        <div className="relative flex flex-col justify-between space-y-6 overflow-hidden rounded-3xl border border-[#0DF5C4]/30 bg-[#101b1a] p-7 shadow-xl">
+          <div className="space-y-5">
+            <div className="flex items-center justify-between text-[11px] font-mono text-[#8caaa4]">
+              <span>FLEXIBLE / 04</span>
+              <span className="rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2.5 py-1 text-[9px] font-bold text-[#0DF5C4]">
+                YOUR TOOLKIT
+              </span>
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 text-[#0DF5C4]">
+              <SlidersHorizontal className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold text-white">Customizable plan</h3>
+              <p className="mt-1 text-xs leading-5 text-[#a2b4b0]">
+                Only pay for the tools your workflow needs. Build a plan one feature at a time.
+              </p>
+            </div>
+            <div className="border-t border-[#25413c] pt-4">
+              <div className="font-mono text-3xl font-bold text-white">Your mix</div>
+              <p className="mt-1 text-[11px] leading-5 text-[#94a7a2]">
+                Choose AI Assistant, Pulse Pilot, Team Chat, workspaces, and more.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setPage("custom-plan")}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#0DF5C4]/40 bg-[#0DF5C4] px-4 py-3 text-xs font-bold text-[#08110f] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4] focus-visible:ring-offset-2 focus-visible:ring-offset-[#101b1a]"
+          >
+            <span>Build your plan</span>
+            <ArrowRight className="h-4 w-4" />
           </button>
         </div>
 

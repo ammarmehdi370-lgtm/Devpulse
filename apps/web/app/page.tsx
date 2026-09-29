@@ -10,6 +10,7 @@ import { WorkspacesPage } from "./components/WorkspacesPage";
 import { DeploymentsPage } from "./components/DeploymentsPage";
 import { TeamChatPage } from "./components/TeamChatPage";
 import { PricingPage } from "./components/PricingPage";
+import { CustomPlanPage } from "./components/CustomPlanPage";
 import { AppShell } from "./components/AppShell";
 import { CloudCoreDashboard } from "./components/CloudCoreDashboard";
 import { CommandPalette } from "./components/CommandPalette";
@@ -99,6 +100,7 @@ function MainAppContent() {
       {page === "remote-control" && <RemoteControlPage />}
       {page === "ai-studio" && <FullScreenAiPage />}
       {page === "pricing" && <PricingPage />}
+      {page === "custom-plan" && <CustomPlanPage />}
       {page === "cloud-core" && <CloudCoreDashboard />}
     </AppShell>
   );

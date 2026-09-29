@@ -17,15 +17,11 @@ import {
   Radio,
   Check,
   X,
-  Wifi,
-  Share2,
   Monitor,
   Clock,
   Users,
-  Activity,
-  Maximize2,
+  Code2,
 } from "lucide-react";
-import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
 
 export const RemoteControlPage: React.FC = () => {
   const {
@@ -112,138 +108,122 @@ export const RemoteControlPage: React.FC = () => {
   };
 
   const handleStopSession = () => {
-    if (confirm("Stop collaborative remote programming session?")) {
+    if (confirm("End this Pulse Pilot session?")) {
       setPage("editor");
     }
   };
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-[#07070c] text-white overflow-hidden font-sans select-none">
-      <div className="p-3 border-b border-[#1c1c2b] bg-[#0d0d15]">
-        <FriendlyHint
-          title="Remote help session"
-          body="This is a live collaboration view. You can guide someone else through a workspace, share your screen, and control the code together in real time."
-        />
-      </div>
-      {/* Top Remote Control Status Bar (Pixel-Perfect to Screenshot 2) */}
-      <div className="h-12 bg-[#0c0c14] border-b border-[#1c1c2b] px-4 flex items-center justify-between shrink-0 font-mono text-xs z-30">
-        {/* Left: Brand + Controlling Info */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-6 h-6 rounded-lg flex items-center justify-center text-[#09090e] font-bold text-xs"
-              style={{ backgroundColor: theme.primary }}
-            >
-              <Layers className="w-3.5 h-3.5" />
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden bg-[#08090f] font-sans text-white">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-[#242432] bg-[#101018] px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 text-[#0DF5C4]">
+            <Radio className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h1 className="text-sm font-semibold text-white sm:text-base">Pulse Pilot</h1>
+              <span className="flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2 py-0.5 font-mono text-[9px] font-semibold text-[#0DF5C4]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" /> LIVE SESSION
+              </span>
             </div>
-            <span className="font-bold text-white hidden sm:inline">
-              Devpulse
-            </span>
+            <p className="mt-0.5 truncate text-[11px] text-[#9292a9] sm:text-xs">
+              Pair-programming in Ahmed&apos;s workspace
+            </p>
           </div>
+        </div>
+        <span className="hidden text-xs text-[#85859e] lg:block">Edits sync in real time</span>
+      </header>
 
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#f43f5e]/15 border border-[#f43f5e]/30 text-[#f43f5e] text-[10px] font-bold">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#f43f5e] animate-ping" />
-            LIVE
+      <div className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#242432] bg-[#0d0d14] px-4 py-2.5 sm:px-6">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#09090e]" style={{ backgroundColor: theme.primary }}>
+              <Layers className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="truncate text-sm font-semibold text-white">Ahmed&apos;s Workspace</span>
+                <span className="flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2 py-0.5 font-mono text-[9px] font-bold text-[#0DF5C4]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" /> LIVE
+                </span>
+              </div>
+              <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-[#8e8ea6]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" />
+                us-east · {latency}ms · peer-to-peer
+              </div>
+            </div>
           </div>
-
-          <div className="text-[#a4a4c6] font-medium hidden md:inline">
-            Controlling:{" "}
-            <strong className="text-white">Ahmed&apos;s Workspace</strong>
-          </div>
-
-          <div className="flex items-center gap-1.5 text-[11px] text-[#0DF5C4]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4]" />
-            <span>us-east · {latency}ms latency · p2p direct</span>
+          <div className="flex items-center gap-2.5 rounded-lg border border-[#29293a] bg-[#15151f] px-2.5 py-1.5">
+            <div className="flex -space-x-2" aria-hidden="true">
+              <Image
+                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces"
+                alt=""
+                width={24}
+                height={24}
+                unoptimized
+                className="h-6 w-6 rounded-full object-cover ring-2 ring-[#15151f]"
+              />
+              <Image
+                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces"
+                alt=""
+                width={24}
+                height={24}
+                unoptimized
+                className="h-6 w-6 rounded-full object-cover ring-2 ring-[#15151f]"
+              />
+            </div>
+            <div className="leading-tight">
+              <div className="text-[11px] font-medium text-[#d5d5e2]">2 collaborators</div>
+              <div className="mt-0.5 text-[9px] text-[#85859e]">Ahmed · you</div>
+            </div>
           </div>
         </div>
 
-        {/* Right: Timer, Participants, Stop Button */}
-        <div className="flex items-center gap-4">
-          <div className="px-2.5 py-1 rounded-lg bg-[#141420] border border-[#242436] text-[#0DF5C4] font-bold text-xs flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5" />
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-lg border border-[#29293a] bg-[#15151f] px-3 py-2 font-mono text-xs font-semibold text-[#0DF5C4]">
+            <Clock className="h-3.5 w-3.5" />
             <span>{formatTime(seconds)}</span>
           </div>
-
-          {/* Ahmed (Host) */}
-          <div className="flex items-center gap-2 pl-2 border-l border-[#1f1f2e]">
-            <Image
-              src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces"
-              alt="Ahmed"
-              width={24}
-              height={24}
-              unoptimized
-              className="w-6 h-6 rounded-full object-cover ring-1 ring-[#FF9E64]"
-            />
-            <div className="hidden lg:block text-left text-[10px] leading-tight">
-              <div className="text-white font-semibold">Ahmed Al-Mansoor</div>
-              <div className="text-[#FF9E64]">Host</div>
-            </div>
-          </div>
-
-          {/* You (Alex) */}
-          <div className="flex items-center gap-2">
-            <Image
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces"
-              alt="Alex"
-              width={24}
-              height={24}
-              unoptimized
-              className="w-6 h-6 rounded-full object-cover ring-1 ring-[#6C63FF]"
-            />
-            <div className="hidden lg:block text-left text-[10px] leading-tight">
-              <div className="text-white font-semibold">You (Alex)</div>
-              <div className="text-[#6C63FF]">Controlling</div>
-            </div>
-          </div>
-
-          {/* Stop Session Button */}
           <button
             onClick={handleStopSession}
-            className="px-3 py-1 rounded-lg bg-[#f43f5e]/15 hover:bg-[#f43f5e]/25 border border-[#f43f5e]/40 text-[#f43f5e] font-semibold text-xs flex items-center gap-1 transition-colors"
+            className="flex items-center gap-2 rounded-lg border border-[#f43f5e]/35 bg-[#f43f5e]/10 px-3 py-2 text-xs font-semibold text-[#fb7185] transition-colors hover:bg-[#f43f5e]/20"
           >
-            <span>■</span>
-            <span>Stop Session</span>
+            <X className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">End session</span>
           </button>
         </div>
       </div>
 
-      {/* Dual Split-Screen Collaborative Workspace (Pixel-Perfect to Screenshot 2) */}
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[#1c1c2b] overflow-hidden">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 overflow-hidden bg-[#08090f] md:grid-cols-2 md:grid-rows-1 md:divide-x md:divide-[#242432]">
         {/* Left Pane: YOUR VIEW (Alex) */}
-        <div className="flex flex-col bg-[#09090f] overflow-hidden">
+        <section className="flex min-h-0 flex-col overflow-hidden bg-[#09090f]">
           {/* Sub-Header */}
-          <div className="h-9 bg-[#0e0e16] border-b border-[#1c1c2b] px-3 flex items-center justify-between font-mono text-xs shrink-0">
-            <div className="flex items-center gap-3">
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#6C63FF]/20 text-[#c5c1ff] border border-[#6C63FF]/40">
-                YOUR VIEW
+          <div className="flex min-h-11 shrink-0 items-center justify-between gap-3 border-b border-[#242432] bg-[#11111a] px-3 sm:px-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="shrink-0 text-xs font-semibold text-[#d8d8e8]">
+                Your editor
               </span>
 
-              {/* Tabs */}
-              <div className="flex items-center gap-1">
-                <span className="px-2 py-1 bg-[#141422] rounded text-white font-medium flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
+                <span className="flex shrink-0 items-center gap-1.5 rounded-md border border-[#303040] bg-[#191923] px-2.5 py-1.5 font-mono text-[11px] font-medium text-white">
                   <span className="text-[#FF9E64]">JS</span> index.js
-                </span>
-                <span className="px-2 py-1 text-[#6e6e88] hover:text-white cursor-pointer">
-                  utils.js
-                </span>
-                <span className="px-2 py-1 text-[#6e6e88] hover:text-white cursor-pointer">
-                  package.json
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 text-[11px]">
-              <span className="text-[#0DF5C4] flex items-center gap-1 font-semibold">
-                <Check className="w-3 h-3" /> Read & Write
+            <div className="flex shrink-0 items-center gap-2 text-[10px] sm:gap-3 sm:text-[11px]">
+              <span className="flex items-center gap-1 text-[#0DF5C4]">
+                <Check className="h-3 w-3" /> <span className="hidden sm:inline">Read &amp; write</span>
               </span>
-              <span className="text-[#8c8ca5]">Sync: 8ms lag</span>
+              <span className="hidden text-[#8c8ca5] sm:inline">Synced · 8ms</span>
             </div>
           </div>
 
           {/* Interactive Code Editor (Alex) */}
-          <div className="flex-1 flex overflow-hidden font-mono text-xs relative">
+          <div className="relative flex min-h-0 flex-1 overflow-hidden font-mono text-xs">
             {/* Line Numbers */}
-            <div className="w-10 bg-[#09090f] py-4 pr-2 text-right text-[#45455c] select-none border-r border-[#171722] shrink-0 space-y-1">
+            <div className="w-10 shrink-0 space-y-1 border-r border-[#20202b] bg-[#0b0b12] py-4 pr-2 text-right text-[#55556c] select-none">
               {remoteCode.split("\n").map((_, i) => (
                 <div
                   key={i}
@@ -255,10 +235,16 @@ export const RemoteControlPage: React.FC = () => {
             </div>
 
             {/* Editable Content */}
-            <div className="flex-1 relative overflow-auto p-4 bg-[#09090f]">
+            <div className="relative flex-1 overflow-auto bg-[#09090f] p-4 sm:p-5">
               {!remoteCode && (
-                <div className="absolute inset-4 z-0 pointer-events-none text-[#63637e]">
-                  Waiting for Ahmed to open a file...
+                <div className="pointer-events-none absolute left-5 top-6 z-0 max-w-xs sm:left-7 sm:top-8">
+                  <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-[#6C63FF]/25 bg-[#6C63FF]/10 text-[#aaa4ff]">
+                    <Code2 className="h-5 w-5" />
+                  </div>
+                  <div className="text-sm font-medium text-[#d0d0df]">Your editor is ready</div>
+                  <p className="mt-1.5 text-xs leading-5 text-[#77778f]">
+                    When Ahmed opens a file, it will appear here for both of you to edit.
+                  </p>
                 </div>
               )}
               <textarea
@@ -271,52 +257,47 @@ export const RemoteControlPage: React.FC = () => {
                   )
                 }
                 spellCheck={false}
-                className="relative z-10 w-full h-full bg-transparent text-[#d8d8e8] font-mono text-xs leading-5 resize-none focus:outline-none selection:bg-[#6C63FF]/30 select-text"
+                aria-label="Your shared workspace editor"
+                className="relative z-10 h-full w-full resize-none bg-transparent font-mono text-xs leading-6 text-[#d8d8e8] selection:bg-[#6C63FF]/30 focus:outline-none select-text"
               />
-
-              {/* Active User Cursor Tag overlay on line 16 */}
-              <div className="absolute top-[310px] right-6 px-2 py-0.5 rounded bg-[#6C63FF] text-white text-[10px] font-mono font-bold shadow-md pointer-events-none">
-                You (Alex)
-              </div>
             </div>
           </div>
-        </div>
+        </section>
 
         {/* Right Pane: AHMED'S SCREEN */}
-        <div className="flex flex-col bg-[#09090f] overflow-hidden">
+        <section className="flex min-h-0 flex-col overflow-hidden bg-[#09090f]">
           {/* Sub-Header */}
-          <div className="h-9 bg-[#0e0e16] border-b border-[#1c1c2b] px-3 flex items-center justify-between font-mono text-xs shrink-0">
-            <div className="flex items-center gap-3">
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#FF9E64]/20 text-[#FF9E64] border border-[#FF9E64]/40">
-                AHMED&apos;S SCREEN
+          <div className="flex min-h-11 shrink-0 items-center justify-between gap-3 border-b border-[#242432] bg-[#11111a] px-3 sm:px-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="shrink-0 text-xs font-semibold text-[#d8d8e8]">
+                Ahmed&apos;s screen
               </span>
 
-              {/* Tabs */}
-              <div className="flex items-center gap-1">
-                <span className="px-2 py-1 bg-[#141422] rounded text-white font-medium flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+                <span className="flex shrink-0 items-center gap-1 rounded-md border border-[#303040] bg-[#191923] px-2.5 py-1.5 font-mono text-[11px] font-medium text-white">
                   <span className="text-[#FF9E64]">JS</span> index.js
                 </span>
               </div>
 
               {/* Typing indicator */}
               {ahmedTyping && (
-                <div className="flex items-center gap-1.5 text-[11px] text-[#FF9E64]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#FF9E64] animate-ping" />
-                  <span>Ahmed is typing...</span>
+                <div className="flex shrink-0 items-center gap-1.5 text-[10px] text-[#FFAE80] sm:text-[11px]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#FF9E64]" />
+                  <span className="hidden sm:inline">Ahmed is typing</span>
                 </div>
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-[11px] text-[#787896]">
-              <Monitor className="w-3.5 h-3.5" />
-              <span>Remote Host Display · Mirroring · 60 FPS</span>
+            <div className="hidden shrink-0 items-center gap-2 font-mono text-[10px] text-[#85859e] lg:flex">
+              <Monitor className="h-3.5 w-3.5" />
+              <span>Mirroring · 60 FPS</span>
             </div>
           </div>
 
           {/* Mirrored Code Display */}
-          <div className="flex-1 flex overflow-hidden font-mono text-xs relative opacity-95">
+          <div className="relative flex min-h-0 flex-1 overflow-hidden font-mono text-xs">
             {/* Line Numbers */}
-            <div className="w-10 bg-[#09090f] py-4 pr-2 text-right text-[#45455c] select-none border-r border-[#171722] shrink-0 space-y-1">
+            <div className="w-10 shrink-0 space-y-1 border-r border-[#20202b] bg-[#0b0b12] py-4 pr-2 text-right text-[#55556c] select-none">
               {remoteCode.split("\n").map((_, i) => (
                 <div
                   key={i}
@@ -328,36 +309,39 @@ export const RemoteControlPage: React.FC = () => {
             </div>
 
             {/* Read-Only Mirrored Screen */}
-            <div className="flex-1 relative overflow-auto p-4 bg-[#09090f]">
+            <div className="relative flex-1 overflow-auto bg-[#09090f] p-4 sm:p-5">
               {!remoteCode ? (
-                <div className="text-[#63637e]">
-                  Waiting for Ahmed to open a file...
+                <div className="max-w-xs">
+                  <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-[#FF9E64]/25 bg-[#FF9E64]/10 text-[#FFAE80]">
+                    <Monitor className="h-5 w-5" />
+                  </div>
+                  <div className="text-sm font-medium text-[#d0d0df]">Waiting for Ahmed&apos;s screen</div>
+                  <p className="mt-1.5 text-xs leading-5 text-[#77778f]">
+                    The host&apos;s open file and cursor will show here as soon as they connect.
+                  </p>
                 </div>
               ) : (
-                <pre className="text-[#d8d8e8] font-mono text-xs leading-5 select-text">
+                <pre className="font-mono text-xs leading-6 text-[#d8d8e8] select-text">
                   <code>{remoteCode}</code>
                 </pre>
               )}
 
-              {/* Ahmed's Live Cursor Highlight */}
-              <div className="absolute top-[310px] right-6 px-2 py-0.5 rounded bg-[#FF9E64] text-[#09090e] text-[10px] font-mono font-bold shadow-md pointer-events-none">
-                Ahmed
-              </div>
             </div>
           </div>
-        </div>
+        </section>
       </div>
 
-      {/* Bottom Collaboration Toolbar (Pixel-Perfect to Screenshot 2) */}
-      <div className="h-12 bg-[#0c0c14] border-t border-[#1c1c2b] px-4 flex items-center justify-between shrink-0 font-mono text-xs z-30">
+      <footer className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[#242432] bg-[#101018] px-3 py-2 sm:px-5">
         {/* Left Controls: Mic, Camera, Release Control */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
+            type="button"
+            aria-label={isRemoteMuted ? "Turn microphone on" : "Mute microphone"}
             onClick={() => setIsRemoteMuted((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition-colors ${
+            className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs transition-colors ${
               isRemoteMuted
-                ? "bg-[#181824] border-[#252536] text-[#8e8ea6]"
-                : "bg-[#0DF5C4]/15 border-[#0DF5C4]/40 text-[#0DF5C4]"
+                ? "border-[#343444] bg-[#191923] text-[#b0b0c4]"
+                : "border-[#0DF5C4]/30 bg-[#0DF5C4]/10 text-[#0DF5C4]"
             }`}
           >
             {isRemoteMuted ? (
@@ -365,15 +349,17 @@ export const RemoteControlPage: React.FC = () => {
             ) : (
               <Mic className="w-3.5 h-3.5" />
             )}
-            <span>{isRemoteMuted ? "Mute" : "Unmuted"}</span>
+            <span>{isRemoteMuted ? "Unmute" : "Mute"}</span>
           </button>
 
           <button
+            type="button"
+            aria-label={isRemoteCameraOn ? "Turn camera off" : "Turn camera on"}
             onClick={() => setIsRemoteCameraOn((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition-colors ${
+            className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs transition-colors ${
               isRemoteCameraOn
-                ? "bg-[#181824] border-[#252536] text-[#c4c4dc]"
-                : "bg-[#181824] border-[#252536] text-[#6b6b85]"
+                ? "border-[#343444] bg-[#191923] text-[#b0b0c4]"
+                : "border-[#FF9E64]/30 bg-[#FF9E64]/10 text-[#FFAE80]"
             }`}
           >
             {isRemoteCameraOn ? (
@@ -381,21 +367,21 @@ export const RemoteControlPage: React.FC = () => {
             ) : (
               <VideoOff className="w-3.5 h-3.5" />
             )}
-            <span>Camera On</span>
+            <span>Camera {isRemoteCameraOn ? "on" : "off"}</span>
           </button>
 
           <button
+            type="button"
+            aria-label={isRemoteControlling ? "Release workspace control" : "Request workspace control"}
             onClick={() => setIsRemoteControlling((prev) => !prev)}
-            className="px-4 py-1.5 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-1.5 shadow transition-all hover:brightness-110"
-            style={{ backgroundColor: theme.primary }}
+            className={`flex min-h-10 items-center gap-2 rounded-lg px-3.5 text-xs font-semibold transition-colors ${isRemoteControlling ? "text-[#09090e] hover:brightness-110" : "border border-[#343444] bg-[#191923] text-white hover:bg-[#22222d]"}`}
+            style={isRemoteControlling ? { backgroundColor: theme.primary } : undefined}
           >
-            <Lock className="w-3.5 h-3.5 text-[#09090e]" />
-            <span>
-              {isRemoteControlling ? "Release Control" : "Request Control"}
-            </span>
+            {isRemoteControlling ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+            <span>{isRemoteControlling ? "Release control" : "Request control"}</span>
           </button>
 
-          <label className="hidden lg:flex items-center gap-1.5 text-xs text-[#8c8ca5] cursor-pointer ml-2">
+          <label className="hidden items-center gap-2 border-l border-[#29293a] pl-3 text-xs text-[#a0a0b5] lg:flex">
             <input
               type="checkbox"
               defaultChecked
@@ -406,34 +392,36 @@ export const RemoteControlPage: React.FC = () => {
         </div>
 
         {/* Right Controls: Share Terminal, Chat, Stream Quality */}
-        <div className="flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2">
           <button
+            type="button"
             onClick={() =>
               alert("Terminal sharing enabled. Port 8080 forwarded.")
             }
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141420] hover:bg-[#1c1c2a] border border-[#232336] text-[#a4a4c6] hover:text-white transition-colors"
+            className="hidden min-h-10 items-center gap-2 rounded-lg border border-[#343444] bg-[#191923] px-3 text-xs text-[#c4c4dc] transition-colors hover:bg-[#22222d] hover:text-white sm:flex"
           >
             <Terminal className="w-3.5 h-3.5" />
             <span>Share Terminal</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setPage("chat")}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#141420] hover:bg-[#1c1c2a] border border-[#232336] text-white transition-colors"
+            className="flex min-h-10 items-center gap-2 rounded-lg border border-[#343444] bg-[#191923] px-3 text-xs text-white transition-colors hover:bg-[#22222d]"
           >
             <MessageSquare className="w-3.5 h-3.5 text-[#6C63FF]" />
             <span>Chat</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-[#6C63FF] text-[10px] text-white font-bold">
+            <span className="rounded-full bg-[#6C63FF] px-1.5 py-0.5 text-[10px] font-bold text-white">
               2
             </span>
           </button>
 
-          <div className="hidden xl:flex items-center gap-3 text-[11px] text-[#71718c] pl-2 border-l border-[#1f1f2e]">
-            <span>Stream: 4K (60fps)</span>
-            <span className="text-[#0DF5C4]">📶 Loss: 0.0% · 18.4 Mbps</span>
+          <div className="hidden 2xl:flex items-center gap-3 border-l border-[#29293a] pl-3 font-mono text-[10px] text-[#8d8da5]">
+            <span>4K · 60 FPS</span>
+            <span className="text-[#0DF5C4]">Loss 0.0% · 18.4 Mbps</span>
           </div>
         </div>
-      </div>
+      </footer>
     </div>
   );
 };

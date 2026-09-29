@@ -13,6 +13,7 @@ export type PageType =
   | "remote-control"
   | "ai-studio"
   | "pricing"
+  | "custom-plan"
   | "cloud-core";
 
 export interface ThemeConfig {
