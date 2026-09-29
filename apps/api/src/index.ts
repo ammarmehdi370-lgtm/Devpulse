@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { extname } from "node:path";
 import cors from "cors";
 import express from "express";
@@ -16,7 +16,6 @@ import { verifyToken } from "./lib/jwt.js";
 
 const app: express.Express = express();
 const port = Number(process.env.PORT ?? 4000);
-const testMagicTokens = new Map<string, string>();
 const objectStoreEndpoint = new URL(
   process.env.AWS_S3_ENDPOINT ?? "http://localhost:9000",
 );
@@ -189,67 +188,6 @@ app.get("/v1/me", async (request, response, next) => {
       workspaces: user.memberships.map(
         (membership: (typeof user.memberships)[number]) => membership.workspace,
       ),
-    });
-  } catch (error) {
-    return next(error);
-  }
-});
-
-app.post("/v1/auth/magic-link", async (request, response) => {
-  const parsed = z
-    .object({ email: z.string().email() })
-    .safeParse(request.body);
-  if (!parsed.success) return sendValidationError(response, parsed.error);
-  await redisConnection;
-  const token = randomBytes(32).toString("hex");
-  const tokenKey = `magic:${createHash("sha256").update(token).digest("hex")}`;
-  if (redis.isReady) {
-    await redis.set(tokenKey, parsed.data.email, { EX: 600 });
-  } else if (process.env.NODE_ENV === "test") {
-    testMagicTokens.set(tokenKey, parsed.data.email);
-  }
-  return response.json({
-    message: "Magic link requested",
-    ...(process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
-      ? { verificationToken: token }
-      : {}),
-  });
-});
-
-app.post("/v1/auth/magic-link/verify", async (request, response, next) => {
-  const parsed = z
-    .object({ token: z.string().min(32) })
-    .safeParse(request.body);
-  if (!parsed.success) return sendValidationError(response, parsed.error);
-  try {
-    await redisConnection;
-    const key = `magic:${createHash("sha256").update(parsed.data.token).digest("hex")}`;
-    const email = redis.isReady
-      ? await redis.get(key)
-      : process.env.NODE_ENV === "test"
-        ? testMagicTokens.get(key) ?? null
-        : null;
-    if (!email)
-      return response
-        .status(401)
-        .json({ error: "Magic link is invalid or expired" });
-    if (redis.isReady) await redis.del(key);
-    else testMagicTokens.delete(key);
-    const user = await db.user.upsert({
-      where: { email },
-      update: {},
-      create: { email, name: email.split("@")[0] },
-    });
-    const token = sessionToken(user.id);
-    setSessionCookie(response, token);
-    return response.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-      },
     });
   } catch (error) {
     return next(error);

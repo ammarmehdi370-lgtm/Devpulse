@@ -27,4 +27,28 @@ describe("API foundation", () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toBe("Invalid request");
   });
+
+  it("returns a dev verification token without sending email", async () => {
+    const email = `magic-${Date.now()}@example.com`;
+    const response = await request(app)
+      .post("/api/auth/magic-link/send")
+      .send({ email });
+
+    expect(response.status).toBe(200);
+    expect(response.body.token).toMatch(/^[a-f\d]{64}$/i);
+    expect(response.body.verificationToken).toBe(response.body.token);
+    expect(response.body.url).toContain(`/auth/verify?token=${response.body.token}`);
+  });
+
+  it("limits magic-link sends to three per email per hour", async () => {
+    const email = `rate-limit-${Date.now()}@example.com`;
+    const send = () => request(app).post("/api/auth/magic-link/send").send({ email });
+
+    expect((await send()).status).toBe(200);
+    expect((await send()).status).toBe(200);
+    expect((await send()).status).toBe(200);
+    const limited = await send();
+    expect(limited.status).toBe(429);
+    expect(limited.body.error).toBe("RATE_LIMITED");
+  });
 });

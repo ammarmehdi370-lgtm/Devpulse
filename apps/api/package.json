@@ -28,6 +28,7 @@
     "passport-google-oauth20": "^2.0.0",
     "pino-http": "^10.3.0",
     "redis": "^6.2.1",
+    "resend": "^6.30.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

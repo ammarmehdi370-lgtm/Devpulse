@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { setAccessToken } from "../lib/apiClient";
 import {
   Terminal,
   Zap,
@@ -23,6 +24,7 @@ export const LoginPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [loginMethod, setLoginMethod] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
 
   useEffect(() => {
     const error = new URLSearchParams(window.location.search).get("auth_error");
@@ -57,6 +59,7 @@ export const LoginPage: React.FC = () => {
     setIsLoading(true);
     setLoginMethod(provider);
     setAuthError("");
+    setAuthNotice("");
 
     if (provider === "gitlab" || provider === "sso") {
       // ── DEV BYPASS ────────────────────────────────────────────────────────
@@ -80,7 +83,7 @@ export const LoginPage: React.FC = () => {
     if (provider === "email") {
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/auth/magic-link`,
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/magic-link/send`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -89,14 +92,21 @@ export const LoginPage: React.FC = () => {
           },
         );
         const result = (await response.json()) as {
+          token?: string;
           verificationToken?: string;
+          message?: string;
           error?: string;
         };
         if (!response.ok)
-          throw new Error(result.error || "Unable to request magic link");
-        if (!result.verificationToken) return;
+          throw new Error(result.message || result.error || "Unable to request magic link");
+        const developmentToken = result.token || result.verificationToken;
+        if (!developmentToken) {
+          setAuthNotice(result.message || "Check your email for the sign-in link.");
+          setIsLoading(false);
+          return;
+        }
         const verifyResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/auth/magic-link/verify`,
+          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/magic-link/verify`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -105,14 +115,16 @@ export const LoginPage: React.FC = () => {
           },
         );
         const verified = (await verifyResponse.json()) as {
+          accessToken?: string;
           user?: { email: string; name?: string };
           error?: string;
         };
-        if (!verifyResponse.ok || !verified.user)
+        if (!verifyResponse.ok || !verified.user || !verified.accessToken)
           throw new Error(verified.error || "Unable to verify magic link");
+        setAccessToken(verified.accessToken);
         login(verified.user.email, verified.user.name || "Devpulse User");
       } catch (error) {
-        console.error(error);
+        setAuthError(error instanceof Error ? error.message : "Unable to send sign-in link");
         setIsLoading(false);
       }
       return;
@@ -159,6 +171,7 @@ export const LoginPage: React.FC = () => {
               {authError}
             </div>
           )}
+          {authNotice && <div role="status" className="mb-5 border border-[#0DF5C4]/30 bg-[#0DF5C4]/10 px-4 py-3 text-xs text-[#9cebdc]">{authNotice}</div>}
 
           {/* Auth Providers */}
           <div className="space-y-3 mb-6">

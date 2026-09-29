@@ -70,6 +70,12 @@ pnpm --filter @devpulse/database exec prisma migrate deploy
 pnpm --filter @devpulse/database db:generate
 ```
 
+For magic-link email delivery, sign up at [Resend](https://resend.com), verify
+the sending domain in the Resend dashboard, create an API key, and set
+`RESEND_API_KEY`, `EMAIL_FROM`, and `EMAIL_FROM_NAME` in `.env`. Production
+magic-link requests fail closed if Redis or Resend is unavailable. Development
+and test responses include a one-time token and do not send email.
+
 OAuth access tokens are held in browser memory and delivered in a URL fragment;
 the frontend removes the fragment immediately. Refresh tokens are httpOnly
 cookies. The Redis-backed OAuth state session expires after ten minutes. The
