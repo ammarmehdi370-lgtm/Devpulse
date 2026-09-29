@@ -113,6 +113,8 @@ export interface EditorFile {
   revisionId?: string;
   lastSavedAt?: Date;
   sizeBytes?: number;
+  isLargeFile: boolean;
+  openedAnyway: boolean;
   modified: boolean;
   isDirty?: boolean;
 }
@@ -180,6 +182,7 @@ interface AppContextType {
   setActiveFileId: (id: string) => void;
   fileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
+  updateOpenFileMetadata: (fileId: string, metadata: Partial<Pick<EditorFile, "isLargeFile" | "openedAnyway" | "language" | "origin">>) => void;
   saveFileContent: (fileId: string, contentOverride?: string, forceOverride?: boolean) => Promise<void>;
   saveLocalFileToProject: (fileId: string, path?: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
@@ -231,6 +234,9 @@ const EMPTY_DEPLOYMENTS: Deployment[] = [];
 const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const LARGE_FILE_LIMIT_BYTES = 500 * 1024;
+
+const isLargeEditorContent = (content: string) => new TextEncoder().encode(content).length > LARGE_FILE_LIMIT_BYTES;
 
 export class ApiRequestError extends Error {
   status: number;
@@ -1085,6 +1091,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     origin: "api",
     apiFileId: file.id,
     sizeBytes: file.sizeBytes ?? undefined,
+    isLargeFile: (file.sizeBytes ?? 0) > LARGE_FILE_LIMIT_BYTES,
+    openedAnyway: false,
     modified: false,
   });
 
@@ -1115,7 +1123,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           const detail = await apiJson<{ content: string }>(
             `/v1/projects/${project.id}/files/${file.id}`,
           );
-          return { file: { ...editorFileFromApi(file), content: detail.content }, content: detail.content };
+            return { file: { ...editorFileFromApi(file), content: detail.content, isLargeFile: isLargeEditorContent(detail.content) || (file.sizeBytes ?? 0) > LARGE_FILE_LIMIT_BYTES }, content: detail.content };
         }),
       );
       const nextFiles = filesWithContent.map(({ file }) => file);
@@ -1157,9 +1165,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const updateFileContent = (fileId: string, content: string) => {
     setFileContents((prev) => ({ ...prev, [fileId]: content }));
     setOpenFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, content, isDirty: true, modified: true } : f)),
+      prev.map((f) => (f.id === fileId ? { ...f, content, isLargeFile: isLargeEditorContent(content), isDirty: true, modified: true } : f)),
     );
-    setTreeFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, content, isDirty: true, modified: true } : f)));
+    setTreeFiles((prev) => prev.map((f) => (f.id === fileId ? { ...f, content, isLargeFile: isLargeEditorContent(content), isDirty: true, modified: true } : f)));
+  };
+
+  const updateOpenFileMetadata = (fileId: string, metadata: Partial<Pick<EditorFile, "isLargeFile" | "openedAnyway" | "language" | "origin">>) => {
+    setOpenFiles((prev) => prev.map((file) => file.id === fileId ? { ...file, ...metadata } : file));
+    setTreeFiles((prev) => prev.map((file) => file.id === fileId ? { ...file, ...metadata } : file));
   };
 
   const saveFileContent = async (fileId: string, contentOverride?: string, forceOverride = false) => {
@@ -1219,7 +1232,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     path?: string,
     initialContent?: string,
   ) => {
-    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: path || name, content: initialContent || "", language: name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "new", modified: true, isDirty: true };
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: path || name, content: initialContent || "", language: name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "new", isLargeFile: isLargeEditorContent(initialContent || ""), openedAnyway: false, modified: true, isDirty: true };
     setTreeFiles((prev) => [...prev, newFile]);
     setFileContents((prev) => ({
       ...prev,
@@ -1240,7 +1253,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const loadSingleLocalFile = async (name: string, content: string) => {
-    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: name, content, language: name.endsWith(".py") ? "python" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "local", modified: false };
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: name, content, language: name.endsWith(".py") ? "python" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "local", isLargeFile: isLargeEditorContent(content), openedAnyway: false, modified: false };
     setTreeFiles((prev) => [...prev, newFile]);
     setFileContents((prev) => ({ ...prev, [newFile.id]: content }));
     setOpenFiles((prev) => [...prev, newFile]);
@@ -1254,7 +1267,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     folderName: string,
     files: { name: string; path: string; content: string }[],
   ) => {
-    const newTree = files.map((file): EditorFile => ({ id: crypto.randomUUID(), name: file.name, path: file.path, content: file.content, language: file.name.endsWith(".py") ? "python" : file.name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(file.name), origin: "local", modified: false }));
+    const newTree = files.map((file): EditorFile => ({ id: crypto.randomUUID(), name: file.name, path: file.path, content: file.content, language: file.name.endsWith(".py") ? "python" : file.name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(file.name), origin: "local", isLargeFile: isLargeEditorContent(file.content), openedAnyway: false, modified: false }));
     const newContents = Object.fromEntries(newTree.map((file, index) => [file.id, files[index]?.content || ""]));
 
     setLoadedProjectName(folderName);
@@ -1350,6 +1363,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setActiveFileId,
         fileContents,
         updateFileContent,
+        updateOpenFileMetadata,
         saveFileContent,
         saveLocalFileToProject,
         openFileInEditor,

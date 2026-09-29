@@ -81,7 +81,7 @@ test("project load error offers retry and offline mode", async ({ page }) => {
   expect(project.id).toBeTruthy();
 });
 
-test("large local file shows a warning and can be opened", async ({ page }) => {
+test("AI remains disabled after opening large file", async ({ page }) => {
   await startEditor(page, []);
   const chooserPromise = page.waitForEvent("filechooser");
   await page.getByRole("button", { name: "Upload Files" }).click();
@@ -98,7 +98,9 @@ test("large local file shows a warning and can be opened", async ({ page }) => {
   await expect(page.getByText("plaintext", { exact: true })).toBeVisible();
   await warning.getByRole("button", { name: "Open anyway" }).click();
   await expect(page.getByRole("tab", { name: /large-sample\.ts/ })).toBeVisible();
-  const aiInput = page.getByRole("textbox", { name: /Ask Devpulse AI/ });
+  await expect(page.getByText(/may affect performance/i)).not.toBeVisible();
+  await expect(page.getByText("AI disabled for large files")).toBeVisible();
+  const aiInput = page.getByRole("textbox", { name: /Ask Devpulse AI/i });
   await expect(aiInput).toHaveAttribute("aria-disabled", "true");
-  await expect(aiInput.locator("xpath=..").getByRole("button")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
 });
