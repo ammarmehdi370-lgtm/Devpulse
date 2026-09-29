@@ -39,11 +39,42 @@ cp .env.example .env
 
 Update `.env` with real credentials before using Anthropic, Stripe, OAuth, email, or AWS features.
 
-For local authentication, configure `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
-`GITLAB_CLIENT_ID`, and `GITLAB_CLIENT_SECRET` with callbacks pointing to the API
-at `/v1/auth/github/callback` or `/v1/auth/gitlab/callback`. The development magic-link
-flow returns a verification token in the API response; production email delivery still
-requires an email provider integration.
+For local GitHub authentication, configure `GITHUB_CLIENT_ID` and
+`GITHUB_CLIENT_SECRET` in `.env`. Register this callback URL on the GitHub OAuth
+App and use the `user:email` scope (requested by Devpulse):
+
+```text
+http://localhost:4000/api/auth/github/callback
+```
+
+Create an OAuth App at GitHub **Settings → Developer settings → OAuth Apps →
+New OAuth App**. Set its homepage URL to `http://localhost:3000`. The client ID
+and secret belong only in the API environment, never in frontend variables.
+Google OAuth uses the callback
+`http://localhost:4000/api/auth/google/callback` and requests `profile` and
+`email` scopes.
+
+Generate an RS256 keypair and a session secret from the repository root:
+
+```bash
+bash apps/api/scripts/generate-keys.sh
+openssl rand -hex 32
+```
+
+Set the generated value as `SESSION_SECRET`. Keep the private key and OAuth
+client secrets out of version control. Apply the checked-in OAuth account
+migration and regenerate the client:
+
+```bash
+pnpm --filter @devpulse/database exec prisma migrate deploy
+pnpm --filter @devpulse/database db:generate
+```
+
+OAuth access tokens are held in browser memory and delivered in a URL fragment;
+the frontend removes the fragment immediately. Refresh tokens are httpOnly
+cookies. The Redis-backed OAuth state session expires after ten minutes. The
+development magic-link flow returns a verification token in the API response;
+production email delivery still requires an email provider integration.
 
 ## Database and infrastructure
 

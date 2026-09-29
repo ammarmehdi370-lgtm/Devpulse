@@ -9,6 +9,7 @@ import {
   Lock,
   KeyRound,
   Mail,
+  AlertCircle,
   ArrowRight,
   CheckCircle2,
   Layers,
@@ -26,7 +27,14 @@ export const LoginPage: React.FC = () => {
   useEffect(() => {
     const error = new URLSearchParams(window.location.search).get("auth_error");
     if (error) {
-      setAuthError(error);
+      const messages: Record<string, string> = {
+        github_failed: "GitHub sign in failed. Please try again.",
+        google_failed: "Google sign in failed. Please try again.",
+        github_not_configured: "GitHub sign in is not configured yet.",
+        google_not_configured: "Google sign in is not configured yet.",
+        oauth_callback_missing_token: "Sign in could not be completed. Please try again.",
+      };
+      setAuthError(messages[error] || "Sign in could not be completed. Please try again.");
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
@@ -50,13 +58,12 @@ export const LoginPage: React.FC = () => {
     setLoginMethod(provider);
     setAuthError("");
 
-    if (provider === "github" || provider === "gitlab" || provider === "sso") {
+    if (provider === "gitlab" || provider === "sso") {
       // ── DEV BYPASS ────────────────────────────────────────────────────────
       // In development, skip the real OAuth redirect and log in immediately
       // with a mock dev user so you can test the full app flow locally.
       if (process.env.NODE_ENV === "development") {
         const providerLabels: Record<string, string> = {
-          github: "GitHub Dev",
           gitlab: "GitLab Dev",
           sso: "SSO Dev",
         };
@@ -147,7 +154,8 @@ export const LoginPage: React.FC = () => {
             neural coding agents.
           </p>
           {authError && (
-            <div className="mb-5 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+            <div role="alert" className="mb-5 flex items-center gap-2 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+              <AlertCircle className="h-4 w-4 shrink-0" />
               {authError}
             </div>
           )}
@@ -155,9 +163,8 @@ export const LoginPage: React.FC = () => {
           {/* Auth Providers */}
           <div className="space-y-3 mb-6">
             {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
-            <button
-              onClick={() => handleLogin("github")}
-              disabled={isLoading}
+            <a
+              href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/github`}
               className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20"
             >
               <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
@@ -167,12 +174,8 @@ export const LoginPage: React.FC = () => {
                   d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"
                 />
               </svg>
-              <span>
-                {isLoading && loginMethod === "github"
-                  ? "Authenticating with GitHub..."
-                  : "Continue with GitHub"}
-              </span>
-            </button>
+              <span>Continue with GitHub</span>
+            </a>
 
             {/* Continue with GitLab */}
             <button

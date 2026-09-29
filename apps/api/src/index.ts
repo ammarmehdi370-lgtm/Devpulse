@@ -5,25 +5,18 @@ import { extname } from "node:path";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
-import { createClient } from "redis";
 import * as Minio from "minio";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import pinoHttp from "pino-http";
 import { z } from "zod";
 import { db } from "@devpulse/database";
+import { authRouter } from "./routes/auth.js";
+import { redis, redisConnection } from "./lib/redis.js";
+import { verifyToken } from "./lib/jwt.js";
 
 const app: express.Express = express();
 const port = Number(process.env.PORT ?? 4000);
-const redis = createClient({
-  url: process.env.REDIS_URL ?? "redis://localhost:6379",
-  socket: { reconnectStrategy: false },
-});
 const testMagicTokens = new Map<string, string>();
-redis.on("error", (error) => console.error("Redis error", error));
-const redisConnection =
-  process.env.NODE_ENV === "test"
-    ? Promise.resolve()
-    : redis.connect().catch(() => undefined);
 const objectStoreEndpoint = new URL(
   process.env.AWS_S3_ENDPOINT ?? "http://localhost:9000",
 );
@@ -61,12 +54,13 @@ const fileContentSchema = z.string().max(2_000_000);
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.APP_URL ?? "http://localhost:3000",
+    origin: process.env.FRONTEND_URL ?? process.env.APP_URL ?? "http://localhost:3000",
     credentials: true,
   }),
 );
 app.use(express.json({ limit: "5mb" }));
 app.use(pinoHttp());
+app.use("/api/auth", authRouter);
 app.get("/health", (_request, response) =>
   response.json({ status: "ok", service: "api" }),
 );
@@ -135,6 +129,7 @@ app.post("/v1/auth/logout", (_request, response) => {
     "Set-Cookie",
     "devpulse_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
   );
+  response.append("Set-Cookie", "refresh_token=; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=0");
   return response.status(204).send();
 });
 
@@ -173,14 +168,11 @@ if (process.env.NODE_ENV !== "production") {
 
 app.get("/v1/me", async (request, response, next) => {
   try {
-    const cookie = request.headers.cookie?.match(
-      /(?:^|; )devpulse_session=([^;]+)/,
-    )?.[1];
-    if (!cookie)
+    const userId = await getRequestUserId(request);
+    if (!userId)
       return response.status(401).json({ error: "Authentication required" });
-    const payload = jwt.verify(cookie, jwtSecret) as { sub: string };
     const user = await db.user.findUnique({
-      where: { id: payload.sub },
+      where: { id: userId },
       include: {
         memberships: {
           include: { workspace: { include: { projects: true } } },
@@ -268,9 +260,7 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
   const provider = request.params.provider;
   const callback = `${process.env.API_URL ?? `http://localhost:${port}`}/v1/auth/${provider}/callback`;
   if (provider === "github" && process.env.GITHUB_CLIENT_ID)
-    return response.redirect(
-      `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(process.env.GITHUB_CLIENT_ID)}&redirect_uri=${encodeURIComponent(callback)}&scope=user:email`,
-    );
+    return response.redirect(`${process.env.API_URL ?? `http://localhost:${port}`}/api/auth/github`);
   if (provider === "gitlab" && process.env.GITLAB_CLIENT_ID)
     return response.redirect(
       `https://gitlab.com/oauth/authorize?client_id=${encodeURIComponent(process.env.GITLAB_CLIENT_ID)}&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=read_user`,
@@ -312,6 +302,8 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
 
 app.get("/v1/auth/:provider/callback", async (request, response, next) => {
   const provider = request.params.provider;
+  if (provider === "github")
+    return response.status(410).json({ error: "Use /api/auth/github/callback" });
   const code = typeof request.query.code === "string" ? request.query.code : "";
   if (!code)
     return response.status(400).json({ error: "OAuth code is required" });
@@ -409,20 +401,22 @@ async function findProjectFile(fileId: string) {
 
 type AuthenticatedRequest = express.Request & { userId?: string; fileRecord?: Awaited<ReturnType<typeof findProjectFile>>; aiUsage?: { id: string; requestCount: number; tokenCount: number; limit: number; plan: string } };
 
-function getRequestUserId(request: express.Request): string | null {
-  const cookie = request.headers.cookie?.match(/(?:^|; )devpulse_session=([^;]+)/)?.[1];
+async function getRequestUserId(request: express.Request): Promise<string | null> {
   const authorization = request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  const token = cookie ?? authorization;
-  if (!token) return null;
-  try {
-    return String((jwt.verify(token, jwtSecret) as { sub: string }).sub);
-  } catch {
-    return null;
+  if (authorization) {
+    try {
+      return (await verifyToken(authorization)).sub;
+    } catch {
+      return null;
+    }
   }
+  const cookie = request.headers.cookie?.match(/(?:^|; )devpulse_session=([^;]+)/)?.[1];
+  if (!cookie) return null;
+  try { return String((jwt.verify(cookie, jwtSecret) as { sub: string }).sub); } catch { return null; }
 }
 
-function requireUser(request: express.Request, response: express.Response): string | null {
-  const userId = getRequestUserId(request);
+async function requireUser(request: express.Request, response: express.Response): Promise<string | null> {
+  const userId = await getRequestUserId(request);
   if (!userId) {
     response.status(401).json({ error: "Authentication required" });
     return null;
@@ -432,7 +426,7 @@ function requireUser(request: express.Request, response: express.Response): stri
 }
 
 async function checkFileAccess(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
-  const userId = requireUser(request, response);
+  const userId = await requireUser(request, response);
   if (!userId) return;
   const file = await findProjectFile(String(request.params.fileId));
   if (!file) {
@@ -536,7 +530,7 @@ app.get("/v1/projects", async (_request, response, next) => {
 });
 
 app.get("/v1/projects/:projectId/contributors", async (request, response, next) => {
-  const userId = requireUser(request, response);
+  const userId = await requireUser(request, response);
   if (!userId) return;
   const period = request.query.period === "7d" || request.query.period === "all" ? request.query.period : "30d";
   const periodStart = contributorPeriodStart(period);
@@ -924,7 +918,7 @@ async function userCanAccessProject(userId: string, projectId: string): Promise<
 }
 
 async function checkAIUsage(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
-  const userId = requireUser(request, response);
+  const userId = await requireUser(request, response);
   if (!userId) return;
   const parsedProjectId = typeof request.body?.projectId === "string" ? request.body.projectId : undefined;
   const usage = await getOrCreateAIUsage(userId, parsedProjectId);
@@ -1011,7 +1005,7 @@ app.post("/v1/ai/apply", async (request, response, next) => {
   const parsed = aiApplySchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
-    const userId = requireUser(request, response);
+    const userId = await requireUser(request, response);
     if (!userId) return;
     const sizeBytes = Buffer.byteLength(parsed.data.code, "utf8");
     if (sizeBytes > AI_APPLY_LIMIT_BYTES) return response.status(413).json({ error: "CONTENT_TOO_LARGE", message: "AI generated content exceeds 500KB limit", sizeBytes, limitBytes: AI_APPLY_LIMIT_BYTES });
@@ -1044,7 +1038,7 @@ app.post("/v1/ai/apply", async (request, response, next) => {
 });
 
 app.get("/v1/ai/usage", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try { const usage = await getOrCreateAIUsage(userId); const resetDate = new Date(usage.year, usage.month, 1).toISOString().slice(0, 10); return response.json({ used: usage.requestCount, limit: usage.limit, plan: usage.plan, resetDate, percentage: Math.round((usage.requestCount / usage.limit) * 100) }); } catch (error) { return next(error); }
 });
 
@@ -1066,7 +1060,7 @@ function conversationSummary(conversation: { id: string; title: string; fileId: 
 }
 
 app.get("/v1/ai/conversations", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try {
     const fileId = typeof request.query.fileId === "string" ? request.query.fileId : undefined;
     const projectId = typeof request.query.projectId === "string" ? request.query.projectId : undefined;
@@ -1089,7 +1083,7 @@ app.get("/v1/ai/conversations", async (request, response, next) => {
 });
 
 app.get("/v1/ai/conversations/:id/messages", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try {
     const conversation = await findOwnedConversation(userId, String(request.params.id));
     if (!conversation) return response.status(404).json({ error: "Conversation not found" });
@@ -1101,7 +1095,7 @@ app.get("/v1/ai/conversations/:id/messages", async (request, response, next) => 
 });
 
 app.post("/v1/ai/conversations/:id/messages", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   const parsed = aiConversationMessageSchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
@@ -1115,12 +1109,12 @@ app.post("/v1/ai/conversations/:id/messages", async (request, response, next) =>
 });
 
 app.delete("/v1/ai/conversations/:id", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try { const deleted = await db.aIConversation.deleteMany({ where: { id: String(request.params.id), userId } }); if (!deleted.count) return response.status(404).json({ error: "Conversation not found" }); return response.json({ success: true }); } catch (error) { return next(error); }
 });
 
 app.get("/v1/ai/conversations/:id/export", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try {
     const conversation = await findOwnedConversation(userId, String(request.params.id));
     if (!conversation) return response.status(404).json({ error: "Conversation not found" });
@@ -1555,7 +1549,7 @@ app.post("/v1/execute", async (request, response) => {
   const cached = redis.isReady ? await redis.get(cacheKey) : null;
   if (cached) {
     const cachedResult = JSON.parse(cached) as { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; error?: string; durationMs?: number; executionId?: string };
-    const userId = getRequestUserId(request);
+    const userId = await getRequestUserId(request);
     let executionId = cachedResult.executionId;
     if (parsed.data.fileId && userId && !executionId) {
       const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
@@ -1575,7 +1569,7 @@ app.post("/v1/execute", async (request, response) => {
   );
   const durationMs = Date.now() - startedAt;
   let executionId: string | undefined;
-  const userId = getRequestUserId(request);
+  const userId = await getRequestUserId(request);
   if (parsed.data.fileId && userId) {
     const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
     const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
@@ -1603,7 +1597,7 @@ app.get("/v1/files/:fileId/executions", checkFileAccess, async (request, respons
 });
 
 app.get("/v1/executions/:id", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try {
     const execution = await db.codeExecution.findFirst({ where: { id: String(request.params.id), userId }, include: { user: { select: { name: true, avatarUrl: true } } } });
     if (!execution) return response.status(404).json({ error: "Execution not found" });
@@ -1613,7 +1607,7 @@ app.get("/v1/executions/:id", async (request, response, next) => {
 
 const editorSessionSchema = z.object({ projectId: z.string().cuid(), openFileIds: z.array(z.string().cuid()).max(500), activeFileId: z.string().cuid().optional(), scrollPositions: z.record(z.number().finite()).optional(), cursorPositions: z.record(z.object({ line: z.number().int().nonnegative(), col: z.number().int().nonnegative() })).optional() });
 app.put("/v1/editor/session", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   const parsed = editorSessionSchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
@@ -1627,7 +1621,7 @@ app.put("/v1/editor/session", async (request, response, next) => {
 });
 
 app.get("/v1/editor/session/:projectId", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try {
     if (!await userCanAccessProject(userId, String(request.params.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
     const session = await db.editorSession.findUnique({ where: { userId_projectId: { userId, projectId: String(request.params.projectId) } } });
@@ -1637,7 +1631,7 @@ app.get("/v1/editor/session/:projectId", async (request, response, next) => {
 });
 
 app.delete("/v1/editor/session/:projectId", async (request, response, next) => {
-  const userId = requireUser(request, response); if (!userId) return;
+  const userId = await requireUser(request, response); if (!userId) return;
   try {
     if (!await userCanAccessProject(userId, String(request.params.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
     await db.editorSession.deleteMany({ where: { userId, projectId: String(request.params.projectId) } });

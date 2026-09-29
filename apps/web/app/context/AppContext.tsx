@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { authenticatedFetch, setAccessToken } from "../lib/apiClient";
 
 export type PageType =
   | "login"
@@ -592,7 +593,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
-    void fetch(`${API_BASE}/v1/me`, { credentials: "include" })
+    void authenticatedFetch(`${API_BASE}/v1/me`, { credentials: "include" })
       .then(async (response) =>
         response.ok
           ? (response.json() as Promise<{
@@ -639,7 +640,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const logout = () => {
-    void fetch(`${API_BASE}/v1/auth/logout`, {
+    setAccessToken(null);
+    void authenticatedFetch(`${API_BASE}/v1/auth/logout`, {
       method: "POST",
       credentials: "include",
     });
@@ -1000,7 +1002,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     path: string,
     options?: RequestInit,
   ): Promise<T> => {
-    const response = await fetch(`${API_BASE}${path}`, {
+    const response = await authenticatedFetch(`${API_BASE}${path}`, {
       ...options,
       credentials: "include",
       headers: {

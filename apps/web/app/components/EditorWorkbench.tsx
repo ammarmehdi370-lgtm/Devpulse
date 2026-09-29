@@ -12,6 +12,7 @@ import {
 import { ApiRequestError, EditorFile, useApp } from "../context/AppContext";
 import { io, Socket } from "socket.io-client";
 import ContributorGraph from "./ContributorGraph";
+import { authenticatedFetch as fetch } from "../lib/apiClient";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 const DiffEditor = dynamic(() => import("@monaco-editor/react").then((module) => module.DiffEditor), { ssr: false });

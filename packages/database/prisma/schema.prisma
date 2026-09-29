@@ -50,6 +50,7 @@ model User {
   avatarUrl    String?
   passwordHash String?
   memberships  WorkspaceMember[]
+  oauthAccounts OAuthAccount[]
   ownedSpaces  Workspace[]       @relation("WorkspaceOwner")
   messages     Message[]
   aiConversations AIConversation[]
@@ -59,6 +60,22 @@ model User {
   lastEditedFiles File[]          @relation("FileLastEditor")
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
+}
+
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String
+  providerAccountId String
+  accessToken       String?  @db.Text
+  refreshToken      String?  @db.Text
+  expiresAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Workspace {

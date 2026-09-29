@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { RefreshCw, Users, X } from "lucide-react";
+import { authenticatedFetch as fetch } from "../lib/apiClient";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const COLORS = ["#7C3AED", "#06B6D4", "#22C55E", "#F59E0B", "#7a7a9a"];
