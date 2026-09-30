@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { importPKCS8, importSPKI, jwtVerify, SignJWT, type JWTPayload as JosePayload } from "jose";
 
@@ -16,16 +16,54 @@ let privateKey: Awaited<ReturnType<typeof importPKCS8>> | undefined;
 let publicKey: Awaited<ReturnType<typeof importSPKI>> | undefined;
 let keysPromise: Promise<void> | undefined;
 
+function loadKey(envVar: string, label: "private" | "public"): string {
+  const keyPath = process.env[envVar];
+  const setupCommand = "bash apps/api/scripts/generate-keys.sh";
+  if (!keyPath) {
+    throw new Error(
+      `Missing environment variable: ${envVar}\n` +
+        `Add ${envVar}=./keys/${label}.pem to your .env file.\n` +
+        `Generate the key pair with: ${setupCommand}`,
+    );
+  }
+
+  const resolvedPath = path.resolve(keyPath);
+  const workspacePath = path.resolve(process.cwd(), "apps/api", keyPath);
+  const existingPath = [resolvedPath, workspacePath].find(existsSync);
+  if (!existingPath) {
+    throw new Error(
+      `Key file not found: ${resolvedPath}\n` +
+        `Also checked: ${workspacePath}\n` +
+        `Generate the key pair with: ${setupCommand}`,
+    );
+  }
+
+  try {
+    return readFileSync(existingPath, "utf8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to read ${label} JWT key at ${existingPath}: ${detail}`);
+  }
+}
+
 export async function initKeys(): Promise<void> {
   if (privateKey && publicKey) return;
   if (!keysPromise) {
     keysPromise = Promise.resolve().then(async () => {
-      const privatePath = path.resolve(process.env.JWT_PRIVATE_KEY_PATH ?? "./keys/private.pem");
-      const publicPath = path.resolve(process.env.JWT_PUBLIC_KEY_PATH ?? "./keys/public.pem");
-      const privatePem = readFileSync(privatePath, "utf8");
-      const publicPem = readFileSync(publicPath, "utf8");
-      privateKey = await importPKCS8(privatePem, "RS256");
-      publicKey = await importSPKI(publicPem, "RS256");
+      const privatePem = loadKey("JWT_PRIVATE_KEY_PATH", "private");
+      const publicPem = loadKey("JWT_PUBLIC_KEY_PATH", "public");
+      try {
+        const loadedPrivateKey = await importPKCS8(privatePem, "RS256");
+        const loadedPublicKey = await importSPKI(publicPem, "RS256");
+        privateKey = loadedPrivateKey;
+        publicKey = loadedPublicKey;
+        console.log("[JWT] RS256 keys loaded");
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Unable to import RS256 JWT keys. Ensure private.pem is PKCS#8 and public.pem is SPKI. ${detail}`,
+        );
+      }
     }).catch((error: unknown) => {
       keysPromise = undefined;
       throw error;

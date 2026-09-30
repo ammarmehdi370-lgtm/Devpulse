@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./lib/load-env.js";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
@@ -12,7 +12,7 @@ import { z } from "zod";
 import { db } from "@devpulse/database";
 import { authRouter } from "./routes/auth.js";
 import { redis, redisConnection } from "./lib/redis.js";
-import { verifyToken } from "./lib/jwt.js";
+import { initKeys, verifyToken } from "./lib/jwt.js";
 
 const app: express.Express = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -1580,5 +1580,20 @@ app.delete("/v1/editor/session/:projectId", async (request, response, next) => {
 export { app };
 
 if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") {
-  app.listen(port, () => console.log(`Devpulse API listening on :${port}`));
+  async function startServer(): Promise<void> {
+    await initKeys();
+    await new Promise<void>((resolve, reject) => {
+      const server = app.listen(port, () => {
+        console.log(`Devpulse API listening on :${port}`);
+        resolve();
+      });
+      server.once("error", reject);
+    });
+  }
+
+  startServer().catch((error: unknown) => {
+    console.error("\n[API] Startup failed:");
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
 }

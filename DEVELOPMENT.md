@@ -54,10 +54,40 @@ Google OAuth uses the callback
 `http://localhost:4000/api/auth/google/callback` and requests `profile` and
 `email` scopes.
 
-Generate an RS256 keypair and a session secret from the repository root:
+## Generating JWT Keys
+
+Generate an RS256 key pair once before starting the API. From the repository
+root, run one of:
 
 ```bash
 bash apps/api/scripts/generate-keys.sh
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File apps/api/scripts/generate-keys.ps1
+```
+
+The scripts create `apps/api/keys/private.pem` and `public.pem`. The paths in
+`.env` are resolved from either the API package directory or repository root:
+
+```dotenv
+JWT_PRIVATE_KEY_PATH=./keys/private.pem
+JWT_PUBLIC_KEY_PATH=./keys/public.pem
+```
+
+Verify the private key:
+
+```bash
+openssl rsa -in apps/api/keys/private.pem -check -noout
+```
+
+The key files are excluded by `.gitignore`. Never commit or share
+`private.pem`. Regenerating replaces neither file when both keys already
+exist; remove `apps/api/keys/*.pem` first to create a new pair.
+
+Generate a session secret separately:
+
+```bash
 openssl rand -hex 32
 ```
 
