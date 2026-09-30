@@ -24,6 +24,46 @@ Copy-Item .env.example .env
 
 Set a valid `ANTHROPIC_API_KEY` in `.env` before starting the AI service. Never commit `.env` or expose the API key.
 
+## Quick infrastructure startup
+
+The infrastructure startup scripts check the Docker daemon, start PostgreSQL,
+Redis, and MinIO, wait for their health checks, then apply migrations and seed
+the database. From the repository root, run one of:
+
+```powershell
+.\scripts\start-services.ps1
+```
+
+```bash
+bash scripts/start-services.sh
+```
+
+The scripts keep the existing host mappings: PostgreSQL is `localhost:5433`
+(inside Compose it is `postgres:5432`), Redis is `localhost:6379`, and MinIO is
+`localhost:9000` with its console on `localhost:9001`.
+
+Start all app services after infrastructure is ready:
+
+```bash
+pnpm --parallel --filter @devpulse/api --filter @devpulse/socket --filter @devpulse/ai --filter @devpulse/web dev
+```
+
+Check running containers with `docker compose ps`, or run the HTTP/container
+health checks with:
+
+```bash
+bash scripts/verify-services.sh
+```
+
+On Windows, use PowerShell to check each URL:
+
+```powershell
+Invoke-RestMethod http://localhost:4000/health
+Invoke-RestMethod http://localhost:4001/health
+Invoke-RestMethod http://localhost:4002/health
+Invoke-WebRequest http://localhost:3000
+```
+
 ## 3. Start PostgreSQL, Redis, and MinIO
 
 Make sure Docker Desktop is running, then execute:
@@ -154,6 +194,11 @@ Stop and remove containers and volumes:
 docker compose down -v
 ```
 
+`docker compose down -v` deletes database, Redis, and MinIO volumes. Use it
+only when you intend to erase local data. `make stop` stops containers while
+preserving volumes; `make clean` deletes volumes, and `make reset` deletes
+volumes then recreates infrastructure.
+
 Stop a development server running in a terminal with `Ctrl+C`.
 
 ## Service URLs
@@ -168,3 +213,80 @@ Stop a development server running in a terminal with `Ctrl+C`.
 | Redis | localhost:6379 |
 | MinIO API | http://localhost:9000 |
 | MinIO console | http://localhost:9001 |
+
+## Troubleshooting
+
+### Docker is not running
+
+Start Docker Desktop and wait for its engine to finish starting. On Linux:
+
+```bash
+sudo systemctl start docker
+docker info
+```
+
+If Docker still cannot connect, check Docker Desktop's WSL 2 integration on
+Windows or the active Docker context with `docker context ls`.
+
+### Port already in use
+
+Find the process listening on the port before stopping it. For Windows
+PowerShell, replace `4000` with the affected port:
+
+```powershell
+Get-NetTCPConnection -LocalPort 4000 -State Listen |
+  Select-Object LocalAddress, LocalPort, OwningProcess
+Get-Process -Id <PID>
+Stop-Process -Id <PID>
+```
+
+For Linux/macOS:
+
+```bash
+lsof -nP -iTCP:4000 -sTCP:LISTEN
+kill <PID>
+```
+
+If the process is another Compose project, stop only that service/project with
+`docker compose stop <service>` or `docker compose down`. Alternatively, change
+the host-side port in `docker-compose.yml`; keep the container-side port and
+internal service URLs unchanged.
+
+### Volume permission denied
+
+- On Docker Desktop, confirm the drive containing the repository is shared and
+  WSL integration is enabled when using WSL.
+- On Linux, check ownership of the specific bind-mounted directory and grant
+  access to the user/container that needs it; avoid broad `chmod 777` changes.
+- For a named-volume issue, inspect `docker compose logs <service>` and the
+  volume with `docker volume inspect <volume>` before changing ownership.
+- Do not use `docker compose down -v` as a permissions fix unless you intend to
+  delete all local database/object-store data.
+
+### Image not found or pull failure
+
+Refresh the configured images and recreate the affected containers:
+
+```bash
+docker compose pull
+docker compose up -d --force-recreate postgres redis minio api socket ai web
+```
+
+Inspect resolved image names with `docker compose config --images`. If an image
+tag is unavailable for the machine architecture, choose a supported tag rather
+than using `latest` for a production deployment.
+
+### API health check is unreachable
+
+First check container state and logs:
+
+```bash
+docker compose ps
+docker compose logs --tail=200 postgres redis minio api
+```
+
+The API waits for PostgreSQL and Redis, and now waits for MinIO health as well.
+The local API health endpoint is `http://localhost:4000/health`. If the
+container is healthy but the host cannot connect, check port `4000` conflicts,
+firewall rules, and whether the API was started outside Compose with a
+host-accessible `DATABASE_URL` (`localhost:5433`, not `postgres:5432`).
