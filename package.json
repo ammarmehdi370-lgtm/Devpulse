@@ -11,6 +11,7 @@
     "dev:turbo": "turbo dev",
     "build": "npm --prefix apps/web run build",
     "test": "turbo test",
+    "test:all": "pnpm test && pnpm test:e2e",
     "setup:e2e": "node scripts/setup-e2e.mjs",
     "test:e2e": "pnpm --filter @devpulse/web test:e2e",
     "test:e2e:full": "pnpm setup:e2e && pnpm test:e2e",

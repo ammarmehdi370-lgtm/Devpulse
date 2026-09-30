@@ -13,6 +13,7 @@ import { db } from "@devpulse/database";
 import { authRouter, sessionMiddleware } from "./routes/auth.js";
 import { redis, redisConnection } from "./lib/redis.js";
 import { initKeys, verifyToken } from "./lib/jwt.js";
+import type { AiApplyRequest } from "./types/requests.js";
 
 const app: express.Express = express();
 const port = Number(process.env.PORT ?? 4000);
@@ -824,7 +825,6 @@ const aiApplySchema = z.object({
   skipCheck: z.boolean().optional().default(false),
 });
 
-type AiApplyRequest = z.infer<typeof aiApplySchema>;
 type AiApplySafetyError = { status: 400 | 422; error: string; message: string; openBraces?: number; closeBraces?: number };
 
 function validateAIApplyContent(code: string, language: string, skipCheck: boolean): AiApplySafetyError | null {
@@ -944,33 +944,34 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
 app.post("/v1/ai/apply", async (request, response, next) => {
   const parsed = aiApplySchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
+  const applyRequest: AiApplyRequest = parsed.data;
   try {
     const userId = await requireUser(request, response);
     if (!userId) return;
-    const sizeBytes = Buffer.byteLength(parsed.data.code, "utf8");
+    const sizeBytes = Buffer.byteLength(applyRequest.code, "utf8");
     if (sizeBytes > AI_APPLY_LIMIT_BYTES) return response.status(413).json({ error: "CONTENT_TOO_LARGE", message: "AI generated content exceeds 500KB limit", sizeBytes, limitBytes: AI_APPLY_LIMIT_BYTES });
-    const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, include: { project: { include: { workspace: true } } } });
+    const file = await db.file.findUnique({ where: { id: applyRequest.fileId }, include: { project: { include: { workspace: true } } } });
     if (!file) return response.status(404).json({ error: "FILE_NOT_FOUND", message: "File not found" });
     const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspace.id, userId } }, select: { userId: true } });
     if (!membership) return response.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this file" });
-    if (file.version !== parsed.data.expectedVersion) return response.status(409).json({ error: "VERSION_CONFLICT", message: "File changed since AI request was made", currentVersion: file.version });
-    const safetyError = validateAIApplyContent(parsed.data.code, parsed.data.language, parsed.data.skipCheck);
+    if (file.version !== applyRequest.expectedVersion) return response.status(409).json({ error: "VERSION_CONFLICT", message: "File changed since AI request was made", currentVersion: file.version });
+    const safetyError = validateAIApplyContent(applyRequest.code, applyRequest.language, parsed.data.skipCheck);
     if (safetyError) return response.status(safetyError.status).json(safetyError);
     const lines = file.content.split("\n");
-    let nextContent = parsed.data.code;
+    let nextContent = applyRequest.code;
     let linesReplaced = lines.length;
-    if (parsed.data.range) {
-      if (parsed.data.range.endLine > lines.length) return response.status(400).json({ error: "INVALID_RANGE", message: "Apply range is outside the file" });
-      const start = parsed.data.range.startLine - 1;
-      const count = parsed.data.range.endLine - start;
-      lines.splice(start, count, ...parsed.data.code.split("\n"));
+    if (applyRequest.range) {
+      if (applyRequest.range.endLine > lines.length) return response.status(400).json({ error: "INVALID_RANGE", message: "Apply range is outside the file" });
+      const start = applyRequest.range.startLine - 1;
+      const count = applyRequest.range.endLine - start;
+      lines.splice(start, count, ...applyRequest.code.split("\n"));
       nextContent = lines.join("\n");
       linesReplaced = count;
     }
-    const saved = await saveFileRevision(file.id, userId, nextContent, parsed.data.expectedVersion, parsed.data.language, true, parsed.data.aiMessageId);
+    const saved = await saveFileRevision(file.id, userId, nextContent, applyRequest.expectedVersion, applyRequest.language, true, applyRequest.aiMessageId);
     if (!saved) return response.status(409).json({ error: "File was modified elsewhere", currentVersion: (await db.file.findUniqueOrThrow({ where: { id: file.id }, select: { version: true } })).version });
-    if (parsed.data.aiMessageId) {
-      const message = await db.aIMessage.findFirst({ where: { id: parsed.data.aiMessageId, conversation: { userId } } });
+    if (applyRequest.aiMessageId) {
+      const message = await db.aIMessage.findFirst({ where: { id: applyRequest.aiMessageId, conversation: { userId } } });
       if (message) await db.aIMessage.update({ where: { id: message.id }, data: { appliedToFileId: file.id, appliedAt: new Date() } });
     }
     return response.json({ file: { id: saved.file.id, version: saved.file.version, sizeBytes: saved.file.sizeBytes, updatedAt: saved.file.updatedAt }, revisionId: saved.revision.id, linesReplaced, appliedFromAI: true });
