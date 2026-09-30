@@ -1,4 +1,4 @@
-import "./lib/load-env.js";
+import "./lib/bootstrap.js";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
@@ -10,7 +10,7 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import pinoHttp from "pino-http";
 import { z } from "zod";
 import { db } from "@devpulse/database";
-import { authRouter } from "./routes/auth.js";
+import { authRouter, sessionMiddleware } from "./routes/auth.js";
 import { redis, redisConnection } from "./lib/redis.js";
 import { initKeys, verifyToken } from "./lib/jwt.js";
 
@@ -59,6 +59,8 @@ app.use(
 );
 app.use(express.json({ limit: "5mb" }));
 app.use(pinoHttp());
+app.use("/api/auth/github", sessionMiddleware);
+app.use("/api/auth/google", sessionMiddleware);
 app.use("/api/auth", authRouter);
 app.get("/health", (_request, response) =>
   response.json({ status: "ok", service: "api" }),

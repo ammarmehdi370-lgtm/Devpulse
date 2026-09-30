@@ -17,6 +17,21 @@ if (-not (Test-Path ".env")) {
     exit 1
 }
 
+$sessionLine = Get-Content ".env" | Where-Object { $_ -match '^\s*SESSION_SECRET\s*=' } | Select-Object -Last 1
+$sessionSecret = if ($sessionLine) { ($sessionLine -replace '^\s*SESSION_SECRET\s*=\s*', '').Trim().Trim('"').Trim("'") } else { "" }
+if ([string]::IsNullOrEmpty($sessionSecret)) {
+    Write-Host "ERROR: SESSION_SECRET is not set in .env" -ForegroundColor Red
+    Write-Host "Generate one with: openssl rand -hex 32"
+    Write-Host "Then add SESSION_SECRET=<your-value> to .env"
+    exit 1
+}
+if ($sessionSecret.Length -lt 32) {
+    Write-Host "ERROR: SESSION_SECRET is too short ($($sessionSecret.Length) chars; need at least 32)." -ForegroundColor Red
+    Write-Host "Generate a new one with: openssl rand -hex 32"
+    exit 1
+}
+Write-Host "SESSION_SECRET is configured" -ForegroundColor Green
+
 Write-Host "Starting PostgreSQL, Redis, and MinIO..."
 docker compose up -d postgres redis minio
 if ($LASTEXITCODE -ne 0) { throw "docker compose failed to start infrastructure" }

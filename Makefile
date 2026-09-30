@@ -1,4 +1,4 @@
-.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate seed studio
+.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate seed studio generate-secrets
 infra:
 	bash scripts/start-services.sh
 dev: infra
@@ -30,3 +30,9 @@ seed:
 	pnpm seed
 studio:
 	pnpm studio
+generate-secrets:
+	@echo "Copy these to your .env:"
+	@echo ""
+	@printf "SESSION_SECRET=" && openssl rand -hex 32
+	@printf "JWT_PRIVATE_KEY_PATH=./keys/private.pem\n"
+	@printf "JWT_PUBLIC_KEY_PATH=./keys/public.pem\n"

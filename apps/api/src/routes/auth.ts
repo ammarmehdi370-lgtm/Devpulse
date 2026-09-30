@@ -23,24 +23,30 @@ const MAGIC_RATE_LIMIT = 3;
 const MAGIC_RATE_WINDOW_SECONDS = 60 * 60;
 const memoryMagicTokens = new Map<string, { value: string; expiresAt: number }>();
 const memoryMagicRates = new Map<string, { count: number; expiresAt: number }>();
-
-if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
-  throw new Error("SESSION_SECRET must be configured in production");
-}
+const isTestEnvironment = process.env.NODE_ENV === "test";
+const sessionSecret = process.env.SESSION_SECRET ?? (isTestEnvironment ? randomBytes(32).toString("hex") : undefined);
+if (!sessionSecret) throw new Error("SESSION_SECRET is required. Generate one with: openssl rand -hex 32");
 
 setupPassport();
 
-router.use(session({
-  name: "devpulse_oauth_state",
-  ...(process.env.NODE_ENV === "test" ? {} : { store: new RedisStore({ client: redis, ttl: 600 }) }),
-  secret: process.env.SESSION_SECRET ?? "devpulse-development-oauth-session-secret",
+export const sessionMiddleware: express.RequestHandler = session({
+  store: isTestEnvironment ? undefined : new RedisStore({
+    client: redis,
+    prefix: "oauth-session:",
+    ttl: 600,
+  }),
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
+  name: "dp.oauth.sid",
   cookie: {
-    ...refreshCookieOptions,
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
     maxAge: 10 * 60 * 1000,
   },
-}));
+});
+
 router.use(passport.initialize());
 
 function strategy(provider: "github" | "google", mode: "start" | "callback") {

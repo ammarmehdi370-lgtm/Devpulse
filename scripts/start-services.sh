@@ -19,6 +19,24 @@ if [[ ! -f .env ]]; then
   exit 1
 fi
 
+session_secret="$(sed -n 's/^[[:space:]]*SESSION_SECRET[[:space:]]*=[[:space:]]*//p' .env | tail -n 1)"
+session_secret="${session_secret%\"}"
+session_secret="${session_secret#\"}"
+if [[ -z "$session_secret" ]]; then
+  echo >&2
+  echo "ERROR: SESSION_SECRET is not set in .env" >&2
+  echo "Generate one with: openssl rand -hex 32" >&2
+  echo "Then add SESSION_SECRET=<your-value> to .env" >&2
+  exit 1
+fi
+if [[ ${#session_secret} -lt 32 ]]; then
+  echo >&2
+  echo "ERROR: SESSION_SECRET is too short (${#session_secret} chars; need at least 32)." >&2
+  echo "Generate a new one with: openssl rand -hex 32" >&2
+  exit 1
+fi
+echo "SESSION_SECRET is configured"
+
 echo "Starting PostgreSQL, Redis, and MinIO..."
 docker compose up -d postgres redis minio
 
