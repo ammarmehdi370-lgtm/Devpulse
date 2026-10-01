@@ -1,6 +1,8 @@
 import { db } from "../src/index.js";
 
 async function main(): Promise<void> {
+  await db.oAuthAccount.deleteMany();
+
   const user = await db.user.upsert({
     where: { email: "demo@devpulse.local" },
     update: {},

@@ -1580,10 +1580,68 @@ app.delete("/v1/editor/session/:projectId", async (request, response, next) => {
   } catch (error) { return next(error); }
 });
 
+async function verifyDatabase(): Promise<void> {
+  try {
+    await db.$queryRaw`SELECT 1`;
+    const tables = await db.$queryRaw<Array<{ tablename: string }>>`
+      SELECT tablename
+      FROM pg_tables
+      WHERE schemaname = 'public'
+      ORDER BY tablename
+    `;
+    const tableNames = tables.map((table) => table.tablename);
+    const requiredTables = [
+      "User",
+      "Workspace",
+      "WorkspaceMember",
+      "oauth_accounts",
+      "Project",
+      "File",
+      "FileRevision",
+      "Channel",
+      "Message",
+    ];
+    const missingTables = requiredTables.filter(
+      (tableName) => !tableNames.includes(tableName),
+    );
+
+    if (missingTables.length > 0) {
+      console.error("\n[DB] Missing tables:");
+      missingTables.forEach((tableName) => console.error(`  - ${tableName}`));
+      console.error(
+        "\nRun migrations:\n" +
+          "  pnpm --filter @devpulse/database exec prisma migrate deploy\n",
+      );
+      process.exit(1);
+    }
+
+    console.log(`[DB] Schema verified (${tableNames.length} tables)`);
+  } catch (error: unknown) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? error.code
+        : undefined;
+    if (code === "P1001") {
+      console.error(
+        "\n[DB] Cannot connect to database.\n" +
+          "Is PostgreSQL running?\n" +
+          "  docker compose up -d postgres\n",
+      );
+    } else {
+      console.error(
+        "[DB] Database error:",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    process.exit(1);
+  }
+}
+
 export { app };
 
 if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") {
   async function startServer(): Promise<void> {
+    await verifyDatabase();
     await initKeys();
     await new Promise<void>((resolve, reject) => {
       const server = app.listen(port, () => {

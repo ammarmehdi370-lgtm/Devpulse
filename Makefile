@@ -1,4 +1,4 @@
-.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate seed studio generate-secrets
+.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio generate-secrets
 infra:
 	bash scripts/start-services.sh
 dev: infra
@@ -26,6 +26,13 @@ typecheck:
 	pnpm typecheck
 migrate:
 	pnpm migrate
+db-status:
+	pnpm --filter @devpulse/database exec prisma migrate status
+db-migrate:
+	pnpm --filter @devpulse/database exec prisma migrate deploy
+db-reset:
+	pnpm --filter @devpulse/database exec prisma migrate reset --force
+	pnpm seed
 seed:
 	pnpm seed
 studio:
