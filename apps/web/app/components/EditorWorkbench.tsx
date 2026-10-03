@@ -31,12 +31,20 @@ import {
   File,
   Code2,
   FolderOpen,
+  ChevronRight,
 } from "lucide-react";
-import { FriendlyHint, HelpfulInfo, friendlyConfirm } from "./FriendlyHelpers";
+import {
+  FriendlyHint,
+  HelpfulInfo,
+  friendlyAlert,
+  friendlyConfirm,
+} from "./FriendlyHelpers";
 
 export const EditorWorkbench: React.FC = () => {
   const {
     theme,
+    workspaces,
+    setPage,
     isEditorProjectOpen,
     setIsEditorProjectOpen,
     editorProjectId,
@@ -46,6 +54,8 @@ export const EditorWorkbench: React.FC = () => {
     loadedProjectName,
     setLoadedProjectName,
     treeFiles,
+    treeFolders,
+    createNewFolder,
     openFiles,
     activeFileId,
     setActiveFileId,
@@ -77,6 +87,12 @@ export const EditorWorkbench: React.FC = () => {
   >([]);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [newFileNameInput, setNewFileNameInput] = useState("");
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderNameInput, setNewFolderNameInput] = useState("");
+  const [selectedFolder, setSelectedFolder] = useState("");
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [runOutput, setRunOutput] = useState<string | null>(null);
   const [isRunningCode, setIsRunningCode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -99,7 +115,11 @@ export const EditorWorkbench: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = (event.target?.result as string) || "";
-      loadSingleLocalFile(file.name, content);
+      void loadSingleLocalFile(file.name, content).catch((error: unknown) =>
+        friendlyAlert(
+          error instanceof Error ? error.message : "Unable to open this file.",
+        ),
+      );
     };
     reader.readAsText(file);
   };
@@ -127,7 +147,14 @@ export const EditorWorkbench: React.FC = () => {
         });
         readCount++;
         if (readCount === maxFiles) {
-          loadUserLocalFiles(folderName, loadedList);
+          void loadUserLocalFiles(folderName, loadedList).catch(
+            (error: unknown) =>
+              friendlyAlert(
+                error instanceof Error
+                  ? error.message
+                  : "Unable to open this folder.",
+              ),
+          );
         }
       };
       reader.readAsText(f);
@@ -137,7 +164,10 @@ export const EditorWorkbench: React.FC = () => {
   const handleCreateNewFile = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFileNameInput.trim()) return;
-    void createNewFile(newFileNameInput.trim(), newFileNameInput.trim(), "")
+    const filePath = [selectedFolder, newFileNameInput.trim()]
+      .filter(Boolean)
+      .join("/");
+    void createNewFile(filePath, filePath, "")
       .then(() => {
         setNewFileNameInput("");
         setIsCreatingFile(false);
@@ -147,6 +177,133 @@ export const EditorWorkbench: React.FC = () => {
           error instanceof Error ? error.message : "Unable to create file",
         ),
       );
+  };
+
+  const handleCreateNewFolder = (e: React.FormEvent) => {
+    e.preventDefault();
+    const folderName = newFolderNameInput.trim();
+    if (!folderName) return;
+    const folderPath = [selectedFolder, folderName].filter(Boolean).join("/");
+    createNewFolder(folderPath);
+    setSelectedFolder(folderPath);
+    if (!isEditorProjectOpen) {
+      setLoadedProjectName("Local workspace");
+      setIsEditorProjectOpen(true);
+      setIsFileTreeOpen(true);
+    }
+    setNewFolderNameInput("");
+    setIsCreatingFolder(false);
+  };
+
+  const renderExplorerContents = (parentPath = "", depth = 0) => {
+    if (parentPath && collapsedFolders.has(parentPath)) return null;
+
+    const childFolders = treeFolders.filter((folderPath) => {
+      const parent = folderPath.split("/").slice(0, -1).join("/");
+      return parent === parentPath;
+    });
+    const childFiles = treeFiles.filter(
+      (file) => file.path.split("/").slice(0, -1).join("/") === parentPath,
+    );
+
+    return (
+      <>
+        {childFolders.map((folderPath) => {
+          const isCollapsed = collapsedFolders.has(folderPath);
+          const folderName = folderPath.split("/").pop();
+          return (
+            <React.Fragment key={folderPath}>
+              <div
+                className={`flex items-center rounded transition-colors ${selectedFolder === folderPath ? "bg-[#1a1a2b] text-white" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+                style={{ paddingLeft: `${depth * 12}px` }}
+              >
+                <button
+                  type="button"
+                  aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${folderName}`}
+                  aria-expanded={!isCollapsed}
+                  onClick={() =>
+                    setCollapsedFolders((previous) => {
+                      const next = new Set(previous);
+                      if (next.has(folderPath)) next.delete(folderPath);
+                      else next.add(folderPath);
+                      return next;
+                    })
+                  }
+                  className="flex h-7 w-6 shrink-0 items-center justify-center rounded hover:bg-white/5"
+                >
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFolder(folderPath)}
+                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
+                  title={folderPath}
+                >
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-[#FFAE64]" />
+                  <span className="truncate">{folderName}</span>
+                </button>
+              </div>
+              {renderExplorerContents(folderPath, depth + 1)}
+            </React.Fragment>
+          );
+        })}
+        {childFiles.map((file) => (
+          <div
+            key={file.id}
+            className={`group flex items-center justify-between rounded py-1.5 pr-2 text-left transition-colors cursor-pointer ${activeFile?.id === file.id ? "bg-[#1a1a2b] text-white font-semibold" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+            style={{ paddingLeft: `${depth * 12 + 24}px` }}
+            onClick={() => openFileInEditor(file)}
+          >
+            <div className="flex min-w-0 items-center gap-2 truncate">
+              <span
+                className={`shrink-0 text-[10px] px-1 rounded font-bold uppercase ${
+                  file.iconType === "ts"
+                    ? "bg-[#3178c6]/20 text-[#3178c6]"
+                    : file.iconType === "py"
+                      ? "bg-[#3572A5]/20 text-[#3572A5]"
+                      : file.iconType === "json"
+                        ? "bg-[#FF9E64]/20 text-[#FF9E64]"
+                        : "bg-white/10 text-white"
+                }`}
+              >
+                {file.iconType}
+              </span>
+              <span className="truncate">{file.name}</span>
+            </div>
+            <button
+              type="button"
+              aria-label={`Delete ${file.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                void (async () => {
+                  if (
+                    await friendlyConfirm(
+                      `Delete ${file.name}? This cannot be undone.`,
+                    )
+                  ) {
+                    try {
+                      await deleteFile(file.id);
+                    } catch (error) {
+                      await friendlyAlert(
+                        error instanceof Error
+                          ? error.message
+                          : "Could not delete the file.",
+                      );
+                    }
+                  }
+                })();
+              }}
+              className="shrink-0 rounded p-0.5 opacity-0 hover:text-[#f87171] group-hover:opacity-100"
+              title="Delete file"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+      </>
+    );
   };
 
   // Run Code Dynamically
@@ -374,48 +531,63 @@ export const EditorWorkbench: React.FC = () => {
                     </div>
                   </div>
                 </button>
+                <button
+                  onClick={() => setIsCreatingFolder(true)}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
+                >
+                  <FolderPlus className="w-4 h-4 text-[#FF9E64]" />
+                  <div>
+                    <div className="font-semibold text-white group-hover:text-[#FF9E64] transition-colors">
+                      New Folder...
+                    </div>
+                    <div className="text-[10px] text-[#6d6d88] font-mono">
+                      Create a folder in this workspace
+                    </div>
+                  </div>
+                </button>
               </div>
             </div>
 
             <div className="space-y-3">
               <div className="text-[11px] font-mono text-[#6c6c88] uppercase tracking-wider">
-                CLOUD WORKSPACES
+                YOUR WORKSPACES · {workspaces.length}
               </div>
               <div className="space-y-2 text-xs">
-                <button
-                  onClick={() => void loadEditorProject()}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-gradient-to-r from-[#0DF5C4]/10 to-[#6C63FF]/10 hover:from-[#0DF5C4]/20 hover:to-[#6C63FF]/20 border border-[#0DF5C4]/30 text-white transition-all text-left group shadow-sm"
-                >
-                  <Sparkles className="w-4 h-4 text-[#0DF5C4]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#0DF5C4] transition-colors">
-                      Open devpulse-core / staging
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      TypeScript Microkernel & Telemetry (Ready)
-                    </div>
+                {workspaces.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-[#29293a] px-4 py-6 text-center">
+                    <p className="text-[#9292a9]">No workspaces created yet.</p>
+                    <button
+                      type="button"
+                      onClick={() => setPage("workspaces")}
+                      className="mt-3 rounded-lg border border-[#343444] px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-white/5"
+                    >
+                      Go to Workspaces
+                    </button>
                   </div>
-                </button>
-
-                <button
-                  onClick={() => {
-                    loadSingleLocalFile(
-                      "main.py",
-                      "# FastAPI Neural Agent Worker\nfrom fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get('/')\ndef index():\n    return {'status': 'live', 'service': 'neural-coder'}\n",
-                    );
-                  }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <Code2 className="w-4 h-4 text-[#FF9E64]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#FF9E64] transition-colors">
-                      Open Python FastAPI Service
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      FastAPI Python · Uvicorn Daemon
-                    </div>
-                  </div>
-                </button>
+                ) : (
+                  workspaces.map((workspace) => (
+                    <button
+                      key={workspace.id}
+                      type="button"
+                      onClick={() => {
+                        void loadEditorProject().then(() =>
+                          setLoadedProjectName(workspace.name),
+                        );
+                      }}
+                      className="w-full flex items-center gap-3 rounded-xl border border-[#242436] bg-[#151522] p-3 text-left text-white transition hover:border-[#0DF5C4]/40 hover:bg-[#1c1c2e]"
+                    >
+                      <Sparkles className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-semibold">
+                          {workspace.name}
+                        </span>
+                        <span className="mt-1 block truncate font-mono text-[10px] text-[#777791]">
+                          {workspace.repo} / {workspace.branch} · {workspace.status}
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -449,6 +621,41 @@ export const EditorWorkbench: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsCreatingFile(false)}
+                  className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          {isCreatingFolder && (
+            <form
+              onSubmit={handleCreateNewFolder}
+              className="p-4 bg-[#161624] border border-[#2a2a3e] rounded-2xl space-y-3"
+            >
+              <div className="text-xs font-bold text-white font-mono">
+                Create Workspace Folder
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  autoFocus
+                  required
+                  placeholder="e.g. src, components, tests"
+                  value={newFolderNameInput}
+                  onChange={(event) => setNewFolderNameInput(event.target.value)}
+                  className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
+                />
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
+                  style={{ backgroundColor: theme.primary }}
+                >
+                  Create Folder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingFolder(false)}
                   className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
                 >
                   Cancel
@@ -570,6 +777,13 @@ export const EditorWorkbench: React.FC = () => {
 
                 <div className="flex items-center gap-1">
                   <button
+                    onClick={() => setIsCreatingFolder(true)}
+                    title="New Folder"
+                    className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
+                  >
+                    <FolderPlus className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => setIsCreatingFile(true)}
                     title="New File"
                     className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
@@ -592,7 +806,16 @@ export const EditorWorkbench: React.FC = () => {
                   <span>WORKSPACE FILES ({treeFiles.length})</span>
                 </div>
 
-                {treeFiles.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setSelectedFolder("")}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors ${selectedFolder === "" ? "bg-[#1a1a2b] text-white" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+                >
+                  <Folder className="h-3.5 w-3.5 text-[#0DF5C4]" />
+                  <span>Workspace root</span>
+                </button>
+
+                {treeFiles.length === 0 && treeFolders.length === 0 ? (
                   <div className="p-4 text-center text-[11px] text-[#63637e] space-y-2">
                     <p>No files loaded.</p>
                     <button
@@ -603,53 +826,45 @@ export const EditorWorkbench: React.FC = () => {
                     </button>
                   </div>
                 ) : (
-                  treeFiles.map((file) => (
-                    <div
-                      key={file.id}
-                      className={`group flex items-center justify-between px-2 py-1.5 rounded text-left transition-colors cursor-pointer ${
-                        activeFile?.id === file.id
-                          ? "bg-[#1a1a2b] text-white font-semibold"
-                          : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"
-                      }`}
-                      onClick={() => openFileInEditor(file)}
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <span
-                          className={`text-[10px] px-1 rounded font-bold uppercase ${
-                            file.iconType === "ts"
-                              ? "bg-[#3178c6]/20 text-[#3178c6]"
-                              : file.iconType === "py"
-                                ? "bg-[#3572A5]/20 text-[#3572A5]"
-                                : file.iconType === "json"
-                                  ? "bg-[#FF9E64]/20 text-[#FF9E64]"
-                                  : "bg-white/10 text-white"
-                          }`}
-                        >
-                          {file.iconType}
-                        </span>
-                        <span className="truncate">{file.name}</span>
-                      </div>
-
-                      {/* Delete File action */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (
-                            friendlyConfirm(
-                              `Delete ${file.name}? This cannot be undone.`,
-                            )
-                          )
-                            void deleteFile(file.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 hover:text-[#f87171] p-0.5"
-                        title="Delete file"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))
+                  renderExplorerContents()
                 )}
               </div>
+
+              {isCreatingFolder && (
+                <form
+                  onSubmit={handleCreateNewFolder}
+                  className="p-2 bg-[#161624] border border-[#2b2b3e] rounded-xl space-y-2"
+                >
+                  <div className="text-[10px] text-[#8b8ba8]">
+                    New folder in {selectedFolder || "workspace root"}
+                  </div>
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    placeholder="folder-name"
+                    value={newFolderNameInput}
+                    onChange={(e) => setNewFolderNameInput(e.target.value)}
+                    className="w-full px-2 py-1 bg-[#101018] border border-[#262638] rounded-lg text-xs font-mono text-white focus:outline-none"
+                  />
+                  <div className="flex justify-end gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingFolder(false)}
+                      className="px-2 py-0.5 text-[10px] text-[#787896]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-2 py-0.5 text-[10px] rounded font-semibold text-[#09090e]"
+                      style={{ backgroundColor: theme.primary }}
+                    >
+                      Create Folder
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {/* Inline New File Form if opened */}
               {isCreatingFile && (
@@ -657,6 +872,9 @@ export const EditorWorkbench: React.FC = () => {
                   onSubmit={handleCreateNewFile}
                   className="p-2 bg-[#161624] border border-[#2b2b3e] rounded-xl space-y-2"
                 >
+                  <div className="text-[10px] text-[#8b8ba8]">
+                    New file in {selectedFolder || "workspace root"}
+                  </div>
                   <input
                     type="text"
                     autoFocus

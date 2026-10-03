@@ -15,6 +15,7 @@ import { AppShell } from "./components/AppShell";
 import { CloudCoreDashboard } from "./components/CloudCoreDashboard";
 import { ActivityPage } from "./components/ActivityPage";
 import { CommandPalette } from "./components/CommandPalette";
+import { ModalHost } from "./components/FriendlyHelpers";
 
 const PanelLoading = () => (
   <div
@@ -95,8 +96,8 @@ function MainAppContent() {
     <AppShell>
       {page === "repositories" && <RepositoriesPage />}
       {page === "workspaces" && <WorkspacesPage />}
-      {page === "deployments" && <DeploymentsPage />}
       {page === "activity" && <ActivityPage />}
+      {page === "deployments" && <DeploymentsPage />}
       {page === "chat" && <TeamChatPage />}
       {page === "editor" && <EditorWorkbench />}
       {page === "remote-control" && <RemoteControlPage />}
@@ -114,6 +115,7 @@ export default function HomePage() {
       <AppErrorBoundary>
         <MainAppContent />
         <CommandPalette />
+        <ModalHost />
       </AppErrorBoundary>
     </AppProvider>
   );

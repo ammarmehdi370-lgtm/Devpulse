@@ -28,7 +28,12 @@ import {
   Loader2,
   Plus,
 } from "lucide-react";
-import { FriendlyHint, HelpfulInfo, friendlyConfirm } from "./FriendlyHelpers";
+import {
+  FriendlyHint,
+  HelpfulInfo,
+  friendlyAlert,
+  friendlyConfirm,
+} from "./FriendlyHelpers";
 import { PageHeader } from "./PageHeader";
 import { WorkspaceCardSkeleton } from "./SkeletonLoaders";
 
@@ -141,8 +146,11 @@ export const WorkspacesPage: React.FC = () => {
     setTimeout(() => setCliCopied(false), 2000);
   };
 
-  const askBeforeWorkspaceAction = (message: string, action: () => void) => {
-    if (friendlyConfirm(message)) action();
+  const askBeforeWorkspaceAction = async (
+    message: string,
+    action: () => void,
+  ) => {
+    if (await friendlyConfirm(message)) action();
   };
 
   const handleToggleWorkspace = async (ws: WorkspaceDevbox) => {
@@ -168,7 +176,7 @@ export const WorkspacesPage: React.FC = () => {
 
   const handleDeleteWorkspace = async (ws: WorkspaceDevbox) => {
     if (
-      !friendlyConfirm(`Delete workspace "${ws.name}"? This cannot be undone.`)
+      !(await friendlyConfirm(`Delete workspace "${ws.name}"? This cannot be undone.`))
     )
       return;
     setDeletingId(ws.id);
@@ -476,7 +484,7 @@ export const WorkspacesPage: React.FC = () => {
           <div className="flex items-center gap-3 text-xs font-mono">
             <button
               onClick={() =>
-                alert(
+                void friendlyAlert(
                   "Devpulse Cloud Documentation: Hypervisor MicroVM Specs & Architecture",
                 )
               }

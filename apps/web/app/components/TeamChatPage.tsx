@@ -1,11 +1,16 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useApp } from "../context/AppContext";
 import {
   Hash,
   Send,
+  Bold,
+  Italic,
+  Underline,
+  List,
+  ListOrdered,
   Users,
   FileText,
   Download,
@@ -25,6 +30,7 @@ interface ChatMessage {
   avatar: string;
   time: string;
   text: string;
+  richTextHtml?: string;
   hasCode?: boolean;
   codeFilename?: string;
   codeSnippet?: string;
@@ -43,12 +49,51 @@ const channelDescriptions: Record<string, string> = {
   random: "Off-topic team conversation",
 };
 
+const allowedMessageTags = new Set([
+  "B",
+  "BR",
+  "CODE",
+  "EM",
+  "I",
+  "LI",
+  "OL",
+  "P",
+  "STRONG",
+  "U",
+  "UL",
+]);
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const sanitizeMessageHtml = (html: string) => {
+  const documentFragment = new DOMParser().parseFromString(html, "text/html");
+  const sanitizeNode = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return escapeHtml(node.textContent || "");
+    if (!(node instanceof HTMLElement)) return "";
+
+    const tagName = node.tagName;
+    const children = Array.from(node.childNodes).map(sanitizeNode).join("");
+    if (!allowedMessageTags.has(tagName)) return children;
+    if (tagName === "BR") return "<br>";
+    return `<${tagName.toLowerCase()}>${children}</${tagName.toLowerCase()}>`;
+  };
+
+  return Array.from(documentFragment.body.childNodes).map(sanitizeNode).join("");
+};
+
 export const TeamChatPage: React.FC = () => {
   const { theme, user } = useApp();
   const [activeChannel, setActiveChannel] = useState("frontend");
   const [isChannelDetailsOpen, setIsChannelDetailsOpen] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(true);
-  const [messageInput, setMessageInput] = useState("");
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [isMessageEmpty, setIsMessageEmpty] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -103,9 +148,17 @@ export const TeamChatPage: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, []);
 
+  const handleFormat = (command: string) => {
+    editorRef.current?.focus();
+    document.execCommand(command, false);
+    setIsMessageEmpty(!editorRef.current?.innerText.trim());
+  };
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageInput.trim()) return;
+    const editor = editorRef.current;
+    const text = editor?.innerText.trim() || "";
+    if (!editor || !text) return;
 
     const newMsg = {
       id: Date.now(),
@@ -114,12 +167,14 @@ export const TeamChatPage: React.FC = () => {
       roleColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
       avatar: user.avatar,
       time: "Just now",
-      text: messageInput.trim(),
+      text,
+      richTextHtml: sanitizeMessageHtml(editor.innerHTML),
       reactions: [],
     };
 
     setMessages([...messages, newMsg]);
-    setMessageInput("");
+    editor.innerHTML = "";
+    setIsMessageEmpty(true);
   };
 
   return (
@@ -434,9 +489,16 @@ export const TeamChatPage: React.FC = () => {
                     </span>
                   </div>
 
-                  <p className="max-w-4xl text-sm leading-6 text-[#d3d3e1]">
-                    {msg.text}
-                  </p>
+                  {msg.richTextHtml ? (
+                    <div
+                      className="max-w-4xl whitespace-pre-wrap break-words text-sm leading-6 text-[#d3d3e1] [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-6 [&_code]:rounded [&_code]:bg-[#1b1b27] [&_code]:px-1 [&_code]:font-mono [&_strong]:font-semibold [&_u]:underline"
+                      dangerouslySetInnerHTML={{ __html: msg.richTextHtml }}
+                    />
+                  ) : (
+                    <p className="max-w-4xl text-sm leading-6 text-[#d3d3e1]">
+                      {msg.text}
+                    </p>
+                  )}
 
                   {/* Embedded Syntax Code Block */}
                   {msg.hasCode && (
@@ -505,24 +567,61 @@ export const TeamChatPage: React.FC = () => {
         {/* Chat Input */}
         <div className="shrink-0 border-t border-[#1c1c2b] bg-[#0c0c13] px-3 py-3 sm:px-6 sm:py-4">
           <form onSubmit={handleSendMessage} className="mx-auto max-w-5xl">
-        <div className="flex items-center gap-2 rounded-lg border border-[#343444] bg-[#14141e] p-1.5 transition-colors focus-within:border-[#0DF5C4]/70 focus-within:shadow-[0_0_0_3px_rgba(13,245,196,0.06)]">
-              <input
-                type="text"
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-                placeholder={`Message #${activeChannel}...`}
-                aria-label={`Message #${activeChannel}`}
-                className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-white placeholder-[#777791] focus:outline-none"
-              />
+            <div className="rounded-lg border border-[#343444] bg-[#14141e] transition-colors focus-within:border-[#0DF5C4]/70 focus-within:shadow-[0_0_0_3px_rgba(13,245,196,0.06)]">
+              <div className="flex items-center gap-1 border-b border-[#29293a] px-2 py-1.5">
+                {[
+                  { command: "bold", label: "Bold", Icon: Bold },
+                  { command: "italic", label: "Italic", Icon: Italic },
+                  { command: "underline", label: "Underline", Icon: Underline },
+                  { command: "insertUnorderedList", label: "Bulleted list", Icon: List },
+                  { command: "insertOrderedList", label: "Numbered list", Icon: ListOrdered },
+                ].map(({ command, label, Icon }) => (
+                  <button
+                    key={command}
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleFormat(command)}
+                    className="flex h-8 w-8 items-center justify-center rounded text-[#a0a0b6] transition hover:bg-[#242432] hover:text-white"
+                  >
+                    <Icon className="h-4 w-4" />
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-end gap-2 p-1.5">
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  role="textbox"
+                  aria-multiline="true"
+                  aria-label={`Message #${activeChannel}`}
+                  data-placeholder={`Message #${activeChannel}...`}
+                  onInput={(event) =>
+                    setIsMessageEmpty(!event.currentTarget.innerText.trim())
+                  }
+                  onPaste={(event) => {
+                    event.preventDefault();
+                    document.execCommand(
+                      "insertText",
+                      false,
+                      event.clipboardData.getData("text/plain"),
+                    );
+                    setIsMessageEmpty(!editorRef.current?.innerText.trim());
+                  }}
+                  className="max-h-36 min-h-10 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-sm leading-6 text-white outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-[#777791]"
+                />
               <button
                 type="submit"
-                disabled={!messageInput.trim()}
+                disabled={isMessageEmpty}
                 className="flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-semibold text-[#09090e] transition-opacity active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 sm:px-4"
                 style={{ backgroundColor: theme.primary }}
               >
                 <span>Send</span>
                 <Send className="h-3.5 w-3.5" />
               </button>
+              </div>
             </div>
           </form>
         </div>

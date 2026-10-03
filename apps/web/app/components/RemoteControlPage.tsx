@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import { useApp } from "../context/AppContext";
+import { friendlyAlert, friendlyConfirm } from "./FriendlyHelpers";
 import { io, Socket } from "socket.io-client";
 import {
   Layers,
@@ -107,8 +108,8 @@ export const RemoteControlPage: React.FC = () => {
     return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const handleStopSession = () => {
-    if (confirm("End this Pulse Pilot session?")) {
+  const handleStopSession = async () => {
+    if (await friendlyConfirm("End this Pulse Pilot session?")) {
       setPage("editor");
     }
   };
@@ -122,9 +123,12 @@ export const RemoteControlPage: React.FC = () => {
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h1 className="text-sm font-semibold text-white sm:text-base">Pulse Pilot</h1>
+              <h1 className="text-sm font-semibold text-white sm:text-base">
+                Pulse Pilot
+              </h1>
               <span className="flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2 py-0.5 font-mono text-[9px] font-semibold text-[#0DF5C4]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" /> LIVE SESSION
+                <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" /> LIVE
+                SESSION
               </span>
             </div>
             <p className="mt-0.5 truncate text-[11px] text-[#9292a9] sm:text-xs">
@@ -132,20 +136,28 @@ export const RemoteControlPage: React.FC = () => {
             </p>
           </div>
         </div>
-        <span className="hidden text-xs text-[#85859e] lg:block">Edits sync in real time</span>
+        <span className="hidden text-xs text-[#85859e] lg:block">
+          Edits sync in real time
+        </span>
       </header>
 
       <div className="z-20 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[#242432] bg-[#0d0d14] px-4 py-2.5 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#09090e]" style={{ backgroundColor: theme.primary }}>
+            <div
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#09090e]"
+              style={{ backgroundColor: theme.primary }}
+            >
               <Layers className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-semibold text-white">Ahmed&apos;s Workspace</span>
+                <span className="truncate text-sm font-semibold text-white">
+                  Ahmed&apos;s Workspace
+                </span>
                 <span className="flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2 py-0.5 font-mono text-[9px] font-bold text-[#0DF5C4]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" /> LIVE
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" />{" "}
+                  LIVE
                 </span>
               </div>
               <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-[#8e8ea6]">
@@ -174,8 +186,12 @@ export const RemoteControlPage: React.FC = () => {
               />
             </div>
             <div className="leading-tight">
-              <div className="text-[11px] font-medium text-[#d5d5e2]">2 collaborators</div>
-              <div className="mt-0.5 text-[9px] text-[#85859e]">Ahmed · you</div>
+              <div className="text-[11px] font-medium text-[#d5d5e2]">
+                2 collaborators
+              </div>
+              <div className="mt-0.5 text-[9px] text-[#85859e]">
+                Ahmed · you
+              </div>
             </div>
           </div>
         </div>
@@ -214,9 +230,12 @@ export const RemoteControlPage: React.FC = () => {
 
             <div className="flex shrink-0 items-center gap-2 text-[10px] sm:gap-3 sm:text-[11px]">
               <span className="flex items-center gap-1 text-[#0DF5C4]">
-                <Check className="h-3 w-3" /> <span className="hidden sm:inline">Read &amp; write</span>
+                <Check className="h-3 w-3" />{" "}
+                <span className="hidden sm:inline">Read &amp; write</span>
               </span>
-              <span className="hidden text-[#8c8ca5] sm:inline">Synced · 8ms</span>
+              <span className="hidden text-[#8c8ca5] sm:inline">
+                Synced · 8ms
+              </span>
             </div>
           </div>
 
@@ -241,9 +260,12 @@ export const RemoteControlPage: React.FC = () => {
                   <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-[#6C63FF]/25 bg-[#6C63FF]/10 text-[#aaa4ff]">
                     <Code2 className="h-5 w-5" />
                   </div>
-                  <div className="text-sm font-medium text-[#d0d0df]">Your editor is ready</div>
+                  <div className="text-sm font-medium text-[#d0d0df]">
+                    Your editor is ready
+                  </div>
                   <p className="mt-1.5 text-xs leading-5 text-[#77778f]">
-                    When Ahmed opens a file, it will appear here for both of you to edit.
+                    When Ahmed opens a file, it will appear here for both of you
+                    to edit.
                   </p>
                 </div>
               )}
@@ -315,9 +337,12 @@ export const RemoteControlPage: React.FC = () => {
                   <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-[#FF9E64]/25 bg-[#FF9E64]/10 text-[#FFAE80]">
                     <Monitor className="h-5 w-5" />
                   </div>
-                  <div className="text-sm font-medium text-[#d0d0df]">Waiting for Ahmed&apos;s screen</div>
+                  <div className="text-sm font-medium text-[#d0d0df]">
+                    Waiting for Ahmed&apos;s screen
+                  </div>
                   <p className="mt-1.5 text-xs leading-5 text-[#77778f]">
-                    The host&apos;s open file and cursor will show here as soon as they connect.
+                    The host&apos;s open file and cursor will show here as soon
+                    as they connect.
                   </p>
                 </div>
               ) : (
@@ -325,7 +350,6 @@ export const RemoteControlPage: React.FC = () => {
                   <code>{remoteCode}</code>
                 </pre>
               )}
-
             </div>
           </div>
         </section>
@@ -336,7 +360,9 @@ export const RemoteControlPage: React.FC = () => {
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             type="button"
-            aria-label={isRemoteMuted ? "Turn microphone on" : "Mute microphone"}
+            aria-label={
+              isRemoteMuted ? "Turn microphone on" : "Mute microphone"
+            }
             onClick={() => setIsRemoteMuted((prev) => !prev)}
             className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs transition-colors ${
               isRemoteMuted
@@ -372,13 +398,27 @@ export const RemoteControlPage: React.FC = () => {
 
           <button
             type="button"
-            aria-label={isRemoteControlling ? "Release workspace control" : "Request workspace control"}
+            aria-label={
+              isRemoteControlling
+                ? "Release workspace control"
+                : "Request workspace control"
+            }
             onClick={() => setIsRemoteControlling((prev) => !prev)}
             className={`flex min-h-10 items-center gap-2 rounded-lg px-3.5 text-xs font-semibold transition-colors ${isRemoteControlling ? "text-[#09090e] hover:brightness-110" : "border border-[#343444] bg-[#191923] text-white hover:bg-[#22222d]"}`}
-            style={isRemoteControlling ? { backgroundColor: theme.primary } : undefined}
+            style={
+              isRemoteControlling
+                ? { backgroundColor: theme.primary }
+                : undefined
+            }
           >
-            {isRemoteControlling ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-            <span>{isRemoteControlling ? "Release control" : "Request control"}</span>
+            {isRemoteControlling ? (
+              <Lock className="h-3.5 w-3.5" />
+            ) : (
+              <Unlock className="h-3.5 w-3.5" />
+            )}
+            <span>
+              {isRemoteControlling ? "Release control" : "Request control"}
+            </span>
           </button>
 
           <label className="hidden items-center gap-2 border-l border-[#29293a] pl-3 text-xs text-[#a0a0b5] lg:flex">
@@ -396,7 +436,7 @@ export const RemoteControlPage: React.FC = () => {
           <button
             type="button"
             onClick={() =>
-              alert("Terminal sharing enabled. Port 8080 forwarded.")
+              void friendlyAlert("Terminal sharing enabled. Port 8080 forwarded.")
             }
             className="hidden min-h-10 items-center gap-2 rounded-lg border border-[#343444] bg-[#191923] px-3 text-xs text-[#c4c4dc] transition-colors hover:bg-[#22222d] hover:text-white sm:flex"
           >

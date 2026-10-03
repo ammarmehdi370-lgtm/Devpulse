@@ -162,9 +162,9 @@ export const RepositoriesPage: React.FC = () => {
 
   const handleDeleteRepo = async (repo: Repository) => {
     if (
-      !friendlyConfirm(
+      !(await friendlyConfirm(
         `Remove project ${repo.name}? This will delete the project from this list and cannot be undone from this screen.`,
-      )
+      ))
     )
       return;
     setDeletingId(repo.id);

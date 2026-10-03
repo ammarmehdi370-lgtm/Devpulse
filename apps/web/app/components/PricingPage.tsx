@@ -15,7 +15,7 @@ import {
   Users,
   SlidersHorizontal,
 } from "lucide-react";
-import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
+import { FriendlyHint, HelpfulInfo, friendlyAlert } from "./FriendlyHelpers";
 
 export const PricingPage: React.FC = () => {
   const { theme, billingCycle, setBillingCycle, setPage } = useApp();
@@ -244,15 +244,21 @@ export const PricingPage: React.FC = () => {
               <SlidersHorizontal className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-xl font-bold text-white">Customizable plan</h3>
+              <h3 className="text-xl font-bold text-white">
+                Customizable plan
+              </h3>
               <p className="mt-1 text-xs leading-5 text-[#a2b4b0]">
-                Only pay for the tools your workflow needs. Build a plan one feature at a time.
+                Only pay for the tools your workflow needs. Build a plan one
+                feature at a time.
               </p>
             </div>
             <div className="border-t border-[#25413c] pt-4">
-              <div className="font-mono text-3xl font-bold text-white">Your mix</div>
+              <div className="font-mono text-3xl font-bold text-white">
+                Your mix
+              </div>
               <p className="mt-1 text-[11px] leading-5 text-[#94a7a2]">
-                Choose AI Assistant, Pulse Pilot, Team Chat, workspaces, and more.
+                Choose AI Assistant, Pulse Pilot, Team Chat, workspaces, and
+                more.
               </p>
             </div>
           </div>
@@ -326,7 +332,7 @@ export const PricingPage: React.FC = () => {
 
           <button
             onClick={() =>
-              alert("Contacting Devpulse Enterprise engineering sales team.")
+              void friendlyAlert("Contacting Devpulse Enterprise engineering sales team.")
             }
             className="w-full py-3 px-4 rounded-xl bg-[#171724] hover:bg-[#202032] border border-[#2b2b40] text-white font-semibold text-xs transition-colors flex items-center justify-center gap-2"
           >
@@ -446,7 +452,7 @@ export const PricingPage: React.FC = () => {
             Create Free Account
           </button>
           <button
-            onClick={() => alert("Opening engineering conversation channel.")}
+            onClick={() => void friendlyAlert("Opening engineering conversation channel.")}
             className="px-4 py-2.5 rounded-xl bg-[#181826] hover:bg-[#202034] border border-[#2c2c40] text-white text-xs font-semibold transition-colors"
           >
             Talk with Engineering

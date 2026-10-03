@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useApp, PageType } from "../context/AppContext";
 import { ToastContainer } from "./ToastContainer";
+import { friendlyAlert } from "./FriendlyHelpers";
 import { OnboardingTour } from "./OnboardingTour";
 import {
   Box,
@@ -63,6 +64,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   // Check if current view is Workbench mode (Screenshots 1 & 3)
   const isWorkbenchMode = page === "editor" || page === "ai-studio";
   const isCompactCloudCore = page === "cloud-core";
+  const isAiStudio = page === "ai-studio";
 
   // Standard platform items
   const platformNavItems: {
@@ -71,9 +73,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     icon: React.ComponentType<{ className?: string }>;
   }[] = [
     { id: "workspaces", label: "Your Workspaces", icon: Box },
+    { id: "activity", label: "Your Activity", icon: Activity },
     { id: "cloud-core", label: "Cloud Core Engine", icon: Gauge },
     { id: "repositories", label: "Your Code Projects", icon: GitFork },
-    { id: "activity", label: "Your Activity", icon: Activity },
     { id: "editor", label: "Code Editor", icon: Code2 },
     { id: "deployments", label: "Live Releases", icon: Rocket },
     { id: "remote-control", label: "Pulse Pilot", icon: Monitor },
@@ -127,7 +129,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       id: "databases",
       label: "Databases",
       icon: Database,
-      action: () => alert("Postgres Devbox cluster online."),
+      action: () => void friendlyAlert("Postgres Devbox cluster online."),
     },
     {
       id: "api-sandbox",
@@ -138,7 +140,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   ];
 
   return (
-    <div className="min-h-screen bg-[#0a0d0e] text-[#f5f6f6] flex flex-col font-sans select-none overflow-x-hidden">
+    <div
+      className={`${isAiStudio ? "h-dvh overflow-hidden" : "min-h-screen"} flex flex-col overflow-x-hidden bg-[#0a0d0e] font-sans text-[#f5f6f6] select-none`}
+    >
       {/* Top Navigation Bar */}
       <header className="topbar min-h-14 w-full min-w-0 border-b border-[#1c2224] bg-[#0a0d0e] px-2 sm:px-4 xl:px-6 py-3 flex items-center gap-1.5 lg:gap-2 flex-nowrap z-30 sticky top-0 overflow-visible font-sans">
         {/* Left: Brand + Info String matching screenshots */}
@@ -364,7 +368,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       )}
 
       {/* Body with Sidebar and Main Content */}
-      <div className="flex flex-1 overflow-hidden">
+      <div
+        className={`flex flex-1 overflow-hidden ${isAiStudio ? "min-h-0" : ""}`}
+      >
         {/* DUAL MODE SIDEBAR */}
 
         {/* 1. WORKBENCH MODE SIDEBAR (Matches Screenshot 1 & Screenshot 3 Left Sidebar) */}
@@ -658,12 +664,16 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         )}
 
         {/* Main Content Pane */}
-        <main className="flex-1 overflow-y-auto bg-[#08080d]">{children}</main>
+        <main
+          className={`${isAiStudio ? "min-h-0 overflow-hidden" : "overflow-y-auto"} flex-1 bg-[#08080d]`}
+        >
+          {children}
+        </main>
       </div>
       {/* Global Notifications */}
       <ToastContainer />
       {/* First-run Onboarding Tour */}
-      {page !== "login" && <OnboardingTour />}
+      {page !== "login" && !isAiStudio && <OnboardingTour />}
     </div>
   );
 };

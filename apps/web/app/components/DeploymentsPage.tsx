@@ -25,7 +25,12 @@ import {
   Globe,
   Loader2,
 } from "lucide-react";
-import { FriendlyHint, HelpfulInfo, friendlyConfirm } from "./FriendlyHelpers";
+import {
+  FriendlyHint,
+  HelpfulInfo,
+  friendlyAlert,
+  friendlyConfirm,
+} from "./FriendlyHelpers";
 import { PageHeader } from "./PageHeader";
 import { DeploymentCardSkeleton } from "./SkeletonLoaders";
 import { z } from "zod";
@@ -135,9 +140,9 @@ export const DeploymentsPage: React.FC = () => {
 
   const handleDeleteEnv = async (id: string, key: string) => {
     if (
-      !friendlyConfirm(
+      !(await friendlyConfirm(
         `Delete environment variable ${key}? This cannot be undone.`,
-      )
+      ))
     )
       return;
     setDeletingEnvId(id);
@@ -161,9 +166,9 @@ export const DeploymentsPage: React.FC = () => {
 
   const handleRerun = async () => {
     if (
-      !friendlyConfirm(
+      !(await friendlyConfirm(
         "Run the release pipeline again? This will restart the current build and may briefly update the live deployment status.",
-      )
+      ))
     ) {
       return;
     }
@@ -517,7 +522,7 @@ export const DeploymentsPage: React.FC = () => {
             <div className="flex items-center justify-between text-[11px] font-mono text-[#6c6c88] pt-1">
               <span>Webhook ID: wh_8c998144</span>
               <button
-                onClick={() => alert("Webhook secret re-generated.")}
+                onClick={() => void friendlyAlert("Webhook secret re-generated.")}
                 className="text-[#a0a0c0] hover:underline"
               >
                 Re-generate
@@ -556,7 +561,7 @@ export const DeploymentsPage: React.FC = () => {
                   .map((l) => `${l.time} ${l.tag} ${l.text}`)
                   .join("\n");
                 navigator.clipboard.writeText(streamText);
-                alert("Terminal log stream copied to clipboard!");
+                void friendlyAlert("Terminal log stream copied to clipboard!");
               }}
               className="text-[#7e7e9a] hover:text-white transition-colors"
             >
@@ -604,12 +609,12 @@ export const DeploymentsPage: React.FC = () => {
 
             <div className="flex items-center gap-2 text-xs font-mono">
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (
                     !revealAllEnvVars &&
-                    !friendlyConfirm(
+                    !(await friendlyConfirm(
                       "Reveal every environment variable value on screen?",
-                    )
+                    ))
                   )
                     return;
                   toggleRevealAllEnvVars();
@@ -626,7 +631,7 @@ export const DeploymentsPage: React.FC = () => {
 
               <button
                 onClick={() =>
-                  alert("Synced latest secret values from HashiCorp Vault.")
+                  void friendlyAlert("Synced latest secret values from HashiCorp Vault.")
                 }
                 className="px-2.5 py-1.5 rounded-lg bg-[#161622] hover:bg-[#202030] border border-[#272738] text-[#a4a4c6] hover:text-white transition-colors"
               >

@@ -85,9 +85,7 @@ export const CustomPlanPage: React.FC = () => {
   const monthlyEstimate = selectedOptions.reduce(
     (total, feature) =>
       total +
-      (billingCycle === "annual"
-        ? feature.annualPrice
-        : feature.monthlyPrice),
+      (billingCycle === "annual" ? feature.annualPrice : feature.monthlyPrice),
     0,
   );
   const annualTotal = monthlyEstimate * 12;
@@ -115,7 +113,9 @@ export const CustomPlanPage: React.FC = () => {
 
     try {
       await navigator.clipboard.writeText(summary);
-      setCopyStatus("Plan summary copied. Share it with the Devpulse team to request a quote.");
+      setCopyStatus(
+        "Plan summary copied. Share it with the Devpulse team to request a quote.",
+      );
     } catch {
       setCopyStatus("Clipboard access is unavailable in this browser.");
     }
@@ -143,7 +143,8 @@ export const CustomPlanPage: React.FC = () => {
               Choose only what you need
             </h1>
             <p className="mt-2 text-sm leading-6 text-[#a0a0b5]">
-              Combine Devpulse tools around the way you work. Your estimate updates as you select features.
+              Combine Devpulse tools around the way you work. Your estimate
+              updates as you select features.
             </p>
           </div>
 
@@ -178,7 +179,10 @@ export const CustomPlanPage: React.FC = () => {
         <section aria-labelledby="feature-heading">
           <div className="mb-4 flex items-end justify-between gap-3">
             <div>
-              <h2 id="feature-heading" className="text-sm font-semibold text-white">
+              <h2
+                id="feature-heading"
+                className="text-sm font-semibold text-white"
+              >
                 Select your features
               </h2>
               <p className="mt-1 text-xs text-[#85859e]">
@@ -208,7 +212,9 @@ export const CustomPlanPage: React.FC = () => {
                   onClick={() => toggleFeature(feature.id)}
                   className={`group flex min-h-32 w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4] ${isSelected ? "border-[#0DF5C4]/50 bg-[#10201e]" : "border-[#29293a] bg-[#11111a] hover:border-[#444456] hover:bg-[#15151f]"}`}
                 >
-                  <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#29293a] bg-[#171722] ${feature.color}`}>
+                  <span
+                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#29293a] bg-[#171722] ${feature.color}`}
+                  >
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -217,7 +223,8 @@ export const CustomPlanPage: React.FC = () => {
                         {feature.name}
                       </span>
                       <span className="shrink-0 font-mono text-xs text-[#d0d0df]">
-                        ${price}<span className="text-[10px] text-[#85859e]">/mo</span>
+                        ${price}
+                        <span className="text-[10px] text-[#85859e]">/mo</span>
                       </span>
                     </span>
                     <span className="mt-1 block text-xs leading-5 text-[#8f8fa6]">
@@ -226,7 +233,11 @@ export const CustomPlanPage: React.FC = () => {
                   </span>
                   <span
                     className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isSelected ? "border-[#0DF5C4] text-[#07110f]" : "border-[#505064] text-transparent"}`}
-                    style={isSelected ? { backgroundColor: theme.primary } : undefined}
+                    style={
+                      isSelected
+                        ? { backgroundColor: theme.primary }
+                        : undefined
+                    }
                     aria-hidden="true"
                   >
                     <Check className="h-3 w-3" />
@@ -258,7 +269,9 @@ export const CustomPlanPage: React.FC = () => {
 
             <div className="space-y-4 p-5">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-xs font-semibold text-white">Included features</h2>
+                <h2 className="text-xs font-semibold text-white">
+                  Included features
+                </h2>
                 {selectedFeatures.length > 0 && (
                   <button
                     type="button"
@@ -276,13 +289,19 @@ export const CustomPlanPage: React.FC = () => {
               {selectedOptions.length > 0 ? (
                 <ul className="space-y-3">
                   {selectedOptions.map((feature) => (
-                    <li key={feature.id} className="flex items-center justify-between gap-3 text-xs">
+                    <li
+                      key={feature.id}
+                      className="flex items-center justify-between gap-3 text-xs"
+                    >
                       <span className="flex min-w-0 items-center gap-2 text-[#c4c4d6]">
                         <Check className="h-3.5 w-3.5 shrink-0 text-[#0DF5C4]" />
                         <span className="truncate">{feature.name}</span>
                       </span>
                       <span className="shrink-0 font-mono text-[#a0a0b5]">
-                        ${billingCycle === "annual" ? feature.annualPrice : feature.monthlyPrice}
+                        $
+                        {billingCycle === "annual"
+                          ? feature.annualPrice
+                          : feature.monthlyPrice}
                       </span>
                     </li>
                   ))}
@@ -305,10 +324,14 @@ export const CustomPlanPage: React.FC = () => {
                   Copy plan summary
                 </button>
                 <p className="mt-3 text-center text-[10px] leading-4 text-[#77778f]">
-                  This is an estimate, not a purchase. Share the summary to request a final quote.
+                  This is an estimate, not a purchase. Share the summary to
+                  request a final quote.
                 </p>
                 {copyStatus && (
-                  <p role="status" className="mt-3 text-center text-[11px] leading-5 text-[#0DF5C4]">
+                  <p
+                    role="status"
+                    className="mt-3 text-center text-[11px] leading-5 text-[#0DF5C4]"
+                  >
                     {copyStatus}
                   </p>
                 )}
