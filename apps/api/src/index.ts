@@ -87,6 +87,20 @@ app.get("/health/ready", async (_request, response, next) => {
   }
 });
 
+function sessionToken(userId: string): string {
+  return jwt.sign({ sub: userId }, jwtSecret, {
+    expiresIn: (process.env.JWT_EXPIRES_IN ??
+      "15m") as SignOptions["expiresIn"],
+  });
+}
+
+function setSessionCookie(response: express.Response, token: string): void {
+  response.setHeader(
+    "Set-Cookie",
+    `devpulse_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=900`,
+  );
+}
+
 if (process.env.NODE_ENV === "test") {
   app.post("/v1/test/cleanup", async (request, response, next) => {
     const expectedSecret = process.env.TEST_CLEANUP_SECRET ?? "e2e-secret";
@@ -112,20 +126,6 @@ if (process.env.NODE_ENV === "test") {
   });
 }
 
-function sessionToken(userId: string): string {
-  return jwt.sign({ sub: userId }, jwtSecret, {
-    expiresIn: (process.env.JWT_EXPIRES_IN ??
-      "15m") as SignOptions["expiresIn"],
-  });
-}
-
-function setSessionCookie(response: express.Response, token: string): void {
-  response.setHeader(
-    "Set-Cookie",
-    `devpulse_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=900`,
-  );
-}
-
 app.post("/v1/auth/logout", (_request, response) => {
   response.setHeader(
     "Set-Cookie",
@@ -134,39 +134,6 @@ app.post("/v1/auth/logout", (_request, response) => {
   response.append("Set-Cookie", "refresh_token=; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=0");
   return response.status(204).send();
 });
-
-if (process.env.NODE_ENV !== "production") {
-  app.get("/api/auth/dev-bypass", async (request, response, next) => {
-    if (process.env.NODE_ENV === "production")
-      return response.status(404).json({ error: "Not found" });
-    const email =
-      (typeof request.query.email === "string" && request.query.email) ||
-      "demo@devpulse.local";
-    try {
-      const user = await db.user.findUnique({
-        where: { email },
-        include: { memberships: { include: { workspace: true } } },
-      });
-      if (!user)
-        return response
-          .status(404)
-          .json({ error: "Dev user not found. Run: pnpm seed" });
-      const accessToken = sessionToken(user.id);
-      setSessionCookie(response, accessToken);
-      response.append(
-        "Set-Cookie",
-        `refresh_token=${accessToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}`,
-      );
-      return response.json({
-        user: { id: user.id, email: user.email, name: user.name },
-        accessToken,
-        workspaceId: user.memberships[0]?.workspace.id,
-      });
-    } catch (error) {
-      return next(error);
-    }
-  });
-}
 
 app.get("/v1/me", async (request, response, next) => {
   try {
@@ -353,7 +320,16 @@ async function getRequestUserId(request: express.Request): Promise<string | null
   }
   const cookie = request.headers.cookie?.match(/(?:^|; )devpulse_session=([^;]+)/)?.[1];
   if (!cookie) return null;
-  try { return String((jwt.verify(cookie, jwtSecret) as { sub: string }).sub); } catch { return null; }
+  try {
+    return (await verifyToken(cookie)).sub;
+  } catch {
+    try {
+      const payload = jwt.verify(cookie, jwtSecret) as { sub?: unknown };
+      return typeof payload.sub === "string" ? payload.sub : null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 async function requireUser(request: express.Request, response: express.Response): Promise<string | null> {

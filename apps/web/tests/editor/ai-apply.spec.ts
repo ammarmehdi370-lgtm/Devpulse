@@ -3,10 +3,27 @@ import { startEditor } from "./fixtures/editor";
 
 async function answerWithCode(page: Page, codeBlock: string): Promise<void> {
   await page.route("**/v1/ai/chat", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "http://localhost:3000",
+          "access-control-allow-credentials": "true",
+          "access-control-allow-methods": "POST, OPTIONS",
+          "access-control-allow-headers": "Content-Type, Authorization, Accept",
+        },
+      });
+      return;
+    }
+
     const event = JSON.stringify({ type: "chunk", content: codeBlock });
     await route.fulfill({
       status: 200,
-      headers: { "content-type": "text/event-stream" },
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "access-control-allow-origin": "http://localhost:3000",
+        "access-control-allow-credentials": "true",
+      },
       body: `data: ${event}\n\ndata: [DONE]\n\n`,
     });
   });

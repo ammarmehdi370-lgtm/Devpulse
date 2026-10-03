@@ -219,6 +219,49 @@ pnpm --filter @devpulse/web build
 pnpm --filter @devpulse/web start
 ```
 
+## Run Playwright E2E tests
+
+Install the workspace dependencies and Chromium:
+
+```bash
+pnpm install --filter @devpulse/web --frozen-lockfile
+pnpm --dir apps/web exec playwright install chromium
+```
+
+On Linux/CI, also install Chromium's system dependencies:
+
+```bash
+pnpm --dir apps/web exec playwright install-deps chromium
+```
+
+Verify Docker, the test-mode API, environment variables, JWT keys, seeded demo
+user, and Chromium before running tests:
+
+```bash
+bash scripts/verify-e2e-ready.sh
+```
+
+Local runs use one worker by default to avoid overwhelming the Next.js
+development server; pass `--workers=N` to override it.
+
+Run one headed smoke test, then the editor suite:
+
+```bash
+pnpm --dir apps/web exec playwright test tests/editor/loading-states.spec.ts --grep "project loading skeleton" --headed --timeout 30000
+pnpm --filter @devpulse/web test:e2e:editor
+```
+
+The local Playwright reporter writes `apps/web/playwright-report`. Open the HTML
+report in a browser with:
+
+```bash
+pnpm --dir apps/web exec playwright show-report
+```
+
+The report lists each test's result and duration. Select a failed test to inspect
+its error, screenshot, video, or trace. The `make e2e-report` target opens the
+same report.
+
 ## Run the backend API only
 
 ```bash

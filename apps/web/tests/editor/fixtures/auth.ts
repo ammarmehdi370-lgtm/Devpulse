@@ -6,10 +6,11 @@ export async function loginAsDev(
   page: Page,
   email = "demo@devpulse.local",
 ): Promise<void> {
-  const bypass = await page.request.get(
+  const bypassResponse = await page.goto(
     `${apiURL}/api/auth/dev-bypass?email=${encodeURIComponent(email)}`,
+    { waitUntil: "domcontentloaded" },
   );
-  expect(bypass.ok(), "development bypass authentication").toBeTruthy();
+  expect(bypassResponse?.ok(), "development bypass authentication").toBeTruthy();
 
   await page.goto("/");
   const continueButton = page.getByRole("button", {

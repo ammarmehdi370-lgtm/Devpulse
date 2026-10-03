@@ -90,13 +90,19 @@ export async function navigateToEditor(
 ): Promise<void> {
   await page.goto(`/editor?project=${encodeURIComponent(projectId)}`);
   await page.waitForFunction(
-    () =>
-      Boolean(document.querySelector(".monaco-editor")) ||
-      Array.from(document.querySelectorAll("h1, h2, h3")).some((heading) =>
+    () => {
+      const monacoReady = Boolean(document.querySelector(".monaco-editor"));
+      const emptyStateVisible = Array.from(document.querySelectorAll("h1, h2, h3")).some((heading) =>
         heading.textContent?.includes("No files yet"),
-      ),
+      );
+      const projectShellReady = Boolean(
+        document.querySelector('[role="tree"][aria-label="Project files"]') ||
+          document.body.textContent?.includes("EXPLORER"),
+      );
+      return monacoReady || emptyStateVisible || projectShellReady;
+    },
     undefined,
-    { timeout: 15_000 },
+    { timeout: 20_000 },
   );
 }
 

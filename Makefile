@@ -1,4 +1,4 @@
-.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio generate-secrets
+.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets
 infra:
 	bash scripts/start-services.sh
 dev: infra
@@ -37,6 +37,16 @@ seed:
 	pnpm seed
 studio:
 	pnpm studio
+e2e-setup:
+	bash scripts/verify-e2e-ready.sh
+e2e:
+	pnpm --filter @devpulse/web test:e2e:editor
+e2e-headed:
+	pnpm --filter @devpulse/web test:e2e:headed
+e2e-ui:
+	pnpm --filter @devpulse/web test:e2e:ui
+e2e-report:
+	pnpm --dir apps/web exec playwright show-report
 generate-secrets:
 	@echo "Copy these to your .env:"
 	@echo ""

@@ -22,7 +22,7 @@ test("project loading skeleton remains visible while the API is delayed", async 
 test("empty project offers file creation, upload, and folder actions", async ({ page }) => {
   await startEditor(page, []);
   await expect(page.getByRole("heading", { name: "No files yet" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "New File" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New File", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Upload Files" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open Folder" })).toBeVisible();
 });

@@ -260,6 +260,64 @@ async function verifyMagicLinkHandler(request: express.Request, response: expres
   }
 }
 
+if (process.env.NODE_ENV !== "production") {
+  router.get("/dev-bypass", async (request, response, next) => {
+    const email =
+      typeof request.query.email === "string" && request.query.email
+        ? request.query.email
+        : "demo@devpulse.local";
+
+    try {
+      const user = await db.user.findUnique({
+        where: { email },
+        include: { memberships: { include: { workspace: true } } },
+      });
+      if (!user) {
+        return response.status(404).json({
+          error: "Dev user not found",
+          hint: "Run: pnpm seed",
+        });
+      }
+
+      const membership = user.memberships[0];
+      const [accessToken, refreshToken] = await Promise.all([
+        generateAccessToken({
+          sub: user.id,
+          email: user.email,
+          name: user.name ?? user.email,
+          workspaceId: membership?.workspaceId ?? "",
+          plan: membership?.workspace.plan.toLowerCase() ?? "free",
+        }),
+        generateRefreshToken({ sub: user.id }),
+      ]);
+
+      response.cookie("devpulse_session", accessToken, {
+        httpOnly: true,
+        secure: false,
+        sameSite: "lax",
+        maxAge: 15 * 60 * 1000,
+      });
+      response.cookie("refresh_token", refreshToken, {
+        ...refreshCookieOptions,
+        secure: false,
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+
+      return response.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+        },
+        accessToken,
+        workspaceId: membership?.workspaceId,
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+}
+
 router.post("/magic-link/send", sendMagicLinkHandler);
 router.post("/magic-link", sendMagicLinkHandler);
 router.post("/magic-link/verify", verifyMagicLinkHandler);

@@ -430,7 +430,7 @@ const AiPanel: React.FC<{
   const commandMatches = AI_COMMANDS.filter((command) => command.value.startsWith(commandQuery));
   useEffect(() => { setCommandMenuDismissed(false); }, [commandQuery]);
   useEffect(() => { if (commandQuery && commandMatches.length && !commandMenuDismissed) announce(`${commandMatches.length} commands available. Use arrow keys.`); }, [announce, commandMatches.length, commandMenuDismissed, commandQuery]);
-  const visibleMessages = historyExpanded ? messages : messages.slice(Math.min(historyCount, messages.length));
+  const visibleMessages = historyExpanded ? messages : messages.slice(-Math.max(1, Math.min(historyCount || messages.length, messages.length)));
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (commandQuery && commandMatches.length && !commandMenuDismissed) {
       if (event.key === "ArrowDown") { event.preventDefault(); setCommandIndex((index) => (index + 1) % commandMatches.length); return; }
@@ -678,7 +678,6 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
         const { session } = await response.json() as SessionResponse;
         if (cancelled) return;
         if (!session || session.openFileIds.length === 0) {
-          openFiles.forEach((file) => closeFileFromEditor(file.id));
           sessionReadyRef.current = true;
           return;
         }
