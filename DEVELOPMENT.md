@@ -39,20 +39,86 @@ cp .env.example .env
 
 Update `.env` with real credentials before using Anthropic, Stripe, OAuth, email, or AWS features.
 
-For local GitHub authentication, configure `GITHUB_CLIENT_ID` and
-`GITHUB_CLIENT_SECRET` in `.env`. Register this callback URL on the GitHub OAuth
-App and use the `user:email` scope (requested by Devpulse):
+## OAuth sign-in setup
 
-```text
-http://localhost:4000/api/auth/github/callback
+OAuth credentials are server-side secrets. Put them in the repository-root
+`.env` only; do not add them to `NEXT_PUBLIC_*` variables or commit `.env`.
+The API can start without OAuth credentials. The login screen queries
+`GET /api/auth/providers` and disables providers that are not configured.
+
+### GitHub (local development)
+
+1. Sign in to GitHub and open **Settings → Developer settings → OAuth Apps**.
+2. Select **New OAuth App**.
+3. Enter:
+   - **Application name:** `Devpulse (Dev)`
+   - **Homepage URL:** `http://localhost:3000`
+   - **Application description:** `Devpulse development`
+   - **Authorization callback URL:** `http://localhost:4000/api/auth/github/callback`
+4. Select **Register application** and copy the **Client ID** from the app page.
+5. Select **Generate a new client secret** and copy it immediately; GitHub
+   displays the secret only once.
+6. Set the values in the repository-root `.env`:
+
+   ```dotenv
+   GITHUB_CLIENT_ID=your-github-client-id
+   GITHUB_CLIENT_SECRET=your-github-client-secret
+   GITHUB_CALLBACK_URL=http://localhost:4000/api/auth/github/callback
+   ```
+
+The API requests GitHub's `user:email` scope. For production, create a separate
+OAuth App with homepage `https://devpulse.io` and callback
+`https://api.devpulse.io/api/auth/github/callback`; use its credentials only in
+the production API environment.
+
+### Google (local development)
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create a
+   project named `Devpulse`, or select the existing Devpulse project.
+2. Configure the OAuth consent screen (branding, audience, and test users as
+   needed for the project).
+3. In **APIs & Services → Library**, enable **People API** if the project
+   requires it. Google+ API is retired and should not be used.
+4. Open **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+5. Select **Web application** and name it `Devpulse Dev`.
+6. Add this **Authorized redirect URI**:
+   `http://localhost:4000/api/auth/google/callback`
+7. Create the client, then copy its **Client ID** and **Client Secret**.
+8. Set the values in the repository-root `.env`:
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=your-google-client-id
+   GOOGLE_CLIENT_SECRET=your-google-client-secret
+   GOOGLE_CALLBACK_URL=http://localhost:4000/api/auth/google/callback
+   ```
+
+The API requests the `profile` and `email` scopes. Restart the API after editing
+`.env`; the strategies are registered at API startup. Production must use a
+separate Google OAuth client and the production callback URL
+`https://api.devpulse.io/api/auth/google/callback`.
+
+### Verify OAuth configuration
+
+With the API running, inspect provider availability:
+
+```bash
+curl http://localhost:4000/api/auth/providers
 ```
 
-Create an OAuth App at GitHub **Settings → Developer settings → OAuth Apps →
-New OAuth App**. Set its homepage URL to `http://localhost:3000`. The client ID
-and secret belong only in the API environment, never in frontend variables.
-Google OAuth uses the callback
-`http://localhost:4000/api/auth/google/callback` and requests `profile` and
-`email` scopes.
+The response has boolean `github`, `google`, and `magicLink` fields. An OAuth
+provider is enabled only when its client ID, client secret, and callback URL are
+all set. When disabled, its `/api/auth/{provider}` endpoint returns HTTP 503
+with `OAUTH_NOT_CONFIGURED`.
+
+To verify GitHub end to end:
+
+1. Open the Devpulse login page and select **Continue with GitHub**.
+2. Confirm the GitHub authorization page appears.
+3. Select **Authorize**.
+4. Confirm the browser returns through `/auth/callback` and signs in to Devpulse.
+5. Confirm the signed-in user is visible in the app's top bar.
+
+Repeat the flow with **Continue with Google** to verify Google sign-in.
 
 ## Generating JWT Keys
 

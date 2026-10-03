@@ -50,32 +50,44 @@ async function findOrCreateOAuthUser(provider: Provider, profile: ProviderProfil
 }
 
 export function setupPassport(): void {
-  if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET && process.env.GITHUB_CALLBACK_URL) {
+  const githubClientId = process.env.GITHUB_CLIENT_ID;
+  const githubClientSecret = process.env.GITHUB_CLIENT_SECRET;
+  const githubCallbackUrl = process.env.GITHUB_CALLBACK_URL;
+  if (githubClientId?.trim() && githubClientSecret?.trim() && githubCallbackUrl?.trim()) {
     passport.use(new GitHubStrategy({
-      clientID: process.env.GITHUB_CLIENT_ID,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET,
-      callbackURL: process.env.GITHUB_CALLBACK_URL,
+      clientID: githubClientId,
+      clientSecret: githubClientSecret,
+      callbackURL: githubCallbackUrl,
       scope: ["user:email"],
       passReqToCallback: false,
     }, (_accessToken: string, _refreshToken: string, profile: GitHubProfile, done: (error: Error | null, user?: Express.User) => void) => {
       void findOrCreateOAuthUser("github", profile, done);
     }));
+    console.log("[Auth] GitHub OAuth configured");
+  } else {
+    console.warn("[Auth] GitHub OAuth not configured (check GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and GITHUB_CALLBACK_URL)");
   }
 
-  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_CALLBACK_URL) {
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const googleCallbackUrl = process.env.GOOGLE_CALLBACK_URL;
+  if (googleClientId?.trim() && googleClientSecret?.trim() && googleCallbackUrl?.trim()) {
     passport.use(new GoogleStrategy({
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL,
+      clientID: googleClientId,
+      clientSecret: googleClientSecret,
+      callbackURL: googleCallbackUrl,
       scope: ["profile", "email"],
     }, (_accessToken: string, _refreshToken: string, profile: GoogleProfile, done: (error: Error | null, user?: Express.User) => void) => {
       void findOrCreateOAuthUser("google", profile, done);
     }));
+    console.log("[Auth] Google OAuth configured");
+  } else {
+    console.warn("[Auth] Google OAuth not configured (check GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_CALLBACK_URL)");
   }
 }
 
 export function isOAuthProviderConfigured(provider: Provider): boolean {
   return provider === "github"
-    ? Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET && process.env.GITHUB_CALLBACK_URL)
-    : Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_CALLBACK_URL);
+    ? Boolean(process.env.GITHUB_CLIENT_ID?.trim() && process.env.GITHUB_CLIENT_SECRET?.trim() && process.env.GITHUB_CALLBACK_URL?.trim())
+    : Boolean(process.env.GOOGLE_CLIENT_ID?.trim() && process.env.GOOGLE_CLIENT_SECRET?.trim() && process.env.GOOGLE_CALLBACK_URL?.trim());
 }

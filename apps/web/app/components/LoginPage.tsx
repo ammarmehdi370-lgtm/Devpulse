@@ -16,6 +16,22 @@ import {
   Layers,
 } from "lucide-react";
 
+type OAuthProviders = {
+  github: boolean;
+  google: boolean;
+  magicLink: boolean;
+};
+
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+function isOAuthProviders(value: unknown): value is OAuthProviders {
+  if (typeof value !== "object" || value === null) return false;
+  const providers = value as Record<string, unknown>;
+  return typeof providers.github === "boolean"
+    && typeof providers.google === "boolean"
+    && typeof providers.magicLink === "boolean";
+}
+
 export const LoginPage: React.FC = () => {
   const { login } = useApp();
   const [email, setEmail] = useState("");
@@ -25,20 +41,44 @@ export const LoginPage: React.FC = () => {
   const [loginMethod, setLoginMethod] = useState("");
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
+  const [oauthProviders, setOAuthProviders] = useState<OAuthProviders | null>(null);
+  const [oauthProviderError, setOAuthProviderError] = useState(false);
 
   useEffect(() => {
-    const error = new URLSearchParams(window.location.search).get("auth_error");
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("auth_error") ?? params.get("error");
     if (error) {
       const messages: Record<string, string> = {
         github_failed: "GitHub sign in failed. Please try again.",
+        github_auth_failed: "GitHub sign in failed. Please try again.",
         google_failed: "Google sign in failed. Please try again.",
+        google_auth_failed: "Google sign in failed. Please try again.",
         github_not_configured: "GitHub sign in is not configured yet.",
         google_not_configured: "Google sign in is not configured yet.",
+        oauth_state_mismatch: "Session expired during sign in. Please try again.",
         oauth_callback_missing_token: "Sign in could not be completed. Please try again.",
       };
       setAuthError(messages[error] || "Sign in could not be completed. Please try again.");
       window.history.replaceState({}, "", window.location.pathname);
     }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`${apiUrl}/api/auth/providers`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Provider status request failed (${response.status})`);
+        const providers: unknown = await response.json();
+        if (!isOAuthProviders(providers)) throw new Error("Provider status response was invalid");
+        setOAuthProviders(providers);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        console.error("Unable to load OAuth provider status:", error);
+        setOAuthProviderError(true);
+        setAuthError("Unable to check sign-in availability. Please refresh and try again.");
+      });
+    return () => controller.abort();
   }, []);
 
   // Live telemetry pulse
@@ -176,9 +216,12 @@ export const LoginPage: React.FC = () => {
           {/* Auth Providers */}
           <div className="space-y-3 mb-6">
             {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
-            <a
-              href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/github`}
-              className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20"
+            <button
+              type="button"
+              onClick={() => { window.location.href = `${apiUrl}/api/auth/github`; }}
+              disabled={!oauthProviders?.github}
+              title={oauthProviders?.github ? undefined : oauthProviders ? "GitHub login is not available" : oauthProviderError ? "Unable to check GitHub login availability" : "Checking GitHub login availability"}
+              className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#c4c0ff]"
             >
               <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                 <path
@@ -188,7 +231,18 @@ export const LoginPage: React.FC = () => {
                 />
               </svg>
               <span>Continue with GitHub</span>
-            </a>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { window.location.href = `${apiUrl}/api/auth/google`; }}
+              disabled={!oauthProviders?.google}
+              title={oauthProviders?.google ? undefined : oauthProviders ? "Google login is not available" : oauthProviderError ? "Unable to check Google login availability" : "Checking Google login availability"}
+              className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#161622]"
+            >
+              <span aria-hidden="true" className="text-lg font-bold text-[#8ab4f8]">G</span>
+              <span>Continue with Google</span>
+            </button>
 
             {/* Continue with GitLab */}
             <button

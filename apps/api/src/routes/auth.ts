@@ -50,8 +50,6 @@ export const sessionMiddleware: express.RequestHandler = session({
 router.use(passport.initialize());
 
 function strategy(provider: "github" | "google", mode: "start" | "callback") {
-  if (!isOAuthProviderConfigured(provider)) return (_request: express.Request, response: express.Response) =>
-    response.redirect(`${frontendURL}/?auth_error=${provider}_not_configured`);
   if (mode === "start") return (request: express.Request, response: express.Response, next: express.NextFunction) => {
     const state = randomBytes(32).toString("hex");
     (request.session as typeof request.session & { oauthState?: string }).oauthState = state;
@@ -69,6 +67,19 @@ function strategy(provider: "github" | "google", mode: "start" | "callback") {
   return passport.authenticate(provider, options);
 }
 
+function requireOAuthProvider(provider: "github" | "google"): express.RequestHandler {
+  return (_request, response, next) => {
+    if (!isOAuthProviderConfigured(provider)) {
+      return response.status(503).json({
+        error: "OAUTH_NOT_CONFIGURED",
+        message: `${provider === "github" ? "GitHub" : "Google"} OAuth is not set up on this server`,
+        hint: "Contact the administrator",
+      });
+    }
+    return next();
+  };
+}
+
 function verifyOAuthState(provider: "github" | "google") {
   return (request: express.Request, response: express.Response, next: express.NextFunction) => {
     const expected = (request.session as typeof request.session & { oauthState?: string }).oauthState;
@@ -77,7 +88,7 @@ function verifyOAuthState(provider: "github" | "google") {
     request.session.save((error) => {
       if (error) return next(error);
       if (!expected || !received || expected.length !== received.length || !timingSafeEqual(Buffer.from(expected), Buffer.from(received))) {
-        return response.redirect(`${frontendURL}/?auth_error=${provider}_failed`);
+        return response.redirect(`${frontendURL}/?auth_error=oauth_state_mismatch`);
       }
       return next();
     });
@@ -322,18 +333,32 @@ router.post("/magic-link/send", sendMagicLinkHandler);
 router.post("/magic-link", sendMagicLinkHandler);
 router.post("/magic-link/verify", verifyMagicLinkHandler);
 
-for (const provider of ["github", "google"] as const) {
-  router.get(`/${provider}`, strategy(provider, "start"));
-  router.get(`/${provider}/callback`, verifyOAuthState(provider), strategy(provider, "callback"), async (request, response, next) => {
-    try {
-      const authenticatedUser = request.user as { id: string } | undefined;
-      if (!authenticatedUser?.id) return response.redirect(`${frontendURL}/?auth_error=${provider}_failed`);
-      const accessToken = await issueTokens(authenticatedUser.id, response);
-      return response.redirect(`${frontendURL}/auth/callback#access_token=${encodeURIComponent(accessToken)}`);
-    } catch (error) {
-      return next(error);
-    }
+router.get("/providers", (_request, response) => {
+  return response.json({
+    github: isOAuthProviderConfigured("github"),
+    google: isOAuthProviderConfigured("google"),
+    magicLink: process.env.NODE_ENV !== "production" || Boolean(process.env.RESEND_API_KEY?.trim()),
   });
+});
+
+for (const provider of ["github", "google"] as const) {
+  router.get(`/${provider}`, requireOAuthProvider(provider), strategy(provider, "start"));
+  router.get(
+    `/${provider}/callback`,
+    requireOAuthProvider(provider),
+    verifyOAuthState(provider),
+    strategy(provider, "callback"),
+    async (request, response, next) => {
+      try {
+        const authenticatedUser = request.user as { id: string } | undefined;
+        if (!authenticatedUser?.id) return response.redirect(`${frontendURL}/?auth_error=${provider}_failed`);
+        const accessToken = await issueTokens(authenticatedUser.id, response);
+        return response.redirect(`${frontendURL}/auth/callback#access_token=${encodeURIComponent(accessToken)}`);
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
 }
 
 router.post("/refresh", async (request, response) => {

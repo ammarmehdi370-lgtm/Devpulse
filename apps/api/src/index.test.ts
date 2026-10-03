@@ -10,6 +10,44 @@ describe("API foundation", () => {
     expect(response.body).toEqual({ status: "ok", service: "api" });
   });
 
+  it("reports configured authentication providers", async () => {
+    const response = await request(app).get("/api/auth/providers");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      github: expect.any(Boolean),
+      google: expect.any(Boolean),
+      magicLink: expect.any(Boolean),
+    });
+  });
+
+  it("returns a clear service-unavailable response when OAuth is not configured", async () => {
+    const originalValues = {
+      GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
+      GITHUB_CALLBACK_URL: process.env.GITHUB_CALLBACK_URL,
+    };
+    delete process.env.GITHUB_CLIENT_ID;
+    delete process.env.GITHUB_CLIENT_SECRET;
+    delete process.env.GITHUB_CALLBACK_URL;
+
+    try {
+      const response = await request(app).get("/api/auth/github");
+
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({
+        error: "OAUTH_NOT_CONFIGURED",
+        message: "GitHub OAuth is not set up on this server",
+        hint: "Contact the administrator",
+      });
+    } finally {
+      for (const [key, value] of Object.entries(originalValues)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it("rejects malformed execution requests", async () => {
     const response = await request(app)
       .post("/v1/execute")
