@@ -13,6 +13,7 @@ import { PricingPage } from "./components/PricingPage";
 import { CustomPlanPage } from "./components/CustomPlanPage";
 import { AppShell } from "./components/AppShell";
 import { CloudCoreDashboard } from "./components/CloudCoreDashboard";
+import { ActivityPage } from "./components/ActivityPage";
 import { CommandPalette } from "./components/CommandPalette";
 
 const PanelLoading = () => (
@@ -95,6 +96,7 @@ function MainAppContent() {
       {page === "repositories" && <RepositoriesPage />}
       {page === "workspaces" && <WorkspacesPage />}
       {page === "deployments" && <DeploymentsPage />}
+      {page === "activity" && <ActivityPage />}
       {page === "chat" && <TeamChatPage />}
       {page === "editor" && <EditorWorkbench />}
       {page === "remote-control" && <RemoteControlPage />}

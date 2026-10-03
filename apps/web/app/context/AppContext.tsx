@@ -7,6 +7,7 @@ export type PageType =
   | "theme"
   | "repositories"
   | "workspaces"
+  | "activity"
   | "deployments"
   | "chat"
   | "editor"
@@ -76,6 +77,16 @@ export interface Deployment {
   timestamp: string;
   duration: string;
 }
+export interface ActivityEvent {
+  id: string;
+  timestamp: string;
+  category: string;
+  title: string;
+  detail: string;
+  project: string;
+  actor: string;
+  durationSeconds?: number;
+}
 export interface EnvVariable {
   id: string;
   key: string;
@@ -94,6 +105,7 @@ export interface Toast {
 export interface LogLine {
   id: string;
   time: string;
+  timestamp?: string;
   tag: string;
   color: string;
   text: string;
@@ -149,6 +161,10 @@ interface AppContextType {
   toggleWorkspaceStatus: (id: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
   deployments: Deployment[];
+  activityEvents: ActivityEvent[];
+  addActivityEvent: (
+    event: Omit<ActivityEvent, "id" | "timestamp" | "actor">,
+  ) => void;
   isDataLoading: boolean;
   triggerNewRelease: (customMessage?: string) => Promise<void>;
   rerunPipeline: (id?: string) => Promise<void>;
@@ -411,6 +427,7 @@ const EMPTY_LOGS: LogLine[] = [];
 const WORKSPACES_STORAGE_KEY = "devpulse_workspaces";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+const ACTIVITY_STORAGE_KEY = "devpulse_activity_events";
 const readStoredWorkspaces = (): WorkspaceDevbox[] => {
   if (typeof window === "undefined") return EMPTY_WORKSPACES;
   try {
@@ -427,6 +444,20 @@ const readStoredWorkspaces = (): WorkspaceDevbox[] => {
 
 const INITIAL_REPOSITORIES: Repository[] = [
   {
+const readStoredActivityEvents = (): ActivityEvent[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const storedEvents = JSON.parse(
+      window.localStorage.getItem(ACTIVITY_STORAGE_KEY) || "[]",
+    ) as unknown;
+    return Array.isArray(storedEvents)
+      ? (storedEvents as ActivityEvent[])
+      : [];
+  } catch {
+    return [];
+  }
+};
+
     id: "repo-1",
     name: "devpulse-core",
     description:
@@ -689,6 +720,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     useState<Deployment[]>(INITIAL_DEPLOYMENTS);
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [envVars, setEnvVars] = useState<EnvVariable[]>(INITIAL_ENV_VARS);
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>(
+    readStoredActivityEvents,
+  );
   const [revealAllEnvVars, setRevealAllEnvVars] = useState(false);
 
   const [deployOnPush, setDeployOnPush] = useState(true);
@@ -757,6 +791,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const nextTourStep = () => {
     if (tourStep >= TOTAL_TOUR_STEPS - 1) {
       setIsTourActive(false);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        ACTIVITY_STORAGE_KEY,
+        JSON.stringify(activityEvents.slice(0, 500)),
+      );
+    } catch (error) {
+      console.error("Unable to persist activity history.", error);
+    }
+  }, [activityEvents]);
+
+  const addActivityEvent = (
+    event: Omit<ActivityEvent, "id" | "timestamp" | "actor">,
+  ) => {
+    setActivityEvents((previous) => [
+      {
+        ...event,
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        timestamp: new Date().toISOString(),
+        actor: user.handle,
+      },
+      ...previous,
+    ].slice(0, 500));
+  };
+
       localStorage.setItem("devpulse_tour_done", "true");
     } else {
       setTourStep((prev) => prev + 1);
@@ -892,6 +951,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       return;
     } catch {
       // Keep the prototype usable when the API is unavailable.
+      addActivityEvent({
+        category: "Project",
+        title: "Project added",
+        detail: `Added ${repository.name} to your projects.`,
+        project: repository.name,
+      });
     }
     const newRepo: Repository = {
       ...repoData,
@@ -906,6 +971,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const deleteRepository = async (id: string) => {
+    addActivityEvent({
+      category: "Project",
+      title: "Project added",
+      detail: `Added ${newRepo.name} to your projects.`,
+      project: newRepo.name,
+    });
     try {
       await apiJson(`/v1/repositories/${id}`, { method: "DELETE" });
     } catch {
@@ -916,6 +987,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const toggleStarRepo = async (id: string) => {
     const current = repositories.find((repository) => repository.id === id);
+    if (repository)
+      addActivityEvent({
+        category: "Project",
+        title: "Project removed",
+        detail: `Removed ${repository.name} from your projects.`,
+        project: repository.name,
+      });
     try {
       await apiJson(`/v1/repositories/${id}`, {
         method: "PATCH",
@@ -939,6 +1017,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const spinUpDevbox = async (
     name: string,
+    if (current)
+      addActivityEvent({
+        category: "Project",
+        title: current.isStarred ? "Project unstarred" : "Project starred",
+        detail: `${current.name} was ${current.isStarred ? "removed from" : "added to"} your starred projects.`,
+        project: current.name,
+      });
     template: string,
     repoUrl?: string,
     specs?: { vCpu?: number; ram?: string; storage?: string },
@@ -962,6 +1047,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch {
       // Keep the prototype usable when the API is unavailable.
     }
+      addActivityEvent({
+        category: "Workspace",
+        title: "Workspace started",
+        detail: `Started ${response.name} from the ${response.template} template.`,
+        project: response.repo,
+      });
     const newWs: WorkspaceDevbox = {
       id: `ws-${Date.now()}`,
       name: name || `devbox-${Math.floor(Math.random() * 900) + 100}`,
@@ -983,6 +1074,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const toggleWorkspaceStatus = async (id: string) => {
     const workspace = workspaces.find((item) => item.id === id);
+    addActivityEvent({
+      category: "Workspace",
+      title: "Workspace started",
+      detail: `Started ${newWs.name} from the ${newWs.template} template.`,
+      project: newWs.repo,
+    });
     const status = workspace?.status === "Running" ? "Stopped" : "Running";
     try {
       await apiJson(`/v1/devboxes/${id}`, {
@@ -1006,6 +1103,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const deleteWorkspace = async (id: string) => {
     try {
+    if (workspace)
+      addActivityEvent({
+        category: "Workspace",
+        title: `Workspace ${status.toLowerCase()}`,
+        detail: `${workspace.name} was ${status.toLowerCase()}.`,
+        project: workspace.repo,
+      });
       await apiJson(`/v1/devboxes/${id}`, { method: "DELETE" });
     } catch {
       /* local fallback */
@@ -1016,6 +1120,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const addLog = (tag: string, color: string, text: string) => {
     const now = new Date();
     const timeStr = `[${now.toTimeString().split(" ")[0]}]`;
+    if (workspace)
+      addActivityEvent({
+        category: "Workspace",
+        title: "Workspace deleted",
+        detail: `Deleted ${workspace.name}.`,
+        project: workspace.repo,
+      });
     const newLog: LogLine = {
       id: `log-${Date.now()}-${Math.random()}`,
       time: timeStr,
@@ -1024,6 +1135,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       text,
     };
     setLogs((prev) => [...prev, newLog]);
+      timestamp: now.toISOString(),
   };
 
   const clearLogs = () => {
@@ -1045,6 +1157,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         "text-violet-400",
         `Triggered release pipeline for target ${deployment.target}`,
       );
+      addActivityEvent({
+        category: "Release",
+        title: "Release started",
+        detail: `Started a release for ${deployment.target}.`,
+        project: deployment.target,
+      });
       return;
     } catch {
       // Keep the prototype usable when the API is unavailable.
@@ -1073,6 +1191,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       "[PIPELINE]",
       "text-violet-400",
       `Triggered release pipeline for target ${newDep.target}`,
+    addActivityEvent({
+      category: "Release",
+      title: "Release started",
+      detail: `Started a release for ${newDep.target}.`,
+      project: newDep.target,
+    });
     );
     addLog(
       "[GIT]",
@@ -1136,6 +1260,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       );
     }, 1500);
   };
+    addActivityEvent({
+      category: "Release",
+      title: "Release pipeline rerun",
+      detail: `Re-running the pipeline for ${deployment?.target || "latest deployment"}.`,
+      project: deployment?.target || "Devpulse",
+    });
 
   const addEnvVar = async (key: string, value: string, scope: string) => {
     try {
@@ -1152,6 +1282,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       id: `env-${Date.now()}`,
       key: key.toUpperCase().trim(),
       value: value.trim(),
+      addActivityEvent({
+        category: "Project",
+        title: "Environment variable added",
+        detail: `Added ${variable.key} to the ${variable.scope} scope.`,
+        project: variable.scope,
+      });
       scope: scope || "Production, Staging",
       updatedAt: "Just now",
       isRevealed: false,
@@ -1165,6 +1301,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch {
       /* local fallback */
     }
+    addActivityEvent({
+      category: "Project",
+      title: "Environment variable added",
+      detail: `Added ${newVar.key} to the ${newVar.scope} scope.`,
+      project: newVar.scope,
+    });
     setEnvVars((prev) => prev.filter((v) => v.id !== id));
   };
 
@@ -1175,6 +1317,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const toggleRevealAllEnvVars = () => {
+    if (variable)
+      addActivityEvent({
+        category: "Project",
+        title: "Environment variable deleted",
+        detail: `Deleted ${variable.key}.`,
+        project: variable.scope,
+      });
     setRevealAllEnvVars((prev) => {
       const next = !prev;
       setEnvVars((vars) => vars.map((v) => ({ ...v, isRevealed: next })));
@@ -1404,6 +1553,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     const newFile = editorFileFromApi(created);
     setTreeFiles((prev) => [...prev, newFile]);
+    const file = treeFiles.find((item) => item.id === fileId);
+    addActivityEvent({
+      category: "Code",
+      title: "File saved",
+      detail: `Saved ${file?.path || fileId}.`,
+      project: loadedProjectName || "Editor",
+    });
     setFileContents((prev) => ({
       ...prev,
       [newFile.id]: initialContent || "",
@@ -1439,6 +1595,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       body: JSON.stringify({
         path: name,
         content,
+    addActivityEvent({
+      category: "Code",
+      title: "File created",
+      detail: `Created ${newFile.path}.`,
+      project: loadedProjectName || "Editor",
+    });
+  };
+
+  const createNewFolder = (path: string) => {
+    setTreeFolders((prev) =>
+      Array.from(new Set([...prev, ...getParentFolderPaths([`${path}/.folder`]), path])),
+    );
+    addActivityEvent({
+      category: "Code",
+      title: "Folder created",
+      detail: `Created ${path}.`,
+      project: loadedProjectName || "Editor",
+    });
         language: name.endsWith(".py") ? "python" : "typescript",
       }),
     });
@@ -1450,6 +1624,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setLoadedProjectName(name.split(".")[0] || "local-file");
     setIsEditorProjectOpen(true);
   };
+    addActivityEvent({
+      category: "Code",
+      title: "File deleted",
+      detail: `Deleted ${file?.path || fileId}.`,
+      project: loadedProjectName || "Editor",
+    });
 
   // Real native local folder loader
   const loadUserLocalFiles = async (
@@ -1462,6 +1642,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       (await apiJson<{ projects: { id: string }[] }>("/v1/projects"))
         .projects[0]?.id;
     if (!projectId) throw new Error("No editor project is available");
+    addActivityEvent({
+      category: "Code",
+      title: "File imported",
+      detail: `Imported ${name}.`,
+      project: name.split(".")[0] || "local-file",
+    });
     const imported = await Promise.all(
       files.map(async (file) => {
         const created = await apiJson<{
@@ -1487,6 +1673,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     const newContents = Object.fromEntries(
       imported.map(({ file, content }) => [file.id, content]),
     );
+    addActivityEvent({
+      category: "Code",
+      title: "Project imported",
+      detail: `Imported ${files.length} files from ${folderName}.`,
+      project: folderName,
+    });
 
     setLoadedProjectName(folderName);
     setTreeFiles(newTree);
@@ -1510,6 +1702,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       body: JSON.stringify({ content: nextContent }),
     });
     setOpenFiles((prev) =>
+    const file = treeFiles.find((item) => item.id === activeFileId);
+    addActivityEvent({
+      category: "Code",
+      title: "AI edit applied",
+      detail: `Applied an AI-assisted edit to ${file?.path || activeFileId}.`,
+      project: loadedProjectName || "Editor",
+    });
       prev.map((file) =>
         file.id === activeFileId ? { ...file, isDirty: false } : file,
       ),
@@ -1540,6 +1739,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         searchRepoQuery,
         setSearchRepoQuery,
         repoFilter,
+        activityEvents,
+        addActivityEvent,
         setRepoFilter,
         addRepository,
         deleteRepository,

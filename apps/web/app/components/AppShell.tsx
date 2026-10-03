@@ -73,6 +73,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     { id: "workspaces", label: "Your Workspaces", icon: Box },
     { id: "cloud-core", label: "Cloud Core Engine", icon: Gauge },
     { id: "repositories", label: "Your Code Projects", icon: GitFork },
+    { id: "activity", label: "Your Activity", icon: Activity },
     { id: "editor", label: "Code Editor", icon: Code2 },
     { id: "deployments", label: "Live Releases", icon: Rocket },
     { id: "remote-control", label: "Pulse Pilot", icon: Monitor },
