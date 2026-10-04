@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useApp, PageType } from "../context/AppContext";
 import { ToastContainer } from "./ToastContainer";
 import { friendlyAlert } from "./FriendlyHelpers";
@@ -22,7 +23,6 @@ import {
   Sparkles,
   Monitor,
   CreditCard,
-  Check,
   Cpu,
   Radio,
   Activity,
@@ -38,6 +38,9 @@ import {
   X,
   Bell,
   Gauge,
+  Sun,
+  Moon,
+  UserRound,
 } from "lucide-react";
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({
@@ -47,25 +50,117 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     page,
     setPage,
     theme,
+    colorMode,
+    setColorMode,
     user,
     logout,
     setIsCommandPaletteOpen,
-    setIsEditorProjectOpen,
     setIsFileTreeOpen,
   } = useApp();
 
-  const [isRepoMenuOpen, setIsRepoMenuOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [selectedRepoBranch, setSelectedRepoBranch] = useState(
-    "devpulse-core / staging",
-  );
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+  const [settingsMenuPosition, setSettingsMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
+
+  const toggleSettingsMenu = (trigger: HTMLButtonElement) => {
+    if (settingsMenuPosition) {
+      setSettingsMenuPosition(null);
+      return;
+    }
+    const bounds = trigger.getBoundingClientRect();
+    setSettingsMenuPosition({
+      top: Math.max(8, Math.min(bounds.top, window.innerHeight - 176)),
+      left: Math.max(8, Math.min(bounds.right + 8, window.innerWidth - 264)),
+    });
+  };
+
+  useEffect(() => {
+    if (!isAccountMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        event.target instanceof Node &&
+        !accountMenuRef.current?.contains(event.target)
+      ) {
+        setIsAccountMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsAccountMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isAccountMenuOpen]);
+
+  useEffect(() => {
+    if (!settingsMenuPosition) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        event.target instanceof Node &&
+        !settingsMenuRef.current?.contains(event.target) &&
+        !settingsTriggerRef.current?.contains(event.target)
+      ) {
+        setSettingsMenuPosition(null);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsMenuPosition(null);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [settingsMenuPosition]);
+
+  useEffect(() => {
+    try {
+      const storedPreferences = window.localStorage.getItem(
+        "devpulse_ui_preferences",
+      );
+      if (!storedPreferences) return;
+
+      const parsed: unknown = JSON.parse(storedPreferences);
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        !("density" in parsed) ||
+        (parsed.density !== "comfortable" && parsed.density !== "compact") ||
+        !("reduceMotion" in parsed) ||
+        typeof parsed.reduceMotion !== "boolean"
+      ) {
+        throw new Error("Saved interface preferences are invalid.");
+      }
+
+      document.documentElement.dataset.uiDensity = parsed.density;
+      document.documentElement.dataset.reduceMotion = String(
+        parsed.reduceMotion,
+      );
+    } catch (error) {
+      console.error("Unable to restore Devpulse interface preferences.", error);
+    }
+  }, []);
 
   // Check if current view is Workbench mode (Screenshots 1 & 3)
-  const isWorkbenchMode = page === "editor" || page === "ai-studio";
+  const isWorkbenchMode =
+    page === "editor" || page === "ai-studio" || page === "api-sandbox";
   const isCompactCloudCore = page === "cloud-core";
   const isAiStudio = page === "ai-studio";
-
   // Standard platform items
   const platformNavItems: {
     id: PageType;
@@ -135,121 +230,105 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       id: "api-sandbox",
       label: "API Sandbox",
       icon: Radio,
-      action: () => setPage("editor"),
+      badge: "v3.2",
+      badgeColor: "bg-[#0369a1]/25 text-[#38bdf8] border-[#0284c7]/40",
+      action: () => setPage("api-sandbox"),
     },
   ];
 
   return (
     <div
-      className={`${isAiStudio ? "h-dvh overflow-hidden" : "min-h-screen"} flex flex-col overflow-x-hidden bg-[#0a0d0e] font-sans text-[#f5f6f6] select-none`}
+      className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#0a0d0e] font-sans text-[#f5f6f6] select-none"
     >
-      {/* Top Navigation Bar */}
-      <header className="topbar min-h-14 w-full min-w-0 border-b border-[#1c2224] bg-[#0a0d0e] px-2 sm:px-4 xl:px-6 py-3 flex items-center gap-1.5 lg:gap-2 flex-nowrap z-30 sticky top-0 overflow-visible font-sans">
+      {/* Floating Top Navigation Bar */}
+      <div className="topbar-shell relative z-30 shrink-0">
+      <header className="topbar relative grid h-14 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.08] bg-[#101116] px-3 shadow-[0_5px_18px_rgba(0,0,0,0.18)] sm:px-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:px-6">
         {/* Left: Brand + Info String matching screenshots */}
-        <div className="flex min-w-0 flex-1 items-center gap-2 lg:gap-3">
+        <div className="flex min-w-0 items-center gap-2 lg:gap-3">
           <div
             onClick={() => setPage("workspaces")}
-            className="flex items-center gap-2 cursor-pointer group shrink-0"
+            className="flex shrink-0 cursor-pointer items-center gap-2 group"
           >
-            <div className="w-7 h-7 rounded-lg flex items-center justify-center shadow-md transition-transform group-hover:scale-105 text-[#0a0d0e] bg-[#0DF5C4]">
-              <Layers className="w-4 h-4" />
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#0DF5C4] text-[#081211] shadow-[0_0_18px_rgba(13,245,196,0.18),inset_0_1px_0_rgba(255,255,255,0.45)] transition-transform group-hover:scale-105">
+              <Layers className="h-4 w-4" />
             </div>
-            <span className="font-medium text-[#f5f6f6] text-[15px] tracking-tight">
+            <span className="text-[13px] font-semibold tracking-tight text-[#f5f6f6]">
               Devpulse
             </span>
           </div>
 
           <span
-            className="hidden sm:block h-6 w-px bg-[#1c2224] shrink-0"
+            className="hidden h-5 w-px shrink-0 bg-white/10 sm:block"
             aria-hidden="true"
           />
 
-          {/* Primary navigation */}
-          <nav
-            className="hidden xl:flex min-w-0 flex-1 items-center justify-center gap-0.5"
-            aria-label="Primary navigation"
-          >
-            {[
-              { id: "workspaces", label: "Workspaces", icon: Box },
-              { id: "repositories", label: "Projects", icon: GitFork },
-              { id: "editor", label: "Editor", icon: Code2 },
-              { id: "ai-studio", label: "AI", icon: Sparkles },
-              { id: "deployments", label: "Releases", icon: Rocket },
-            ].map((link) => (
-              <button
-                key={link.id}
-                onClick={() => setPage(link.id as PageType)}
-                aria-current={page === link.id ? "page" : undefined}
-                className={`topbar-nav-item ${
-                  page === link.id ? "topbar-nav-item-active" : ""
-                }`}
-              >
-                <link.icon className="h-4 w-4" aria-hidden="true" />
-                {link.label}
-              </button>
-            ))}
-          </nav>
-
-          {/* Repo / Branch Selector Dropdown */}
-          <div className="relative min-w-0">
-            <button
-              onClick={() => setIsRepoMenuOpen(!isRepoMenuOpen)}
-              aria-label="Switch repository context"
-              aria-expanded={isRepoMenuOpen}
-              className="topbar-pill flex min-w-0 max-w-[155px] sm:max-w-[185px] xl:max-w-[210px] items-center gap-1.5 shrink"
-            >
-              <span className="truncate">{selectedRepoBranch}</span>
-              <ChevronDown
-                className="w-3.5 h-3.5 text-[#7d8383]"
-                aria-hidden="true"
-              />
-            </button>
-
-            {isRepoMenuOpen && (
-              <div className="absolute left-0 mt-1.5 w-56 bg-[#12121c] border border-[#26263a] rounded-xl shadow-2xl py-1 z-50 text-xs font-mono">
-                <div className="px-3 py-1.5 text-[10px] text-[#6b6b88] uppercase tracking-wider">
-                  Switch Context
-                </div>
-                <button
-                  onClick={() => {
-                    setSelectedRepoBranch("devpulse-core / staging");
-                    setIsRepoMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
-                >
-                  <span>devpulse-core / staging</span>
-                  {selectedRepoBranch.includes("staging") && (
-                    <Check className="w-3 h-3 text-[#0DF5C4]" />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedRepoBranch("devpulse-core / main");
-                    setIsRepoMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
-                >
-                  <span>devpulse-core / main</span>
-                  {selectedRepoBranch.includes("main") && (
-                    <Check className="w-3 h-3 text-[#0DF5C4]" />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedRepoBranch("neural-agent / cuda");
-                    setIsRepoMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
-                >
-                  <span>neural-agent / cuda</span>
-                </button>
-              </div>
-            )}
+          <div className="topbar-breadcrumbs hidden min-w-0 items-center gap-1 text-[11px] sm:flex">
+            <span className="truncate text-[#8a8c99]">Workspace</span>
+            <span className="text-white/20">/</span>
+            <span className="truncate font-medium text-[#d6d8e2]">
+              {page === "editor"
+                ? "Maestro Code Studio"
+                : page === "ai-studio"
+                  ? "AI Studio"
+                  : page === "api-sandbox"
+                    ? "API Sandbox"
+                    : page === "deployments"
+                      ? "Releases"
+                      : page === "repositories"
+                        ? "Projects"
+                        : page === "settings"
+                        ? "Settings"
+                        : page === "account-connections"
+                          ? "Add account"
+                          : page === "payment-methods"
+                            ? "Payment methods"
+                        : "Overview"}
+            </span>
           </div>
         </div>
 
+        {/* Primary navigation */}
+        <nav
+          className="hidden items-center gap-0.5 rounded-xl border border-white/[0.045] bg-black/25 p-1 xl:flex"
+          aria-label="Primary navigation"
+        >
+          {[
+            { id: "workspaces", label: "Workspaces", icon: Box },
+            { id: "repositories", label: "Projects", icon: GitFork },
+            { id: "editor", label: "Editor", icon: Code2 },
+            { id: "ai-studio", label: "AI", icon: Sparkles },
+            { id: "deployments", label: "Releases", icon: Rocket },
+          ].map((link) => (
+            <button
+              key={link.id}
+              onClick={() => setPage(link.id as PageType)}
+              aria-current={page === link.id ? "page" : undefined}
+              className={`topbar-nav-item ${
+                page === link.id ? "topbar-nav-item-active" : ""
+              }`}
+            >
+              <link.icon className="h-3.5 w-3.5" aria-hidden="true" />
+              {link.label}
+            </button>
+          ))}
+        </nav>
+
         {/* Right: Quick Jump, Status, Profile */}
-        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 xl:gap-3 ml-auto">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 xl:ml-0 xl:flex-1 xl:justify-end xl:gap-2.5">
+          <button
+            type="button"
+            onClick={() => setColorMode(colorMode === "dark" ? "light" : "dark")}
+            aria-label={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
+            title={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
+            className="topbar-icon-button"
+          >
+            {colorMode === "dark" ? (
+              <Sun className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Moon className="h-4 w-4" aria-hidden="true" />
+            )}
+          </button>
+
           {/* Search or jump to... Ctrl+K */}
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
@@ -303,29 +382,93 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             aria-hidden="true"
           />
 
-          {/* User Profile avatar */}
-          <button
-            className="topbar-account"
-            onClick={() => logout()}
-            title="Open account menu"
-            aria-label={`Account menu for ${user.name}`}
-          >
-            <span className="topbar-avatar" aria-hidden="true">
-              {user.name
-                .split(" ")
-                .map((part) => part[0])
-                .join("")
-                .slice(0, 2)
-                .toUpperCase()}
-            </span>
-            <span className="hidden 2xl:inline">{user.name}</span>
-            <ChevronDown
-              className="hidden sm:block h-3.5 w-3.5 text-[#7d8383]"
-              aria-hidden="true"
-            />
-          </button>
+          {/* User Profile and Account Menu */}
+          <div className="relative" ref={accountMenuRef}>
+            <button
+              type="button"
+              className="topbar-account"
+              onClick={() => setIsAccountMenuOpen((open) => !open)}
+              title="Open account menu"
+              aria-label={`Account menu for ${user.name}`}
+              aria-haspopup="menu"
+              aria-expanded={isAccountMenuOpen}
+              aria-controls="topbar-account-menu"
+            >
+              <span className="topbar-avatar" aria-hidden="true">
+                {user.name
+                  .split(" ")
+                  .map((part) => part[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </span>
+              <span className="hidden 2xl:inline">{user.name}</span>
+              <ChevronDown
+                className={`hidden h-3.5 w-3.5 text-[#7d8383] transition-transform sm:block ${isAccountMenuOpen ? "rotate-180" : ""}`}
+                aria-hidden="true"
+              />
+            </button>
+            {isAccountMenuOpen && (
+              <div
+                id="topbar-account-menu"
+                role="menu"
+                aria-label="Account menu"
+                className="absolute right-0 top-[calc(100%+12px)] z-50 w-72 overflow-hidden rounded-2xl border border-white/10 bg-[#111219] p-2 shadow-[0_20px_60px_rgba(0,0,0,0.55),0_0_24px_rgba(108,99,255,0.1)] ring-1 ring-black/30"
+              >
+                <div className="flex items-center gap-3 rounded-xl px-3 py-3">
+                  <span className="topbar-avatar h-10 w-10 text-sm" aria-hidden="true">
+                    {user.name
+                      .split(" ")
+                      .map((part) => part[0])
+                      .join("")
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-white">
+                      {user.name}
+                    </span>
+                    <span className="mt-0.5 block truncate text-xs text-[#9293a4]">
+                      {user.email}
+                    </span>
+                  </span>
+                </div>
+                <div className="mx-2 my-1 border-t border-white/[0.08]" />
+                <div className="px-3 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[#77798b]">
+                  {user.role}
+                  {user.handle ? ` · @${user.handle}` : ""}
+                </div>
+                <div className="mx-2 my-1 border-t border-white/[0.08]" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsAccountMenuOpen(false);
+                    setPage("account-connections");
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#d8d8e4] transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/60"
+                >
+                  <UserRound className="h-4 w-4 text-[#0DF5C4]" aria-hidden="true" />
+                  Add account
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsAccountMenuOpen(false);
+                    logout();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#f2a3a3] transition hover:bg-red-400/10 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/60"
+                >
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
+      </div>
 
       {isMobileNavOpen && (
         <div
@@ -349,7 +492,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                   <button
                     key={item.id}
                     onClick={() => {
-                      if (item.id === "editor") setIsEditorProjectOpen(false);
                       setPage(item.id);
                       setIsMobileNavOpen(false);
                     }}
@@ -367,16 +509,66 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         </div>
       )}
 
+      {settingsMenuPosition &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={settingsMenuRef}
+            role="menu"
+            aria-label="Settings and theme"
+            className="settings-shortcut-menu"
+            style={{
+              position: "fixed",
+              top: settingsMenuPosition.top,
+              left: settingsMenuPosition.left,
+              zIndex: 100,
+            }}
+          >
+            <div className="settings-shortcut-heading">Preferences</div>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setSettingsMenuPosition(null);
+                setPage("settings");
+              }}
+            >
+              <Settings className="h-4 w-4" aria-hidden="true" />
+              <span>
+                <strong>Site settings</strong>
+                <small>Appearance and interface</small>
+              </span>
+              <ChevronDown className="ml-auto h-3.5 w-3.5 -rotate-90 opacity-50" />
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setSettingsMenuPosition(null);
+                setPage("theme");
+              }}
+            >
+              <Palette className="h-4 w-4" aria-hidden="true" />
+              <span>
+                <strong>Theme palette</strong>
+                <small>Choose your color palette</small>
+              </span>
+              <ChevronDown className="ml-auto h-3.5 w-3.5 -rotate-90 opacity-50" />
+            </button>
+          </div>,
+          document.body,
+        )}
+
       {/* Body with Sidebar and Main Content */}
       <div
-        className={`flex flex-1 overflow-hidden ${isAiStudio ? "min-h-0" : ""}`}
+        className="flex min-h-0 flex-1 overflow-hidden"
       >
         {/* DUAL MODE SIDEBAR */}
 
         {/* 1. WORKBENCH MODE SIDEBAR (Matches Screenshot 1 & Screenshot 3 Left Sidebar) */}
         {isWorkbenchMode ? (
           <aside
-            className={`${isSidebarOpen ? "w-56" : "w-14"} bg-[#0c0c14] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans transition-[width] duration-150`}
+            className={`${isSidebarOpen ? "w-56" : "w-14"} min-h-0 overflow-y-auto bg-[#0c0c14] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans transition-[width] duration-150`}
           >
             <div className="p-3 space-y-5">
               {/* Top Header */}
@@ -409,7 +601,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                     {workbenchNavItems.map((item) => {
                       const Icon = item.icon;
                       const isSelected =
-                        item.id === "editor" && page === "editor";
+                        (item.id === "editor" && page === "editor") ||
+                        (item.id === "api-sandbox" && page === "api-sandbox");
                       return (
                         <button
                           key={item.id}
@@ -498,11 +691,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                 {/* Settings Footer */}
                 <div className="pt-2 border-t border-[#1a1a28] flex items-center justify-between text-[#787896]">
                   <button
-                    onClick={() => setPage("theme")}
+                    ref={settingsTriggerRef}
+                    onClick={(event) => toggleSettingsMenu(event.currentTarget)}
+                    aria-haspopup="menu"
+                    aria-expanded={Boolean(settingsMenuPosition)}
+                    aria-label="Open settings menu"
                     className="hover:text-white flex items-center gap-1.5 text-xs"
                   >
                     <Settings className="w-3.5 h-3.5" />
-                    <span>Settings</span>
+                    <span>Settings & Theme</span>
                   </button>
                   <div className="flex items-center gap-2">
                     <Split className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
@@ -515,7 +712,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         ) : (
           /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
           <aside
-            className={`${isSidebarOpen ? (isCompactCloudCore ? "flex w-[68px] md:w-56" : "hidden w-56 md:flex") : "hidden w-14 md:flex"} bg-[#0b0b12] border-r border-[#1e1e2d] flex-col justify-between shrink-0 font-sans transition-[width] duration-150`}
+            className={`${isSidebarOpen ? (isCompactCloudCore ? "flex w-[68px] md:w-56" : "hidden w-56 md:flex") : "hidden w-14 md:flex"} min-h-0 overflow-y-auto bg-[#0b0b12] border-r border-[#1e1e2d] flex-col justify-between shrink-0 font-sans transition-[width] duration-150`}
           >
             <div
               className={`space-y-6 ${isSidebarOpen && isCompactCloudCore ? "p-1.5 md:p-3" : "p-3"}`}
@@ -555,9 +752,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                         <button
                           key={item.id}
                           onClick={() => {
-                            if (item.id === "editor") {
-                              setIsEditorProjectOpen(false);
-                            }
                             setPage(item.id);
                           }}
                           aria-label={
@@ -603,11 +797,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                   </div>
                   <div className="space-y-1">
                     <button
-                      onClick={() => setPage("theme")}
+                      ref={settingsTriggerRef}
+                      onClick={(event) => toggleSettingsMenu(event.currentTarget)}
+                      aria-haspopup="menu"
+                      aria-expanded={Boolean(settingsMenuPosition)}
+                      aria-label="Open settings menu"
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-3" : ""}`}
-                      aria-label={
-                        isCompactCloudCore ? "Settings & Theme" : undefined
-                      }
                       title={
                         isCompactCloudCore ? "Settings & Theme" : undefined
                       }
@@ -665,7 +860,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
         {/* Main Content Pane */}
         <main
-          className={`${isAiStudio ? "min-h-0 overflow-hidden" : "overflow-y-auto"} flex-1 bg-[#08080d]`}
+          className={`${isAiStudio ? "overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-[#08080d]`}
         >
           {children}
         </main>
@@ -673,7 +868,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       {/* Global Notifications */}
       <ToastContainer />
       {/* First-run Onboarding Tour */}
-      {page !== "login" && !isAiStudio && <OnboardingTour />}
+      {page !== "login" &&
+        page !== "editor" &&
+        page !== "settings" &&
+        page !== "payment-methods" &&
+        !isAiStudio && <OnboardingTour />}
     </div>
   );
 };

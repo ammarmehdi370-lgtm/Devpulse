@@ -40,6 +40,217 @@ import {
   friendlyConfirm,
 } from "./FriendlyHelpers";
 
+type NativeEditorHandle =
+  | { kind: "directory"; handle: FileSystemDirectoryHandle }
+  | { kind: "file"; handle: FileSystemFileHandle };
+
+interface FilePickerWindow extends Window {
+  showDirectoryPicker?: (options?: {
+    mode?: "read" | "readwrite";
+  }) => Promise<FileSystemDirectoryHandle>;
+  showOpenFilePicker?: () => Promise<FileSystemFileHandle[]>;
+}
+
+const NATIVE_HANDLE_DB = "devpulse-editor-handles";
+const NATIVE_HANDLE_STORE = "handles";
+const NATIVE_HANDLE_KEY = "active-workspace";
+const TEXT_FILE_EXTENSIONS = new Set([
+  "c",
+  "cc",
+  "cpp",
+  "cs",
+  "css",
+  "csv",
+  "dockerfile",
+  "env",
+  "go",
+  "h",
+  "html",
+  "java",
+  "js",
+  "jsx",
+  "json",
+  "md",
+  "mjs",
+  "php",
+  "ps1",
+  "py",
+  "rb",
+  "rs",
+  "scss",
+  "sh",
+  "sql",
+  "svg",
+  "toml",
+  "ts",
+  "tsx",
+  "txt",
+  "xml",
+  "yaml",
+  "yml",
+]);
+
+const isTextEditorFile = (name: string) => {
+  const normalizedName = name.toLowerCase();
+  if (normalizedName === "dockerfile" || normalizedName === "makefile") {
+    return true;
+  }
+  return TEXT_FILE_EXTENSIONS.has(normalizedName.split(".").pop() || "");
+};
+
+type ChangedLineKind = "added" | "modified";
+
+const getLineChanges = (savedText: string, currentText: string) => {
+  const savedLines = savedText ? savedText.split("\n") : [];
+  const currentLines = currentText ? currentText.split("\n") : [];
+  let prefixLength = 0;
+
+  while (
+    prefixLength < savedLines.length &&
+    prefixLength < currentLines.length &&
+    savedLines[prefixLength] === currentLines[prefixLength]
+  ) {
+    prefixLength++;
+  }
+
+  let suffixLength = 0;
+  while (
+    suffixLength < savedLines.length - prefixLength &&
+    suffixLength < currentLines.length - prefixLength &&
+    savedLines[savedLines.length - 1 - suffixLength] ===
+      currentLines[currentLines.length - 1 - suffixLength]
+  ) {
+    suffixLength++;
+  }
+
+  const savedChangeCount = savedLines.length - prefixLength - suffixLength;
+  const currentChangeCount = currentLines.length - prefixLength - suffixLength;
+  const changedLines = new Map<number, ChangedLineKind>();
+
+  for (let offset = 0; offset < currentChangeCount; offset++) {
+    changedLines.set(
+      prefixLength + offset,
+      offset < savedChangeCount ? "modified" : "added",
+    );
+  }
+
+  const removedAtLine =
+    savedChangeCount > currentChangeCount
+      ? Math.min(
+          prefixLength + currentChangeCount,
+          Math.max(currentLines.length - 1, 0),
+        )
+      : null;
+
+  return { changedLines, removedAtLine };
+};
+
+const openNativeHandleDb = (): Promise<IDBDatabase> =>
+  new Promise((resolve, reject) => {
+    const request = indexedDB.open(NATIVE_HANDLE_DB, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(NATIVE_HANDLE_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () =>
+      reject(request.error || new Error("Unable to open browser storage."));
+  });
+
+const storeNativeHandle = async (
+  nativeHandle: NativeEditorHandle,
+): Promise<void> => {
+  const db = await openNativeHandleDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(NATIVE_HANDLE_STORE, "readwrite");
+    transaction.objectStore(NATIVE_HANDLE_STORE).put(
+      nativeHandle,
+      NATIVE_HANDLE_KEY,
+    );
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error || new Error("Unable to save folder access."));
+  });
+  db.close();
+};
+
+const readNativeHandle = async (): Promise<NativeEditorHandle | undefined> => {
+  const db = await openNativeHandleDb();
+  const nativeHandle = await new Promise<NativeEditorHandle | undefined>(
+    (resolve, reject) => {
+      const request = db
+        .transaction(NATIVE_HANDLE_STORE, "readonly")
+        .objectStore(NATIVE_HANDLE_STORE)
+        .get(NATIVE_HANDLE_KEY);
+      request.onsuccess = () => resolve(request.result as NativeEditorHandle);
+      request.onerror = () =>
+        reject(request.error || new Error("Unable to restore folder access."));
+    },
+  );
+  db.close();
+  return nativeHandle;
+};
+
+const clearNativeHandle = async (): Promise<void> => {
+  const db = await openNativeHandleDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(NATIVE_HANDLE_STORE, "readwrite");
+    transaction.objectStore(NATIVE_HANDLE_STORE).delete(NATIVE_HANDLE_KEY);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () =>
+      reject(transaction.error || new Error("Unable to clear folder access."));
+  });
+  db.close();
+};
+
+const getTextFilesFromDirectory = async (
+  directory: FileSystemDirectoryHandle,
+  parentPath = "",
+): Promise<{ name: string; path: string; content: string }[]> => {
+  const files: { name: string; path: string; content: string }[] = [];
+  const ignoredDirectories = new Set([
+    ".git",
+    ".next",
+    "build",
+    "dist",
+    "node_modules",
+  ]);
+  const directoryEntries = directory as FileSystemDirectoryHandle & {
+    entries: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+  };
+  for await (const [entryName, entry] of directoryEntries.entries()) {
+    const path = [parentPath, entryName].filter(Boolean).join("/");
+    if (entry.kind === "directory") {
+      if (!ignoredDirectories.has(entryName)) {
+        files.push(
+          ...(await getTextFilesFromDirectory(
+            entry as FileSystemDirectoryHandle,
+            path,
+          )),
+        );
+      }
+      continue;
+    }
+
+    if (!isTextEditorFile(entryName)) continue;
+    const file = await (entry as FileSystemFileHandle).getFile();
+    files.push({ name: entryName, path, content: await file.text() });
+  }
+
+  return files;
+};
+
+const getDirectoryForPath = async (
+  root: FileSystemDirectoryHandle,
+  directoryPath: string,
+  create: boolean,
+): Promise<FileSystemDirectoryHandle> => {
+  let current = root;
+  for (const segment of directoryPath.split("/").filter(Boolean)) {
+    current = await current.getDirectoryHandle(segment, { create });
+  }
+  return current;
+};
+
 export const EditorWorkbench: React.FC = () => {
   const {
     theme,
@@ -60,6 +271,7 @@ export const EditorWorkbench: React.FC = () => {
     activeFileId,
     setActiveFileId,
     fileContents,
+    savedFileContents,
     updateFileContent,
     saveFileContent,
     openFileInEditor,
@@ -68,6 +280,7 @@ export const EditorWorkbench: React.FC = () => {
     deleteFile,
     loadUserLocalFiles,
     loadSingleLocalFile,
+    closeEditorProject,
     isFileTreeOpen,
     setIsFileTreeOpen,
     isAiDrawerOpen,
@@ -77,9 +290,6 @@ export const EditorWorkbench: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const loadEditorProjectRef = useRef(loadEditorProject);
-  loadEditorProjectRef.current = loadEditorProject;
-
   const [aiQuery, setAiQuery] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiHistory, setAiHistory] = useState<
@@ -98,14 +308,88 @@ export const EditorWorkbench: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [nativeHandle, setNativeHandle] = useState<NativeEditorHandle | null>(
+    null,
+  );
+  const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
+  const [isChangesOpen, setIsChangesOpen] = useState(false);
 
   const activeFile =
     openFiles.find((f) => f.id === activeFileId) || openFiles[0];
   const currentCode = activeFile ? fileContents[activeFile.id] || "" : "";
+  const activeFileChanges = activeFile
+    ? getLineChanges(savedFileContents[activeFile.id] || "", currentCode)
+    : { changedLines: new Map<number, ChangedLineKind>(), removedAtLine: null };
+  const dirtyFiles = treeFiles.filter((file) => file.isDirty);
 
   useEffect(() => {
-    if (!editorProjectId) void loadEditorProjectRef.current();
-  }, [editorProjectId]);
+    let isMounted = true;
+    void readNativeHandle()
+      .then((handle) => {
+        if (isMounted && handle) setNativeHandle(handle);
+      })
+      .catch((error: unknown) => {
+        console.error("Unable to restore native editor access.", error);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const openNativeFolder = async () => {
+    if (dirtyFiles.length > 0) {
+      setSaveError("Save or discard the current changes before opening another folder.");
+      setIsClosePromptOpen(true);
+      return;
+    }
+    const pickerWindow = window as FilePickerWindow;
+    if (!pickerWindow.showDirectoryPicker) {
+      folderInputRef.current?.click();
+      return;
+    }
+    try {
+      const handle = await pickerWindow.showDirectoryPicker({
+        mode: "readwrite",
+      });
+      const files = await getTextFilesFromDirectory(handle);
+      await loadUserLocalFiles(handle.name, files);
+      const storedHandle: NativeEditorHandle = { kind: "directory", handle };
+      setNativeHandle(storedHandle);
+      await storeNativeHandle(storedHandle);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      await friendlyAlert(
+        error instanceof Error ? error.message : "Unable to open this folder.",
+      );
+    }
+  };
+
+  const openNativeFile = async () => {
+    if (dirtyFiles.length > 0) {
+      setSaveError("Save or discard the current changes before opening another file.");
+      setIsClosePromptOpen(true);
+      return;
+    }
+    const pickerWindow = window as FilePickerWindow;
+    if (!pickerWindow.showOpenFilePicker) {
+      fileInputRef.current?.click();
+      return;
+    }
+    try {
+      const [handle] = await pickerWindow.showOpenFilePicker();
+      if (!handle) return;
+      const file = await handle.getFile();
+      await loadSingleLocalFile(file.name, await file.text());
+      const storedHandle: NativeEditorHandle = { kind: "file", handle };
+      setNativeHandle(storedHandle);
+      await storeNativeHandle(storedHandle);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      await friendlyAlert(
+        error instanceof Error ? error.message : "Unable to open this file.",
+      );
+    }
+  };
 
   // 1. Native File Selection via Browser File API
   const handleNativeFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,8 +404,13 @@ export const EditorWorkbench: React.FC = () => {
           error instanceof Error ? error.message : "Unable to open this file.",
         ),
       );
+      setNativeHandle(null);
+      void clearNativeHandle().catch((error: unknown) =>
+        console.error("Unable to clear old file access.", error),
+      );
     };
     reader.readAsText(file);
+    e.target.value = "";
   };
 
   // 2. Native Folder Selection via Browser Directory API
@@ -129,36 +418,34 @@ export const EditorWorkbench: React.FC = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const loadedList: { name: string; path: string; content: string }[] = [];
+    const selectedFiles = Array.from(files);
     const folderName =
       files[0]?.webkitRelativePath.split("/")[0] || "My-Local-Folder";
-    let readCount = 0;
-    const maxFiles = Math.min(files.length, 30); // read up to 30 text files for instant responsiveness
-
-    for (let i = 0; i < maxFiles; i++) {
-      const f = files[i]!;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = (event.target?.result as string) || "";
-        loadedList.push({
-          name: f.name,
-          path: f.webkitRelativePath || f.name,
-          content: text,
-        });
-        readCount++;
-        if (readCount === maxFiles) {
-          void loadUserLocalFiles(folderName, loadedList).catch(
-            (error: unknown) =>
-              friendlyAlert(
-                error instanceof Error
-                  ? error.message
-                  : "Unable to open this folder.",
-              ),
-          );
-        }
-      };
-      reader.readAsText(f);
-    }
+    e.target.value = "";
+    const loadedList = Promise.all(
+      selectedFiles
+        .filter((file) => isTextEditorFile(file.name))
+        .map(async (file) => ({
+          name: file.name,
+          path: file.webkitRelativePath || file.name,
+          content: await file.text(),
+        })),
+    );
+    void loadedList
+      .then(async (loadedFiles) => {
+        await loadUserLocalFiles(folderName, loadedFiles);
+        setNativeHandle(null);
+        await clearNativeHandle().catch((error: unknown) =>
+          console.error("Unable to clear old folder access.", error),
+        );
+      })
+      .catch((error: unknown) =>
+        friendlyAlert(
+          error instanceof Error
+            ? error.message
+            : "Unable to open this folder.",
+        ),
+      );
   };
 
   const handleCreateNewFile = (e: React.FormEvent) => {
@@ -167,7 +454,23 @@ export const EditorWorkbench: React.FC = () => {
     const filePath = [selectedFolder, newFileNameInput.trim()]
       .filter(Boolean)
       .join("/");
-    void createNewFile(filePath, filePath, "")
+    void (async () => {
+      if (nativeHandle?.kind === "directory") {
+        const parent = await getDirectoryForPath(
+          nativeHandle.handle,
+          filePath.split("/").slice(0, -1).join("/"),
+          true,
+        );
+        const fileHandle = await parent.getFileHandle(
+          filePath.split("/").pop()!,
+          { create: true },
+        );
+        const writer = await fileHandle.createWritable();
+        await writer.write("");
+        await writer.close();
+      }
+      await createNewFile(filePath, filePath, "");
+    })()
       .then(() => {
         setNewFileNameInput("");
         setIsCreatingFile(false);
@@ -184,6 +487,21 @@ export const EditorWorkbench: React.FC = () => {
     const folderName = newFolderNameInput.trim();
     if (!folderName) return;
     const folderPath = [selectedFolder, folderName].filter(Boolean).join("/");
+    if (nativeHandle?.kind === "directory") {
+      void getDirectoryForPath(nativeHandle.handle, folderPath, true)
+        .then(() => {
+          createNewFolder(folderPath);
+          setSelectedFolder(folderPath);
+          setNewFolderNameInput("");
+          setIsCreatingFolder(false);
+        })
+        .catch((error: unknown) =>
+          setSaveError(
+            error instanceof Error ? error.message : "Unable to create folder",
+          ),
+        );
+      return;
+    }
     createNewFolder(folderPath);
     setSelectedFolder(folderPath);
     if (!isEditorProjectOpen) {
@@ -271,6 +589,13 @@ export const EditorWorkbench: React.FC = () => {
                 {file.iconType}
               </span>
               <span className="truncate">{file.name}</span>
+              {file.isDirty && (
+                <span
+                  title="Unsaved changes"
+                  aria-label="Unsaved changes"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0DF5C4]"
+                />
+              )}
             </div>
             <button
               type="button"
@@ -284,6 +609,15 @@ export const EditorWorkbench: React.FC = () => {
                     )
                   ) {
                     try {
+                      if (nativeHandle?.kind === "directory") {
+                        const parts = file.path.split("/");
+                        const parent = await getDirectoryForPath(
+                          nativeHandle.handle,
+                          parts.slice(0, -1).join("/"),
+                          false,
+                        );
+                        await parent.removeEntry(parts[parts.length - 1]!);
+                      }
                       await deleteFile(file.id);
                     } catch (error) {
                       await friendlyAlert(
@@ -348,6 +682,7 @@ export const EditorWorkbench: React.FC = () => {
     setIsSaving(true);
     setSaveError(null);
     try {
+      await writeFileToDisk(activeFile, currentCode);
       await saveFileContent(activeFile.id);
     } catch (error) {
       setSaveError(
@@ -357,6 +692,113 @@ export const EditorWorkbench: React.FC = () => {
       setIsSaving(false);
     }
   };
+
+  const writeFileToDisk = async (file: EditorFile, content: string) => {
+    if (editorProjectId === "local-workspace") return;
+    const isLocalFile =
+      editorProjectId === "local-file" || editorProjectId === "local-folder";
+    if (!isLocalFile) return;
+    if (!nativeHandle) {
+      throw new Error(
+        "This file was opened without disk write access. Reopen it using Open File or Open Folder in a browser that supports local file access.",
+      );
+    }
+    const permissionHandle = nativeHandle.handle as typeof nativeHandle.handle & {
+      queryPermission?: (descriptor: {
+        mode: "readwrite";
+      }) => Promise<PermissionState>;
+      requestPermission?: (descriptor: {
+        mode: "readwrite";
+      }) => Promise<PermissionState>;
+    };
+    let permission = await permissionHandle.queryPermission?.({
+      mode: "readwrite",
+    });
+    if (permission !== "granted") {
+      permission = await permissionHandle.requestPermission?.({
+        mode: "readwrite",
+      });
+    }
+    if (permission !== "granted") {
+      throw new Error("Permission to save to the original file was denied.");
+    }
+
+    if (nativeHandle.kind === "file") {
+      if (file.path !== nativeHandle.handle.name) {
+        throw new Error(
+          "This new file is not the selected disk file. Open a folder to save multiple files.",
+        );
+      }
+      const writer = await nativeHandle.handle.createWritable();
+      await writer.write(content);
+      await writer.close();
+      return;
+    }
+
+    const parts = file.path.split("/");
+    const parent = await getDirectoryForPath(
+      nativeHandle.handle,
+      parts.slice(0, -1).join("/"),
+      true,
+    );
+    const fileHandle = await parent.getFileHandle(parts[parts.length - 1]!, {
+      create: true,
+    });
+    const writer = await fileHandle.createWritable();
+    await writer.write(content);
+    await writer.close();
+  };
+
+  const closeProjectNow = async (discardChanges: boolean) => {
+    setSaveError(null);
+    if (!discardChanges) {
+      setIsSaving(true);
+      try {
+        for (const file of dirtyFiles) {
+          await writeFileToDisk(file, fileContents[file.id] || "");
+          await saveFileContent(file.id);
+        }
+      } catch (error) {
+        setSaveError(
+          error instanceof Error ? error.message : "Unable to save project",
+        );
+        setIsSaving(false);
+        return;
+      }
+      setIsSaving(false);
+    }
+    try {
+      await clearNativeHandle();
+    } catch (error) {
+      console.error("Unable to clear saved file access.", error);
+    }
+    setNativeHandle(null);
+    closeEditorProject();
+    setIsClosePromptOpen(false);
+  };
+
+  const requestCloseProject = () => {
+    if (dirtyFiles.length > 0) {
+      setIsClosePromptOpen(true);
+      return;
+    }
+    void closeProjectNow(true);
+  };
+
+  useEffect(() => {
+    const handleSaveShortcut = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === "s" &&
+        isEditorProjectOpen
+      ) {
+        event.preventDefault();
+        void handleSaveFile();
+      }
+    };
+    window.addEventListener("keydown", handleSaveShortcut);
+    return () => window.removeEventListener("keydown", handleSaveShortcut);
+  }, [handleSaveFile, isEditorProjectOpen]);
 
   // Dynamic AI Chat
   const handleSendAi = async (e: React.FormEvent) => {
@@ -420,10 +862,12 @@ export const EditorWorkbench: React.FC = () => {
     }
   };
 
-  // 1. VS Code-Style Blank Welcome Screen (Shown when opening Editor initially)
+  // Editor welcome screen shown before a project is opened.
   if (!isEditorProjectOpen) {
     return (
-      <div className="h-[calc(100vh-3.5rem)] flex items-center justify-center p-6 bg-[#08080d] bg-grid-pattern relative select-none font-sans">
+      <div className="editor-welcome-root relative flex min-h-full w-full items-start justify-center overflow-x-hidden bg-[#08080d] bg-grid-pattern px-3 py-3.5 font-sans text-[#e5e7eb] sm:items-center sm:px-4 sm:py-4 lg:px-8 lg:py-8">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_12%,rgba(13,245,196,0.08),transparent_38%),radial-gradient(ellipse_at_82%_72%,rgba(108,99,255,0.1),transparent_44%)]" />
+        <div className="pointer-events-none absolute inset-x-[8%] top-[8%] h-40 rounded-full bg-[#6C63FF]/[0.07] blur-3xl" />
         {/* Hidden Native File & Folder Inputs */}
         <input
           type="file"
@@ -442,126 +886,162 @@ export const EditorWorkbench: React.FC = () => {
           className="hidden"
         />
 
-        <div className="max-w-2xl w-full bg-[#101017] border border-[#202030] rounded-3xl p-8 sm:p-10 shadow-2xl space-y-8 z-10">
+        <div className="editor-welcome-card relative z-10 w-full max-w-5xl rounded-[22px] border border-white/[0.10] bg-gradient-to-br from-[#191922]/[0.99] via-[#111118]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_36px_100px_rgba(0,0,0,0.62),0_14px_42px_rgba(108,99,255,0.11),inset_0_1px_0_rgba(255,255,255,0.07)] ring-1 ring-black/30 backdrop-blur-xl sm:rounded-2xl lg:rounded-[28px]">
+          <div className="editor-welcome-accent" aria-hidden="true" />
+          <div className="editor-welcome-content space-y-4 p-3.5 lg:space-y-8 lg:p-10">
           {isEditorLoading && (
-            <div className="text-xs text-[#0DF5C4] font-mono">
-              Loading Devpulse project...
+            <div className="flex items-center gap-2 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/5 px-3 py-2 text-xs text-[#0DF5C4]">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              Loading your project…
             </div>
           )}
           {editorError && (
-            <div className="text-xs text-[#f87171] font-mono">
+            <div role="alert" className="rounded-lg border border-[#f87171]/30 bg-[#f87171]/10 px-3 py-2 text-xs text-[#fca5a5]">
               {editorError}
             </div>
           )}
-          {/* Header */}
-          <div className="flex items-center gap-4 border-b border-[#1c1c2a] pb-6">
+          <header className="editor-welcome-header flex flex-col gap-2 border-b border-white/[0.07] pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5 lg:pb-7">
+            <div className="flex min-w-0 items-center gap-4">
             <div
-              className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-[0_10px_26px_rgba(13,245,196,0.20),inset_0_1px_0_rgba(255,255,255,0.35)] lg:h-14 lg:w-14"
               style={{ backgroundColor: theme.primary }}
             >
-              <Code2 className="w-7 h-7 text-[#09090e]" />
+              <Code2 className="h-7 w-7 text-[#09090e]" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl font-extrabold text-white tracking-tight">
-                  Visual Studio Code Studio
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <h1 className="text-[21px] font-bold tracking-tight lg:text-[28px]">
+                  <span className="bg-gradient-to-r from-[#f8fafc] via-[#dbeafe] to-[#a5b4fc] bg-clip-text text-transparent">
+                    Maestro
+                  </span>{" "}
+                  <span className="text-white">Code Studio</span>
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-[#0DF5C4]/15 text-[#0DF5C4] border border-[#0DF5C4]/30">
-                  READY
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#5ef0ce]">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" />
+                  Ready
                 </span>
               </div>
-              <p className="text-xs text-[#82829e] mt-0.5">
-                Select a local file or folder to open it in the editor.
+              <p className="mt-1 max-w-xl text-xs leading-5 text-[#9292a9] lg:mt-1.5 lg:text-sm lg:leading-6">
+                Open a local project or start with a new file.
               </p>
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Start Section (Native File / Folder dialogs) */}
-            <div className="space-y-3">
-              <div className="text-[11px] font-mono text-[#6c6c88] uppercase tracking-wider">
-                START FROM DISK
-              </div>
-
-              <div className="space-y-2 text-xs">
-                {/* Open Folder Button */}
-                <button
-                  onClick={() => folderInputRef.current?.click()}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <FolderOpen className="w-4 h-4 text-[#0DF5C4]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#0DF5C4] transition-colors">
-                      Open Folder...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Select any folder from your PC
-                    </div>
-                  </div>
-                </button>
-
-                {/* Open File Button */}
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <File className="w-4 h-4 text-[#6C63FF]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#6C63FF] transition-colors">
-                      Open File...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Select any source code or text file
-                    </div>
-                  </div>
-                </button>
-
-                {/* New Blank File Button */}
-                <button
-                  onClick={() => setIsCreatingFile(true)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <FilePlus className="w-4 h-4 text-[#FF9E64]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#FF9E64] transition-colors">
-                      New File...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Create an empty blank file
-                    </div>
-                  </div>
-                </button>
-                <button
-                  onClick={() => setIsCreatingFolder(true)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-[#151522] hover:bg-[#1c1c2e] border border-[#242436] text-white transition-all text-left group shadow-sm"
-                >
-                  <FolderPlus className="w-4 h-4 text-[#FF9E64]" />
-                  <div>
-                    <div className="font-semibold text-white group-hover:text-[#FF9E64] transition-colors">
-                      New Folder...
-                    </div>
-                    <div className="text-[10px] text-[#6d6d88] font-mono">
-                      Create a folder in this workspace
-                    </div>
-                  </div>
-                </button>
-              </div>
             </div>
+            <div className="flex w-fit items-center gap-2 rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] px-3 py-2 text-[11px] text-[#b0b0c2] shadow-[0_6px_18px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.07)]">
+              <Folder className="h-4 w-4 text-[#a5a1ff]" />
+              <span>Private to this workspace</span>
+            </div>
+          </header>
 
-            <div className="space-y-3">
-              <div className="text-[11px] font-mono text-[#6c6c88] uppercase tracking-wider">
-                YOUR WORKSPACES · {workspaces.length}
+          <div className="editor-welcome-grid grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-10">
+            <section className="editor-welcome-start space-y-2 lg:space-y-4" aria-labelledby="editor-start-title">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <h2 id="editor-start-title" className="text-sm font-semibold text-white">
+                    Start a project
+                  </h2>
+                  <p className="mt-1 text-xs text-[#777791]">
+                    Choose how you’d like to begin.
+                  </p>
+                </div>
+                <span className="pb-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[#66667f]">
+                  From your device
+                </span>
               </div>
-              <div className="space-y-2 text-xs">
+
+              <div className="editor-welcome-actions-stack space-y-1.5 lg:space-y-2.5">
+                <button
+                  onClick={() => void openNativeFolder()}
+                  className="editor-welcome-action group flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-[#0DF5C4]/25 bg-gradient-to-r from-[#0DF5C4]/[0.08] to-[#151522] px-3 py-2 text-left text-white shadow-[0_10px_28px_rgba(13,245,196,0.08),inset_0_1px_0_rgba(255,255,255,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-[#0DF5C4]/55 hover:from-[#0DF5C4]/[0.13] hover:shadow-[0_16px_36px_rgba(13,245,196,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/70 lg:min-h-[74px] lg:gap-3.5 lg:px-4 lg:py-3"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#0DF5C4]/20 bg-[#0DF5C4]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                    <FolderOpen className="h-5 w-5 text-[#0DF5C4]" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold text-white transition-colors group-hover:text-[#78f5db]">
+                      Open a folder
+                    </span>
+                    <span className="mt-1 block text-xs text-[#85859e]">
+                      Best for projects · save edits in place
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#0DF5C4]" />
+                </button>
+
+                <button
+                  onClick={() => void openNativeFile()}
+                  className="editor-welcome-action group flex min-h-[56px] w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#171720] to-[#12121a] px-3 py-2 text-left text-white shadow-[0_8px_22px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#6C63FF]/45 hover:shadow-[0_14px_30px_rgba(108,99,255,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6C63FF]/70 lg:min-h-[68px] lg:gap-3.5 lg:px-4 lg:py-3"
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                    <File className="h-5 w-5 text-[#9690ff]" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold">Open a single file</span>
+                    <span className="mt-1 block text-xs text-[#85859e]">
+                      Quick edit · open one file
+                    </span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#9690ff]" />
+                </button>
+
+                <div className="grid grid-cols-2 gap-1.5 pt-0 lg:gap-2.5 lg:pt-1">
+                  <button
+                    onClick={() => setIsCreatingFile(true)}
+                    className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
+                  >
+                    <FilePlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
+                    <span>
+                      <span className="block text-xs font-semibold text-white">New file</span>
+                      <span className="mt-1 block text-[10px] text-[#777791]">Create a blank file</span>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setIsCreatingFolder(true)}
+                    className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
+                  >
+                    <FolderPlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
+                    <span>
+                      <span className="block text-xs font-semibold text-white">New folder</span>
+                      <span className="mt-1 block text-[10px] text-[#777791]">Organize your files</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <section className="editor-welcome-workspaces space-y-2 lg:space-y-4" aria-labelledby="editor-workspaces-title">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <h2 id="editor-workspaces-title" className="text-sm font-semibold text-white">
+                    Your workspaces
+                  </h2>
+                  <p className="mt-1 text-xs text-[#777791]">
+                    Continue where you left off.
+                  </p>
+                </div>
+                <span className="rounded-full border border-[#29283a] bg-[#151520] px-2.5 py-1 text-[10px] font-mono text-[#85859e]">
+                  {workspaces.length}
+                </span>
+              </div>
+              <div className="space-y-2.5 text-xs">
                 {workspaces.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[#29293a] px-4 py-6 text-center">
-                    <p className="text-[#9292a9]">No workspaces created yet.</p>
+                  <div className="editor-welcome-empty flex min-h-[116px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.12] bg-gradient-to-br from-white/[0.025] to-transparent px-4 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:min-h-[220px] lg:px-6 lg:py-8">
+                    <span className="editor-welcome-empty-icon flex h-9 w-9 items-center justify-center rounded-xl border border-[#6C63FF]/25 bg-[#6C63FF]/10 shadow-[0_8px_24px_rgba(108,99,255,0.16),inset_0_1px_0_rgba(255,255,255,0.07)] lg:h-12 lg:w-12 lg:rounded-2xl">
+                      <FolderTree className="h-4 w-4 text-[#9690ff] lg:h-5 lg:w-5" />
+                    </span>
+                    <h3 className="mt-2.5 text-sm font-semibold text-white lg:mt-4">
+                      No workspaces yet
+                    </h3>
+                    <p className="mt-1 max-w-xs text-[11px] leading-4 text-[#85859e] lg:mt-1.5 lg:text-xs lg:leading-5">
+                      Browse workspaces to launch a cloud environment, or open a local project above.
+                    </p>
                     <button
                       type="button"
                       onClick={() => setPage("workspaces")}
-                      className="mt-3 rounded-lg border border-[#343444] px-3 py-2 text-[11px] font-semibold text-white transition hover:bg-white/5"
+                      className="mt-2.5 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-[#09090e] shadow-[0_8px_22px_rgba(108,99,255,0.22),inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_30px_rgba(108,99,255,0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 lg:mt-5 lg:py-2.5"
+                      style={{ backgroundColor: theme.secondary }}
                     >
-                      Go to Workspaces
+                      Browse workspaces
+                      <ChevronRight className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 ) : (
@@ -574,7 +1054,7 @@ export const EditorWorkbench: React.FC = () => {
                           setLoadedProjectName(workspace.name),
                         );
                       }}
-                      className="w-full flex items-center gap-3 rounded-xl border border-[#242436] bg-[#151522] p-3 text-left text-white transition hover:border-[#0DF5C4]/40 hover:bg-[#1c1c2e]"
+                      className="w-full flex items-center gap-3 rounded-xl border border-[#29283a] bg-[#151520] p-3.5 text-left text-white transition hover:border-[#0DF5C4]/40 hover:bg-[#191927] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/60"
                     >
                       <Sparkles className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
                       <span className="min-w-0 flex-1">
@@ -589,14 +1069,14 @@ export const EditorWorkbench: React.FC = () => {
                   ))
                 )}
               </div>
-            </div>
+            </section>
           </div>
 
           {/* New File Modal */}
           {isCreatingFile && (
             <form
               onSubmit={handleCreateNewFile}
-              className="p-4 bg-[#161624] border border-[#2a2a3e] rounded-2xl space-y-3"
+              className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
             >
               <div className="text-xs font-bold text-white font-mono">
                 Enter File Name
@@ -631,7 +1111,7 @@ export const EditorWorkbench: React.FC = () => {
           {isCreatingFolder && (
             <form
               onSubmit={handleCreateNewFolder}
-              className="p-4 bg-[#161624] border border-[#2a2a3e] rounded-2xl space-y-3"
+              className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
             >
               <div className="text-xs font-bold text-white font-mono">
                 Create Workspace Folder
@@ -663,6 +1143,7 @@ export const EditorWorkbench: React.FC = () => {
               </div>
             </form>
           )}
+          </div>
         </div>
       </div>
     );
@@ -670,7 +1151,7 @@ export const EditorWorkbench: React.FC = () => {
 
   // 2. Full Main Editor Workbench (Matches Screenshot 1 Pixel-Perfect with 100% Dynamic Files & Content)
   return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-[#0b0b12] text-[#d6d6e6] overflow-hidden font-sans select-none">
+    <div className="flex h-full min-h-0 flex-col bg-[#0b0b12] text-[#d6d6e6] overflow-hidden font-sans select-none">
       {/* Hidden Native File & Folder Inputs for top toolbar */}
       <input
         type="file"
@@ -718,12 +1199,20 @@ export const EditorWorkbench: React.FC = () => {
         <div className="flex items-center gap-3">
           {/* Open another file / folder */}
           <button
-            onClick={() => folderInputRef.current?.click()}
+            onClick={() => void openNativeFolder()}
             className="hidden sm:flex items-center gap-1 text-[11px] text-[#8e8ea8] hover:text-white px-2 py-1 rounded bg-[#161624] border border-[#242436]"
           >
             <FolderOpen className="w-3.5 h-3.5 text-[#0DF5C4]" />
             <span>Open Folder</span>
           </button>
+          {dirtyFiles.length > 0 && (
+            <button
+              onClick={() => setIsChangesOpen(true)}
+              className="hidden sm:flex items-center gap-1 text-[11px] text-[#0DF5C4] hover:text-white px-2 py-1 rounded bg-[#0DF5C4]/10 border border-[#0DF5C4]/30"
+            >
+              Show Changes ({dirtyFiles.length})
+            </button>
+          )}
 
           <button
             onClick={handleRunCode}
@@ -739,9 +1228,13 @@ export const EditorWorkbench: React.FC = () => {
           <button
             onClick={handleSaveFile}
             disabled={isSaving || !activeFile?.isDirty}
+            title="Save changes (Ctrl+S)"
             className="px-3 py-1 rounded-lg bg-[#6C63FF]/15 hover:bg-[#6C63FF]/25 border border-[#6C63FF]/40 text-[#c8c4ff] disabled:opacity-40 font-semibold text-xs flex items-center gap-1.5 transition-all"
           >
             <span>{isSaving ? "Saving..." : "Save"}</span>
+            <kbd className="hidden xl:inline text-[9px] text-[#8f89db]">
+              Ctrl+S
+            </kbd>
           </button>
 
           <button
@@ -791,7 +1284,7 @@ export const EditorWorkbench: React.FC = () => {
                     <FilePlus className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => void openNativeFile()}
                     title="Open Local File"
                     className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
                   >
@@ -907,10 +1400,10 @@ export const EditorWorkbench: React.FC = () => {
             {/* Bottom Actions */}
             <div className="p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] text-[#63637e]">
               <button
-                onClick={() => setIsEditorProjectOpen(false)}
+                onClick={requestCloseProject}
                 className="hover:text-white"
               >
-                ← Close Project
+                ← Close Folder
               </button>
               <span>Total: {treeFiles.length} files</span>
             </div>
@@ -982,7 +1475,7 @@ export const EditorWorkbench: React.FC = () => {
                     + Create File
                   </button>
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => void openNativeFile()}
                     className="px-3 py-1.5 rounded-xl bg-[#151522] border border-[#242436] text-white hover:border-white/30"
                   >
                     Open Local File
@@ -992,10 +1485,54 @@ export const EditorWorkbench: React.FC = () => {
             ) : (
               <>
                 {/* Line Numbers */}
-                <div className="w-12 bg-[#09090f] py-4 pr-3 text-right text-[#45455c] select-none border-r border-[#181824] shrink-0 space-y-1">
+                <div
+                  aria-label="Line numbers and change markers"
+                  className="w-14 bg-[#09090f] py-4 px-2 text-right select-none border-r border-[#181824] shrink-0"
+                >
                   {currentCode.split("\n").map((_, index) => (
-                    <div key={index} className="h-5 text-[11px]">
-                      {index + 1}
+                    <div
+                      key={index}
+                      className={`flex h-5 items-center justify-end gap-1 text-[11px] ${
+                        activeFileChanges.changedLines.has(index)
+                          ? activeFileChanges.changedLines.get(index) ===
+                            "added"
+                            ? "text-[#0DF5C4]"
+                            : "text-[#fbbf24]"
+                          : "text-[#45455c]"
+                      }`}
+                    >
+                      {activeFileChanges.removedAtLine === index && (
+                        <span
+                          aria-label="Lines removed"
+                          title="Lines removed"
+                          className="font-bold text-[#f87171]"
+                        >
+                          −
+                        </span>
+                      )}
+                      {activeFileChanges.changedLines.has(index) && (
+                        <span
+                          aria-label={
+                            activeFileChanges.changedLines.get(index) ===
+                            "added"
+                              ? "Added line"
+                              : "Modified line"
+                          }
+                          title={
+                            activeFileChanges.changedLines.get(index) ===
+                            "added"
+                              ? "Added line"
+                              : "Modified line"
+                          }
+                          className="font-bold"
+                        >
+                          {activeFileChanges.changedLines.get(index) ===
+                          "added"
+                            ? "+"
+                            : "~"}
+                        </span>
+                      )}
+                      <span>{index + 1}</span>
                     </div>
                   ))}
                 </div>
@@ -1169,6 +1706,130 @@ export const EditorWorkbench: React.FC = () => {
           </div>
         )}
       </div>
+      {isClosePromptOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="presentation"
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="close-folder-title"
+            className="w-full max-w-md space-y-4 rounded-2xl border border-[#303044] bg-[#11111a] p-5 shadow-2xl"
+          >
+            <div>
+              <h2 id="close-folder-title" className="text-base font-bold text-white">
+                Unsaved changes
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-[#a1a1b7]">
+                {dirtyFiles.length} file{dirtyFiles.length === 1 ? "" : "s"} in{" "}
+                {loadedProjectName} have unsaved changes. Save them to the
+                original files before closing?
+              </p>
+            </div>
+            {saveError && (
+              <p className="rounded-lg border border-red-900 bg-red-950/50 p-2 text-xs text-red-300">
+                {saveError}
+              </p>
+            )}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => setIsClosePromptOpen(false)}
+                className="rounded-lg border border-[#343444] px-3 py-2 text-xs text-white hover:bg-white/5 disabled:opacity-50"
+              >
+                Keep editing
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => void closeProjectNow(true)}
+                className="rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+              >
+                Discard Changes
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => void closeProjectNow(false)}
+                className="rounded-lg bg-[#0DF5C4] px-3 py-2 text-xs font-semibold text-[#07110f] disabled:opacity-50"
+              >
+                {isSaving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {isChangesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="editor-changes-title"
+            className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#303044] bg-[#11111a] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-[#29293a] p-4">
+              <div>
+                <h2 id="editor-changes-title" className="text-sm font-bold text-white">
+                  Changes
+                </h2>
+                <p className="mt-1 text-[11px] text-[#8b8ba8]">
+                  Working copy compared with the last saved version
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close changes"
+                onClick={() => setIsChangesOpen(false)}
+                className="rounded p-1 text-[#8b8ba8] hover:bg-white/5 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3 overflow-y-auto p-4">
+              {dirtyFiles.map((file) => (
+                <details
+                  key={file.id}
+                  open={dirtyFiles.length === 1}
+                  className="overflow-hidden rounded-xl border border-[#2b2b3d] bg-[#0b0b12]"
+                >
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-mono text-[#0DF5C4]">
+                    {file.path}
+                  </summary>
+                  <div className="grid min-w-0 gap-px border-t border-[#2b2b3d] bg-[#2b2b3d] md:grid-cols-2">
+                    <div className="min-w-0 bg-[#101017]">
+                      <div className="border-b border-[#242434] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#f87171]">
+                        Saved
+                      </div>
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-5 text-[#b7a2a2]">
+                        {savedFileContents[file.id] || ""}
+                      </pre>
+                    </div>
+                    <div className="min-w-0 bg-[#101017]">
+                      <div className="border-b border-[#242434] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#0DF5C4]">
+                        Current
+                      </div>
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-5 text-[#c6e8dc]">
+                        {fileContents[file.id] || ""}
+                      </pre>
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
+            <div className="flex justify-end border-t border-[#29293a] p-3">
+              <button
+                type="button"
+                onClick={() => setIsChangesOpen(false)}
+                className="rounded-lg border border-[#343444] px-3 py-2 text-xs text-white hover:bg-white/5"
+              >
+                Done
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 };

@@ -222,7 +222,7 @@ export const PricingPage: React.FC = () => {
           </div>
 
           <button
-            onClick={() => setPage("editor")}
+            onClick={() => setPage("payment-methods")}
             className="w-full py-3.5 px-4 rounded-xl font-bold text-xs text-[#09090e] shadow-xl flex items-center justify-center gap-2 transition-transform hover:scale-[1.02] active:scale-98"
             style={{ backgroundColor: theme.primary }}
           >

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useApp, PageType } from "../context/AppContext";
 import {
   Search,
@@ -12,7 +12,10 @@ import {
   Plus,
   Terminal,
   Zap,
+  Radio,
   ArrowRight,
+  Settings2,
+  UserRoundPlus,
 } from "lucide-react";
 
 export const CommandPalette: React.FC = () => {
@@ -26,10 +29,26 @@ export const CommandPalette: React.FC = () => {
   } = useApp();
 
   const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isCommandPaletteOpen) setQuery("");
   }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!isCommandPaletteOpen) return;
+
+    searchInputRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsCommandPaletteOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCommandPaletteOpen, setIsCommandPaletteOpen]);
 
   if (!isCommandPaletteOpen) return null;
 
@@ -40,6 +59,13 @@ export const CommandPalette: React.FC = () => {
       category: "Navigation",
       icon: Box,
       action: () => setPage("editor"),
+    },
+    {
+      id: "goto-sandbox",
+      label: "Open Virtual API Sandbox (Devpulse)",
+      category: "Navigation",
+      icon: Radio,
+      action: () => setPage("api-sandbox"),
     },
     {
       id: "goto-remote",
@@ -91,6 +117,20 @@ export const CommandPalette: React.FC = () => {
       action: () => setPage("theme"),
     },
     {
+      id: "goto-settings",
+      label: "Open Site Settings",
+      category: "Navigation",
+      icon: Settings2,
+      action: () => setPage("settings"),
+    },
+    {
+      id: "goto-account-connections",
+      label: "Add or Link an Account",
+      category: "Account",
+      icon: UserRoundPlus,
+      action: () => setPage("account-connections"),
+    },
+    {
       id: "goto-chat",
       label: "Open Team Chat",
       category: "Navigation",
@@ -127,32 +167,59 @@ export const CommandPalette: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-start justify-center pt-24 p-4"
+      className="command-palette-backdrop fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 pb-8 pt-[12vh] backdrop-blur-md"
       onClick={() => setIsCommandPaletteOpen(false)}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsCommandPaletteOpen(false);
+        }
+      }}
     >
       <div
-        className="bg-[#12121c] border border-[#27273a] rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden font-sans"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        className="command-palette-panel relative w-full max-w-xl overflow-hidden rounded-[22px] font-sans"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center px-4 py-3 border-b border-[#202030] gap-3">
-          <Search className="w-4 h-4 text-[#777794]" />
+        <div className="command-palette-topline" aria-hidden="true" />
+        <div className="flex items-center gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/[0.10] text-[#a9a4ff] shadow-[0_4px_16px_rgba(108,99,255,0.12)]">
+            <Search className="h-4 w-4" />
+          </span>
           <input
             type="text"
-            autoFocus
-            placeholder="Try typing 'create workspace' or 'go to pricing'"
+            ref={searchInputRef}
+            placeholder="Search pages, workspaces, and actions…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full bg-transparent text-sm text-white placeholder-[#585872] focus:outline-none font-mono"
+            className="w-full bg-transparent text-sm text-white placeholder-[#77798d] focus:outline-none"
+            aria-label="Search commands"
           />
-          <kbd className="px-1.5 py-0.5 rounded bg-[#1c1c2b] text-[10px] text-[#8e8ea6] border border-[#2e2e42]">
-            ESC
-          </kbd>
+          <button
+            type="button"
+            onClick={() => setIsCommandPaletteOpen(false)}
+            className="rounded-lg border border-white/[0.08] bg-white/[0.035] px-2 py-1 text-[10px] font-medium text-[#a0a1b1] transition hover:border-white/[0.16] hover:text-white"
+            aria-label="Close command palette"
+          >
+            Esc
+          </button>
         </div>
 
-        <div className="max-h-72 overflow-y-auto p-2 space-y-1">
+        <div className="flex items-center justify-between px-5 pb-2 pt-4">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#77798d]">
+            Quick actions
+          </span>
+          <span className="text-[10px] text-[#66687a]">
+            {filtered.length} {filtered.length === 1 ? "result" : "results"}
+          </span>
+        </div>
+        <div className="max-h-[min(60vh,420px)] space-y-1 overflow-y-auto px-2 pb-3">
           {filtered.length === 0 ? (
-            <div className="p-4 text-center text-xs text-[#6e6e88]">
-              No matching commands
+            <div className="mx-1 my-2 rounded-xl border border-dashed border-white/[0.09] px-4 py-8 text-center text-xs text-[#85869a]">
+              No results for <span className="font-medium text-[#c6c6d2]">{query}</span>
             </div>
           ) : (
             filtered.map((cmd) => {
@@ -164,20 +231,20 @@ export const CommandPalette: React.FC = () => {
                     cmd.action();
                     setIsCommandPaletteOpen(false);
                   }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-[#1c1c2c] text-xs transition-colors group text-left"
+                  className="command-palette-item group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs transition"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-7 h-7 rounded-lg bg-[#181824] border border-[#2a2a3e] flex items-center justify-center text-[#9c9cb8] group-hover:text-white">
-                      <Icon className="w-3.5 h-3.5" />
+                    <div className="command-palette-icon flex h-9 w-9 items-center justify-center rounded-xl">
+                      <Icon className="h-4 w-4" />
                     </div>
-                    <div>
-                      <div className="text-white font-medium">{cmd.label}</div>
-                      <div className="text-[10px] text-[#63637e] font-mono">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-white">{cmd.label}</div>
+                      <div className="mt-1 text-[10px] text-[#77798d]">
                         {cmd.category}
                       </div>
                     </div>
                   </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-[#585872] group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#686a7c] transition group-hover:translate-x-0.5 group-hover:text-[#0DF5C4]" />
                 </button>
               );
             })

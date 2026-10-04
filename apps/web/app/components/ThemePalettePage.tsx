@@ -16,6 +16,8 @@ import {
   Sliders,
   CheckCircle,
   Eye,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
 
@@ -37,7 +39,15 @@ function generateTonalRamp(hex: string): string[] {
 }
 
 export const ThemePalettePage: React.FC = () => {
-  const { theme, setTheme, availableThemes, setPage, workspaces } = useApp();
+  const {
+    theme,
+    setTheme,
+    colorMode,
+    setColorMode,
+    availableThemes,
+    setPage,
+    workspaces,
+  } = useApp();
   const [selectedThemeId, setSelectedThemeId] = useState(theme.id);
   const [customPrimary, setCustomPrimary] = useState(theme.primary);
   const [customSecondary, setCustomSecondary] = useState(theme.secondary);
@@ -53,6 +63,7 @@ export const ThemePalettePage: React.FC = () => {
   };
 
   const handleApplyAndContinue = () => {
+    setTheme(theme);
     setPage(workspaces.length > 0 ? "editor" : "workspaces");
   };
 
@@ -177,6 +188,15 @@ export const ThemePalettePage: React.FC = () => {
 
             {/* Action Buttons */}
             <div className="flex items-center gap-2 ml-auto">
+              <button
+                type="button"
+                onClick={() => setColorMode(colorMode === "dark" ? "light" : "dark")}
+                aria-label={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
+                title={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
+                className="h-9 w-9 rounded-xl border border-[#2e2e42] bg-[#1a1a26] text-white flex items-center justify-center"
+              >
+                {colorMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
               <button
                 onClick={() => setPage("workspaces")}
                 className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#1a1a26] hover:bg-[#252538] border border-[#2e2e42] text-white flex items-center gap-1.5 shadow transition-all hover:scale-105 active:scale-95"

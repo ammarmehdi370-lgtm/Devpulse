@@ -16,6 +16,10 @@ import { CloudCoreDashboard } from "./components/CloudCoreDashboard";
 import { ActivityPage } from "./components/ActivityPage";
 import { CommandPalette } from "./components/CommandPalette";
 import { ModalHost } from "./components/FriendlyHelpers";
+import { ApiSandboxPage } from "./components/ApiSandboxPage";
+import { SiteSettingsPage } from "./components/SiteSettingsPage";
+import { AccountConnectionsPage } from "./components/AccountConnectionsPage";
+import { PaymentMethodsPage } from "./components/PaymentMethodsPage";
 
 const PanelLoading = () => (
   <div
@@ -79,7 +83,19 @@ class AppErrorBoundary extends React.Component<
 }
 
 function MainAppContent() {
-  const { page } = useApp();
+  const { page, isClientStorageHydrated } = useApp();
+
+  if (!isClientStorageHydrated) {
+    return (
+      <main
+        className="flex min-h-screen items-center justify-center bg-[#0a0d0e] text-sm text-[#9aa0a0]"
+        aria-busy="true"
+        aria-live="polite"
+      >
+        Loading workspace...
+      </main>
+    );
+  }
 
   // 1. Initial State: Login Page
   if (page === "login") {
@@ -105,6 +121,10 @@ function MainAppContent() {
       {page === "pricing" && <PricingPage />}
       {page === "custom-plan" && <CustomPlanPage />}
       {page === "cloud-core" && <CloudCoreDashboard />}
+      {page === "api-sandbox" && <ApiSandboxPage />}
+      {page === "settings" && <SiteSettingsPage />}
+      {page === "account-connections" && <AccountConnectionsPage />}
+      {page === "payment-methods" && <PaymentMethodsPage />}
     </AppShell>
   );
 }

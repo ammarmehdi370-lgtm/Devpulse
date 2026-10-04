@@ -590,7 +590,7 @@ export function CloudCoreDashboard() {
             <h1 className="text-[28px] font-semibold tracking-tight text-white">
               Team Project Allocation
               <span className="ml-2 font-normal text-[#7b7788]">
-                // Workload &amp; Bandwidth Health
+                {"//"} Workload &amp; Bandwidth Health
               </span>
             </h1>
             <div className="mt-3 flex flex-wrap gap-1">

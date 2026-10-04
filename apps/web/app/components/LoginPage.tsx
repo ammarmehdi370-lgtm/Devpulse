@@ -12,6 +12,8 @@ import {
   Cloud,
   Code2,
   GitBranch,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { z } from "zod";
 
@@ -21,7 +23,7 @@ const emailSchema = z
   .email("Enter a valid work email address.");
 
 export const LoginPage: React.FC = () => {
-  const { login } = useApp();
+  const { login, colorMode, setColorMode } = useApp();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loginMethod, setLoginMethod] = useState("");
@@ -52,7 +54,7 @@ export const LoginPage: React.FC = () => {
       // with a mock dev user so you can test the full app flow locally.
       if (provider !== "google" && process.env.NODE_ENV === "development") {
         const providerLabels: Record<string, string> = {
-          github: "GitHub Dev",
+          github: "Alex",
           gitlab: "GitLab Dev",
           sso: "SSO Dev",
         };
@@ -135,9 +137,20 @@ export const LoginPage: React.FC = () => {
                 Devpulse
               </span>
             </div>
-            <span className="rounded-md border border-[#2a3836] bg-[#121c1b] px-2.5 py-1.5 font-mono text-[10px] text-[#9fb1ae]">
-              CLOUD WORKSPACE
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-md border border-[#2a3836] bg-[#121c1b] px-2.5 py-1.5 font-mono text-[10px] text-[#9fb1ae]">
+                CLOUD WORKSPACE
+              </span>
+              <button
+                type="button"
+                onClick={() => setColorMode(colorMode === "dark" ? "light" : "dark")}
+                aria-label={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
+                title={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
+                className="flex h-8 w-8 items-center justify-center rounded-md border border-[#2a3836] bg-[#121c1b] text-[#9fb1ae]"
+              >
+                {colorMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
 
           <div className="mb-7">

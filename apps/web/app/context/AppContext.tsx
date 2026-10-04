@@ -15,7 +15,11 @@ export type PageType =
   | "ai-studio"
   | "pricing"
   | "custom-plan"
-  | "cloud-core";
+  | "cloud-core"
+  | "api-sandbox"
+  | "settings"
+  | "account-connections"
+  | "payment-methods";
 
 export interface ThemeConfig {
   id: string;
@@ -132,11 +136,14 @@ export interface EditorFile {
 interface AppContextType {
   page: PageType;
   setPage: (page: PageType) => void;
+  isClientStorageHydrated: boolean;
   user: UserProfile;
   login: (email?: string, name?: string) => void;
   logout: () => void;
   theme: ThemeConfig;
   setTheme: (theme: ThemeConfig) => void;
+  colorMode: "dark" | "light";
+  setColorMode: (mode: "dark" | "light") => void;
   availableThemes: ThemeConfig[];
   repositories: Repository[];
   searchRepoQuery: string;
@@ -185,6 +192,7 @@ interface AppContextType {
   setIsCommandPaletteOpen: (open: boolean) => void;
   isEditorProjectOpen: boolean;
   setIsEditorProjectOpen: (open: boolean) => void;
+  closeEditorProject: () => void;
   editorProjectId: string;
   isEditorLoading: boolean;
   editorError: string;
@@ -198,6 +206,7 @@ interface AppContextType {
   activeFileId: string;
   setActiveFileId: (id: string) => void;
   fileContents: Record<string, string>;
+  savedFileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
   saveFileContent: (fileId: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
@@ -428,7 +437,167 @@ const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
 const WORKSPACES_STORAGE_KEY = "devpulse_workspaces";
 const ACTIVITY_STORAGE_KEY = "devpulse_activity_events";
+const EDITOR_SESSION_STORAGE_KEY = "devpulse_editor_session";
+const PAGE_STORAGE_KEY = "devpulse_active_page";
+const USER_STORAGE_KEY = "devpulse_user_session";
+const LOGGED_OUT_STORAGE_KEY = "devpulse_logged_out";
+const THEME_STORAGE_KEY = "devpulse_theme";
+const THEME_SELECTED_KEY = "devpulse_theme_selected";
+const COLOR_MODE_STORAGE_KEY = "devpulse_color_mode";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+const hasCompletedThemeSelection = () => {
+  try {
+    return window.localStorage.getItem(THEME_SELECTED_KEY) === "true";
+  } catch (error) {
+    console.error("Unable to read theme onboarding state.", error);
+    return false;
+  }
+};
+
+const isThemeConfig = (value: unknown): value is ThemeConfig => {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    "id" in value &&
+    typeof value.id === "string" &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "primary" in value &&
+    typeof value.primary === "string" &&
+    "secondary" in value &&
+    typeof value.secondary === "string" &&
+    "tertiary" in value &&
+    typeof value.tertiary === "string" &&
+    "neutral" in value &&
+    typeof value.neutral === "string" &&
+    "font" in value &&
+    typeof value.font === "string" &&
+    "mode" in value &&
+    typeof value.mode === "string" &&
+    "roundness" in value &&
+    typeof value.roundness === "string"
+  );
+};
+
+const getStoredTheme = () => {
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (!stored) return THEME_PRESETS[0]!;
+    const parsed: unknown = JSON.parse(stored);
+    if (
+      !isThemeConfig(parsed) ||
+      !THEME_PRESETS.some((preset) => preset.id === parsed.id)
+    ) {
+      return THEME_PRESETS[0]!;
+    }
+    return parsed;
+  } catch (error) {
+    console.error("Unable to restore the saved theme.", error);
+    return THEME_PRESETS[0]!;
+  }
+};
+
+const getStoredColorMode = (): "dark" | "light" => {
+  try {
+    return window.localStorage.getItem(COLOR_MODE_STORAGE_KEY) === "light"
+      ? "light"
+      : "dark";
+  } catch (error) {
+    console.error("Unable to restore the saved color mode.", error);
+    return "dark";
+  }
+};
+
+const readStoredPage = (): PageType => {
+  if (typeof window === "undefined") return "api-sandbox";
+  try {
+    const stored = window.localStorage.getItem(PAGE_STORAGE_KEY);
+    if (stored) return stored as PageType;
+  } catch {}
+  return "api-sandbox";
+};
+
+const getDefaultUser = (): UserProfile => ({
+  name: "Alex",
+  email: "alex@devpulse.dev",
+  handle: "alex",
+  role: "Staff Platform Engineer",
+  avatar:
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces",
+  isAuthenticated: true,
+});
+
+const readStoredUser = (): UserProfile => {
+  const defaultUser = getDefaultUser();
+  if (typeof window === "undefined") return defaultUser;
+  try {
+    if (window.localStorage.getItem(LOGGED_OUT_STORAGE_KEY) === "true") {
+      return { ...defaultUser, isAuthenticated: false };
+    }
+    const stored = window.localStorage.getItem(USER_STORAGE_KEY);
+    if (stored) return JSON.parse(stored) as UserProfile;
+  } catch {}
+  return defaultUser;
+};
+
+interface EditorSessionSnapshot {
+  isEditorProjectOpen: boolean;
+  editorProjectId: string;
+  loadedProjectName: string;
+  treeFiles: EditorFile[];
+  treeFolders: string[];
+  openFiles: EditorFile[];
+  activeFileId: string;
+  fileContents: Record<string, string>;
+  savedFileContents: Record<string, string>;
+}
+
+const EMPTY_EDITOR_SESSION: EditorSessionSnapshot = {
+  isEditorProjectOpen: false,
+  editorProjectId: "",
+  loadedProjectName: "",
+  treeFiles: [],
+  treeFolders: [],
+  openFiles: [],
+  activeFileId: "",
+  fileContents: {},
+  savedFileContents: {},
+};
+
+const readStoredEditorSession = (): EditorSessionSnapshot => {
+  if (typeof window === "undefined") return EMPTY_EDITOR_SESSION;
+  try {
+    const storedSession = JSON.parse(
+      window.localStorage.getItem(EDITOR_SESSION_STORAGE_KEY) || "null",
+    ) as Partial<EditorSessionSnapshot> | null;
+    if (!storedSession || !Array.isArray(storedSession.treeFiles)) {
+      return EMPTY_EDITOR_SESSION;
+    }
+    return {
+      ...EMPTY_EDITOR_SESSION,
+      ...storedSession,
+      treeFolders: Array.isArray(storedSession.treeFolders)
+        ? storedSession.treeFolders
+        : [],
+      openFiles: Array.isArray(storedSession.openFiles)
+        ? storedSession.openFiles
+        : [],
+      fileContents:
+        storedSession.fileContents &&
+        typeof storedSession.fileContents === "object"
+          ? storedSession.fileContents
+          : {},
+      savedFileContents:
+        storedSession.savedFileContents &&
+        typeof storedSession.savedFileContents === "object"
+          ? storedSession.savedFileContents
+          : {},
+    };
+  } catch (error) {
+    console.error("Unable to restore the editor session.", error);
+    return EMPTY_EDITOR_SESSION;
+  }
+};
 
 const readStoredWorkspaces = (): WorkspaceDevbox[] => {
   if (typeof window === "undefined") return EMPTY_WORKSPACES;
@@ -699,17 +868,18 @@ const AppContext = createContext<AppContextType | null>(null);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [page, setPage] = useState<PageType>("login");
+  const [page, setPageState] = useState<PageType>("api-sandbox");
   const [theme, setThemeState] = useState<ThemeConfig>(THEME_PRESETS[0]!);
-  const [user, setUser] = useState<UserProfile>({
-    name: "Alex",
-    email: "alex@devpulse.dev",
-    handle: "alex",
-    role: "Staff Platform Engineer",
-    avatar:
-      "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces",
-    isAuthenticated: false,
-  });
+  const [colorMode, setColorModeState] = useState<"dark" | "light">("dark");
+  const [user, setUser] = useState<UserProfile>(getDefaultUser);
+  const [isClientStorageHydrated, setIsClientStorageHydrated] = useState(false);
+
+  const setPage = (newPage: PageType) => {
+    setPageState(newPage);
+    try {
+      window.localStorage.setItem(PAGE_STORAGE_KEY, newPage);
+    } catch {}
+  };
 
   const [repositories, setRepositories] =
     useState<Repository[]>(INITIAL_REPOSITORIES);
@@ -717,12 +887,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [repoFilter, setRepoFilter] = useState("all");
 
   const [workspaces, setWorkspaces] =
-    useState<WorkspaceDevbox[]>(readStoredWorkspaces);
+    useState<WorkspaceDevbox[]>(EMPTY_WORKSPACES);
   const [deployments, setDeployments] =
     useState<Deployment[]>(INITIAL_DEPLOYMENTS);
-  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>(
-    readStoredActivityEvents,
-  );
+  const [activityEvents, setActivityEvents] = useState<ActivityEvent[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(true);
   const [envVars, setEnvVars] = useState<EnvVariable[]>(INITIAL_ENV_VARS);
   const [revealAllEnvVars, setRevealAllEnvVars] = useState(false);
@@ -733,19 +901,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [logs, setLogs] = useState<LogLine[]>(INITIAL_LOGS);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
-  // Editor State: starts with empty project until user selects file/folder
-  const [isEditorProjectOpen, setIsEditorProjectOpen] = useState(false);
-  const [editorProjectId, setEditorProjectId] = useState("");
+  // Editor State: preserve the current project and open tabs across reloads.
+  const [editorSession] = useState(EMPTY_EDITOR_SESSION);
+  const [isEditorProjectOpen, setIsEditorProjectOpen] = useState(
+    editorSession.isEditorProjectOpen,
+  );
+  const [editorProjectId, setEditorProjectId] = useState(
+    editorSession.editorProjectId,
+  );
   const [isEditorLoading, setIsEditorLoading] = useState(false);
   const [editorError, setEditorError] = useState("");
-  const [loadedProjectName, setLoadedProjectName] = useState("");
-  const [treeFiles, setTreeFiles] = useState<EditorFile[]>([]);
-  const [treeFolders, setTreeFolders] = useState<string[]>([]);
-  const [openFiles, setOpenFiles] = useState<EditorFile[]>([]);
-  const [activeFileId, setActiveFileId] = useState<string>("");
+  const [loadedProjectName, setLoadedProjectName] = useState(
+    editorSession.loadedProjectName,
+  );
+  const [treeFiles, setTreeFiles] = useState<EditorFile[]>(
+    editorSession.treeFiles,
+  );
+  const [treeFolders, setTreeFolders] = useState<string[]>(
+    editorSession.treeFolders,
+  );
+  const [openFiles, setOpenFiles] = useState<EditorFile[]>(
+    editorSession.openFiles,
+  );
+  const [activeFileId, setActiveFileId] = useState<string>(
+    editorSession.activeFileId,
+  );
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(true);
-  const [fileContents, setFileContents] = useState<Record<string, string>>({});
+  const [fileContents, setFileContents] = useState<Record<string, string>>(
+    editorSession.fileContents,
+  );
+  const [savedFileContents, setSavedFileContents] = useState<
+    Record<string, string>
+  >(editorSession.savedFileContents);
 
   // Remote Control Pairing State
   const [remoteCode, setRemoteCode] = useState<string>("");
@@ -773,14 +961,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   // Onboarding Tour State
-  const [isTourActive, setIsTourActive] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem("devpulse_tour_done") !== "true";
-  });
+  const [isTourActive, setIsTourActive] = useState(false);
   const [tourStep, setTourStep] = useState(0);
   const TOTAL_TOUR_STEPS = 3;
 
   useEffect(() => {
+    setPageState(readStoredPage());
+    setUser(readStoredUser());
+    const storedTheme = getStoredTheme();
+    const storedColorMode = getStoredColorMode();
+    setThemeState(storedTheme);
+    setColorModeState(storedColorMode);
+    document.body.setAttribute("data-theme", storedTheme.id);
+    document.documentElement.setAttribute("data-theme-mode", storedColorMode);
+    document.documentElement.style.setProperty("--primary", storedTheme.primary);
+    document.documentElement.style.setProperty("--secondary", storedTheme.secondary);
+    document.documentElement.style.setProperty("--tertiary", storedTheme.tertiary);
+    setWorkspaces(readStoredWorkspaces());
+    setActivityEvents(readStoredActivityEvents());
+    try {
+      setIsTourActive(
+        window.localStorage.getItem("devpulse_tour_done") !== "true",
+      );
+    } catch (error) {
+      console.error("Unable to restore onboarding state.", error);
+    }
+
+    const storedEditorSession = readStoredEditorSession();
+    setIsEditorProjectOpen(storedEditorSession.isEditorProjectOpen);
+    setEditorProjectId(storedEditorSession.editorProjectId);
+    setLoadedProjectName(storedEditorSession.loadedProjectName);
+    setTreeFiles(storedEditorSession.treeFiles);
+    setTreeFolders(storedEditorSession.treeFolders);
+    setOpenFiles(storedEditorSession.openFiles);
+    setActiveFileId(storedEditorSession.activeFileId);
+    setFileContents(storedEditorSession.fileContents);
+    setSavedFileContents(storedEditorSession.savedFileContents);
+    setIsClientStorageHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isClientStorageHydrated) return;
     try {
       window.localStorage.setItem(
         WORKSPACES_STORAGE_KEY,
@@ -789,9 +1010,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch {
       // Keep workspace actions usable when browser storage is unavailable.
     }
-  }, [workspaces]);
+  }, [workspaces, isClientStorageHydrated]);
 
   useEffect(() => {
+    if (!isClientStorageHydrated) return;
     try {
       window.localStorage.setItem(
         ACTIVITY_STORAGE_KEY,
@@ -800,7 +1022,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {
       console.error("Unable to persist activity history.", error);
     }
-  }, [activityEvents]);
+  }, [activityEvents, isClientStorageHydrated]);
+
+  useEffect(() => {
+    if (!isClientStorageHydrated) return;
+    try {
+      window.localStorage.setItem(
+        EDITOR_SESSION_STORAGE_KEY,
+        JSON.stringify({
+          isEditorProjectOpen,
+          editorProjectId,
+          loadedProjectName,
+          treeFiles,
+          treeFolders,
+          openFiles,
+          activeFileId,
+          fileContents,
+          savedFileContents,
+        } satisfies EditorSessionSnapshot),
+      );
+    } catch (error) {
+      console.error("Unable to persist the editor session.", error);
+    }
+  }, [
+    isEditorProjectOpen,
+    editorProjectId,
+    loadedProjectName,
+    treeFiles,
+    treeFolders,
+    openFiles,
+    activeFileId,
+    fileContents,
+    savedFileContents,
+    isClientStorageHydrated,
+  ]);
 
   const addActivityEvent = (
     event: Omit<ActivityEvent, "id" | "timestamp" | "actor">,
@@ -835,6 +1090,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   // Sync theme to DOM
   const setTheme = (newTheme: ThemeConfig) => {
     setThemeState(newTheme);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(newTheme));
+      window.localStorage.setItem(THEME_SELECTED_KEY, "true");
+    } catch (error) {
+      console.error("Unable to save the selected theme.", error);
+    }
     if (typeof document !== "undefined") {
       document.body.setAttribute("data-theme", newTheme.id);
       document.documentElement.style.setProperty("--primary", newTheme.primary);
@@ -849,9 +1110,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  useEffect(() => {
-    setTheme(THEME_PRESETS[0]!);
-  }, []);
+  const setColorMode = (mode: "dark" | "light") => {
+    setColorModeState(mode);
+    try {
+      window.localStorage.setItem(COLOR_MODE_STORAGE_KEY, mode);
+    } catch (error) {
+      console.error("Unable to save the selected color mode.", error);
+    }
+    if (typeof document !== "undefined") {
+      document.documentElement.setAttribute("data-theme-mode", mode);
+    }
+  };
 
   useEffect(() => {
     void fetch(`${API_BASE}/v1/me`, { credentials: "include" })
@@ -873,7 +1142,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           avatar: currentUser.avatarUrl || previous.avatar,
           isAuthenticated: true,
         }));
-        setPage("theme");
+        if (readStoredPage() === "login") {
+          setPage(hasCompletedThemeSelection() ? "workspaces" : "theme");
+        }
       })
       .catch(() => undefined);
   }, []);
@@ -891,21 +1162,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const login = (email?: string, name?: string) => {
-    setUser((prev) => ({
-      ...prev,
+    const updatedUser: UserProfile = {
+      ...user,
       email: email || "alex@devpulse.dev",
       name: name || "Alex",
       isAuthenticated: true,
-    }));
-    setPage("theme");
+    };
+    setUser(updatedUser);
+    try {
+      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      window.localStorage.removeItem(LOGGED_OUT_STORAGE_KEY);
+    } catch {}
+    setPage(hasCompletedThemeSelection() ? "workspaces" : "theme");
   };
 
   const logout = () => {
     void fetch(`${API_BASE}/v1/auth/logout`, {
       method: "POST",
       credentials: "include",
+    }).catch((error: unknown) => {
+      console.error("Unable to notify the authentication service of sign-out.", error);
     });
-    setUser((prev) => ({ ...prev, isAuthenticated: false }));
+    const loggedOutUser: UserProfile = { ...user, isAuthenticated: false };
+    setUser(loggedOutUser);
+    try {
+      window.localStorage.removeItem(USER_STORAGE_KEY);
+      window.localStorage.setItem(LOGGED_OUT_STORAGE_KEY, "true");
+      window.localStorage.setItem(PAGE_STORAGE_KEY, "login");
+    } catch {}
     setPage("login");
   };
 
@@ -1508,9 +1792,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setTreeFiles(nextFiles);
       setTreeFolders(getParentFolderPaths(nextFiles.map((file) => file.path)));
       setFileContents(nextContents);
+      setSavedFileContents(nextContents);
       if (nextFiles.length > 0) {
         setOpenFiles([nextFiles[0]!]);
         setActiveFileId(nextFiles[0]!.id);
+      } else {
+        setOpenFiles([]);
+        setActiveFileId("");
       }
       setIsEditorProjectOpen(true);
     } catch {
@@ -1522,6 +1810,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         getParentFolderPaths(DEFAULT_EDITOR_FILES.map((file) => file.path)),
       );
       setFileContents(DEFAULT_FILE_CONTENTS);
+      setSavedFileContents(DEFAULT_FILE_CONTENTS);
       setOpenFiles([DEFAULT_EDITOR_FILES[0]!, DEFAULT_EDITOR_FILES[1]!]);
       setActiveFileId(DEFAULT_EDITOR_FILES[0]!.id);
       setIsEditorProjectOpen(true);
@@ -1531,18 +1820,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const updateFileContent = (fileId: string, content: string) => {
+    const isDirty = content !== (savedFileContents[fileId] ?? "");
     setFileContents((prev) => ({ ...prev, [fileId]: content }));
     setOpenFiles((prev) =>
-      prev.map((f) => (f.id === fileId ? { ...f, isDirty: true } : f)),
+      prev.map((f) => (f.id === fileId ? { ...f, isDirty } : f)),
+    );
+    setTreeFiles((prev) =>
+      prev.map((file) =>
+        file.id === fileId ? { ...file, isDirty } : file,
+      ),
     );
   };
 
   const saveFileContent = async (fileId: string) => {
     const content = fileContents[fileId] ?? "";
-    const saved = await apiJson<{ id: string }>(`/v1/files/${fileId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ content }),
-    });
+    const isLocalFile =
+      editorProjectId === "local-file" ||
+      editorProjectId === "local-folder" ||
+      editorProjectId === "local-workspace";
+    const saved = isLocalFile
+      ? { id: fileId }
+      : await apiJson<{ id: string }>(`/v1/files/${fileId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ content }),
+        });
+    setSavedFileContents((previous) => ({ ...previous, [fileId]: content }));
     setOpenFiles((prev) =>
       prev.map((file) =>
         file.id === saved.id ? { ...file, isDirty: false } : file,
@@ -1560,6 +1862,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       detail: `Saved ${file?.path || fileId}.`,
       project: loadedProjectName || "Editor",
     });
+  };
+
+  const closeEditorProject = () => {
+    setIsEditorProjectOpen(false);
+    setEditorProjectId("");
+    setLoadedProjectName("");
+    setTreeFiles([]);
+    setTreeFolders([]);
+    setOpenFiles([]);
+    setActiveFileId("");
+    setFileContents({});
+    setSavedFileContents({});
   };
 
   const openFileInEditor = (file: EditorFile) => {
@@ -1594,6 +1908,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       ...prev,
       [newFile.id]: initialContent || "",
     }));
+    setSavedFileContents((prev) => ({
+      ...prev,
+      [newFile.id]: initialContent || "",
+    }));
+    if (!editorProjectId) setEditorProjectId("local-workspace");
+    setIsEditorProjectOpen(true);
     openFileInEditor(newFile);
     addActivityEvent({
       category: "Code",
@@ -1624,6 +1944,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       delete copy[fileId];
       return copy;
     });
+    setSavedFileContents((prev) => {
+      const copy = { ...prev };
+      delete copy[fileId];
+      return copy;
+    });
     addActivityEvent({
       category: "Code",
       title: "File deleted",
@@ -1638,8 +1963,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setTreeFiles([newFile]);
     setTreeFolders([]);
     setFileContents({ [newFile.id]: content });
+    setSavedFileContents({ [newFile.id]: content });
     setOpenFiles([newFile]);
     setActiveFileId(newFile.id);
+    setEditorProjectId("local-file");
     setLoadedProjectName(name.split(".")[0] || "local-file");
     setIsEditorProjectOpen(true);
     addActivityEvent({
@@ -1668,6 +1995,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setTreeFiles(newTree);
     setTreeFolders(getParentFolderPaths(files.map((file) => file.path)));
     setFileContents(newContents);
+    setSavedFileContents(newContents);
+    setEditorProjectId("local-folder");
     if (newTree.length > 0) {
       setOpenFiles([newTree[0]!]);
       setActiveFileId(newTree[0]!.id);
@@ -1687,21 +2016,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     const nextContent = newSnippet
       ? `${current}\n\n// Added by AI Assistant:\n${newSnippet}`
       : current;
-    setFileContents((prev) => ({ ...prev, [activeFileId]: nextContent }));
-    await apiJson(`/v1/files/${activeFileId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ content: nextContent }),
-    });
-    setOpenFiles((prev) =>
-      prev.map((file) =>
-        file.id === activeFileId ? { ...file, isDirty: false } : file,
-      ),
-    );
-    setTreeFiles((prev) =>
-      prev.map((file) =>
-        file.id === activeFileId ? { ...file, isDirty: false } : file,
-      ),
-    );
+    updateFileContent(activeFileId, nextContent);
     const file = treeFiles.find((item) => item.id === activeFileId);
     addActivityEvent({
       category: "Code",
@@ -1720,11 +2035,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       value={{
         page,
         setPage,
+        isClientStorageHydrated,
         user,
         login,
         logout,
         theme,
         setTheme,
+        colorMode,
+        setColorMode,
         availableThemes: THEME_PRESETS,
         repositories,
         searchRepoQuery,
@@ -1761,6 +2079,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setIsCommandPaletteOpen,
         isEditorProjectOpen,
         setIsEditorProjectOpen,
+        closeEditorProject,
         editorProjectId,
         isEditorLoading,
         editorError,
@@ -1774,6 +2093,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         activeFileId,
         setActiveFileId,
         fileContents,
+        savedFileContents,
         updateFileContent,
         saveFileContent,
         openFileInEditor,
