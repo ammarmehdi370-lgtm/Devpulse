@@ -20,7 +20,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type SelectionSnapshot = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; selectedText: string };
 type AiCommand = "/fix" | "/explain" | "/test" | "/comment" | "/refactor" | "/optimize";
-type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; isError?: boolean; errorCode?: string; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
+type AIErrorCode = "AI_NOT_CONFIGURED" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "TOKEN_EXPIRED" | "UNKNOWN";
+type AIErrorEvent = { type: "error"; code: AIErrorCode; message: string };
+type AiStreamEvent = AIErrorEvent | { type: "chunk"; content: string };
+type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; isError?: boolean; errorCode?: AIErrorCode; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
 type AiConversationSummary = { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: string; preview?: string };
 type AiDbMessage = { id: string; role: "USER" | "ASSISTANT"; content: string; command?: string | null; hasCode?: boolean; codeLanguage?: string | null; appliedToFileId?: string | null; createdAt: string };
 type OutputTab = "terminal" | "output" | "problems" | "history";
@@ -280,16 +283,41 @@ const extractCode = (text: string) =>
 const extractCodeLanguage = (text: string) =>
   text.match(/```([\w#+-]+)?\s*[\s\S]*?```/)?.[1] || "text";
 
-const parseSseLine = (line: string): { content?: string; code?: string; message?: string } | null => {
+const isAIErrorCode = (value: unknown): value is AIErrorCode =>
+  value === "AI_NOT_CONFIGURED"
+  || value === "RATE_LIMITED"
+  || value === "SERVICE_UNAVAILABLE"
+  || value === "TOKEN_EXPIRED"
+  || value === "UNKNOWN";
+
+const normalizeAIErrorCode = (value: unknown): AIErrorCode =>
+  isAIErrorCode(value) ? value : "UNKNOWN";
+
+const parseSseLine = (line: string): AiStreamEvent | null => {
   if (!line.startsWith("data:")) return null;
   const payload = line.slice(5).trim();
   if (!payload || payload === "[DONE]") return null;
   try {
-    const parsed = JSON.parse(payload) as { type?: string; content?: string; text?: string; delta?: string; code?: string; message?: string };
-    if (parsed.type === "error") return { code: parsed.code, message: parsed.message };
-    return { content: parsed.type === "chunk" ? parsed.content || "" : parsed.text || parsed.delta || "" };
+    const parsed: unknown = JSON.parse(payload);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const event = parsed as Record<string, unknown>;
+    if (event.type === "error") {
+      return {
+        type: "error",
+        code: normalizeAIErrorCode(event.code),
+        message: typeof event.message === "string" ? event.message : "",
+      };
+    }
+    if (event.type === "chunk" && typeof event.content === "string") {
+      return { type: "chunk", content: event.content };
+    }
+    if (typeof event.text === "string" || typeof event.delta === "string") {
+      const content = typeof event.text === "string" ? event.text : event.delta;
+      if (typeof content === "string") return { type: "chunk", content };
+    }
+    return null;
   } catch {
-    return { content: payload };
+    return null;
   }
 };
 
@@ -900,15 +928,20 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       if (!response.ok) {
         const errorBody: unknown = await response.json().catch(() => null);
         const details = typeof errorBody === "object" && errorBody !== null
-          ? errorBody as { error?: string; code?: string; message?: string }
+          ? errorBody as Record<string, unknown>
           : {};
-        if (details.code === "AI_NOT_CONFIGURED" || details.error === "AI_NOT_CONFIGURED") {
+        const errorCode = details.code ?? details.error;
+        const normalizedCode = normalizeAIErrorCode(errorCode);
+        if (normalizedCode === "AI_NOT_CONFIGURED") {
           setMessages((previous) => previous.map((message) => message.id === assistantId
             ? { ...message, text: "", streaming: false, isError: true, errorCode: "AI_NOT_CONFIGURED" }
             : message));
           return;
         }
-        throw new Error(details.message || details.error || `AI request failed (${response.status})`);
+        const errorMessage = typeof details.message === "string"
+          ? details.message
+          : typeof details.error === "string" ? details.error : `AI request failed (${response.status})`;
+        throw new Error(errorMessage);
       }
       if ((response.headers.get("content-type") || "").includes("text/event-stream") && response.body) {
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
@@ -921,19 +954,18 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
           for (const line of lines) {
             const event = parseSseLine(line);
             if (!event) continue;
-            if (event.code === "AI_NOT_CONFIGURED") {
+            if (event.type === "error") {
               setMessages((previous) => previous.map((message) => message.id === assistantId
-                ? { ...message, text: "", isError: true, errorCode: "AI_NOT_CONFIGURED" }
+                ? {
+                    ...message,
+                    text: event.code === "AI_NOT_CONFIGURED" ? "" : `AI error: ${event.message}`,
+                    isError: true,
+                    errorCode: event.code,
+                  }
                 : message));
               continue;
             }
-            if (event.message) {
-              setMessages((previous) => previous.map((message) => message.id === assistantId
-                ? { ...message, text: `AI error: ${event.message}`, isError: true }
-                : message));
-              continue;
-            }
-            const text = event.content ?? "";
+            const text = event.content;
             if (text) {
               assistantContent += text;
               setMessages((previous) => previous.map((message) => message.id === assistantId

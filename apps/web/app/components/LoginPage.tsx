@@ -21,12 +21,34 @@ type OAuthProviders = {
   magicLink: boolean;
 };
 
+type EmailLoginErrorCode = "EMAIL_NOT_CONFIGURED" | "EMAIL_FAILED" | "UNKNOWN";
+
+interface DevMagicLinkResponse {
+  mode: "development";
+  message: string;
+  token: string;
+  url: string;
+}
+
+interface ProdMagicLinkResponse {
+  mode: "production";
+  message: string;
+}
+
+interface MagicLinkErrorResponse {
+  mode?: never;
+  error: string;
+  message: string;
+}
+
+type MagicLinkResponse = DevMagicLinkResponse | ProdMagicLinkResponse | MagicLinkErrorResponse;
+
 type EmailLoginState =
   | { status: "idle" }
   | { status: "submitting" }
   | { status: "sent"; email: string }
-  | { status: "dev-token"; url: string }
-  | { status: "error"; message: string };
+  | { status: "dev-token"; token: string; url: string }
+  | { status: "error"; code: EmailLoginErrorCode; message: string };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
@@ -36,6 +58,17 @@ function isOAuthProviders(value: unknown): value is OAuthProviders {
   return typeof providers.github === "boolean"
     && typeof providers.google === "boolean"
     && typeof providers.magicLink === "boolean";
+}
+
+function isMagicLinkResponse(value: unknown): value is MagicLinkResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const result = value as Record<string, unknown>;
+  if (typeof result.message !== "string") return false;
+  if (result.mode === "development") {
+    return typeof result.token === "string" && typeof result.url === "string";
+  }
+  if (result.mode === "production") return true;
+  return typeof result.error === "string";
 }
 
 export const LoginPage: React.FC = () => {
@@ -90,7 +123,7 @@ export const LoginPage: React.FC = () => {
   const handleEmailLogin = async () => {
     const requestedEmail = email.trim();
     if (!requestedEmail) {
-      setEmailLoginState({ status: "error", message: "Enter your email address to continue." });
+      setEmailLoginState({ status: "error", code: "UNKNOWN", message: "Enter your email address to continue." });
       return;
     }
 
@@ -103,28 +136,27 @@ export const LoginPage: React.FC = () => {
         credentials: "include",
         body: JSON.stringify({ email: requestedEmail }),
       });
-      const result = (await response.json()) as {
-        mode?: "development" | "production";
-        token?: string;
-        url?: string;
-        message?: string;
-        error?: string;
-      };
+      const result: unknown = await response.json();
+      if (!isMagicLinkResponse(result)) {
+        throw new Error("The sign-in response was invalid. Please try again.");
+      }
 
       if (!response.ok) {
-        const message = result.error === "EMAIL_NOT_CONFIGURED"
+        const errorCode = "error" in result ? result.error : "UNKNOWN";
+        const code: EmailLoginErrorCode = errorCode === "EMAIL_NOT_CONFIGURED"
+          ? "EMAIL_NOT_CONFIGURED"
+          : errorCode === "EMAIL_FAILED" ? "EMAIL_FAILED" : "UNKNOWN";
+        const message = code === "EMAIL_NOT_CONFIGURED"
           ? "Email login is not available right now. Use GitHub or Google to sign in."
-          : result.error === "EMAIL_FAILED"
+          : code === "EMAIL_FAILED"
             ? "Could not send email. Please try again."
-            : result.message || "Unable to request a sign-in link.";
-        setEmailLoginState({ status: "error", message });
+            : result.message;
+        setEmailLoginState({ status: "error", code, message });
         return;
       }
 
-      if (result.mode === "development" && result.token) {
-        const verificationUrl = result.url
-          ?? `${window.location.origin}/auth/verify?token=${encodeURIComponent(result.token)}`;
-        setEmailLoginState({ status: "dev-token", url: verificationUrl });
+      if (result.mode === "development") {
+        setEmailLoginState({ status: "dev-token", token: result.token, url: result.url });
         return;
       }
 
@@ -137,6 +169,7 @@ export const LoginPage: React.FC = () => {
     } catch (error) {
       setEmailLoginState({
         status: "error",
+        code: "UNKNOWN",
         message: error instanceof Error ? error.message : "Unable to send sign-in link.",
       });
     }

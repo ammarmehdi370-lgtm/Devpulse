@@ -34,7 +34,7 @@ async function sendEmail(options: Parameters<Resend["emails"]["send"]>[0]): Prom
   const { data, error } = await getResend().emails.send(options);
   if (error) {
     console.error("[Email] Resend error:", error);
-    throw new Error(`Email delivery failed: ${error.message}`);
+    throw new Error(`Resend error: ${error.name} — ${error.message}`);
   }
   console.log("[Email] Message sent", data?.id);
 }

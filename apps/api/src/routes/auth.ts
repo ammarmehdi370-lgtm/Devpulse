@@ -27,6 +27,23 @@ const isTestEnvironment = process.env.NODE_ENV === "test";
 const sessionSecret = process.env.SESSION_SECRET ?? (isTestEnvironment ? randomBytes(32).toString("hex") : undefined);
 if (!sessionSecret) throw new Error("SESSION_SECRET is required. Generate one with: openssl rand -hex 32");
 
+interface DevMagicLinkResponse {
+  mode: "development";
+  message: string;
+  token: string;
+  url: string;
+}
+
+interface ProdMagicLinkResponse {
+  mode: "production";
+  message: string;
+}
+
+interface MagicLinkErrorResponse {
+  error: string;
+  message: string;
+}
+
 setupPassport();
 
 export const sessionMiddleware: express.RequestHandler = session({
@@ -190,9 +207,17 @@ async function ensureWorkspaceMembership(userId: string, name: string): Promise<
   });
 }
 
-async function sendMagicLinkHandler(request: express.Request, response: express.Response): Promise<express.Response> {
+async function sendMagicLinkHandler(
+  request: express.Request,
+  response: express.Response<DevMagicLinkResponse | ProdMagicLinkResponse | MagicLinkErrorResponse>,
+): Promise<express.Response> {
   const validation = z.object({ email: z.string().trim().email().max(254) }).safeParse(request.body);
-  if (!validation.success) return response.status(400).json({ error: "Invalid email address" });
+  if (!validation.success) {
+    return response.status(400).json({
+      error: "INVALID_EMAIL",
+      message: "Invalid email address",
+    });
+  }
   const email = validation.data.email.toLowerCase();
   if (process.env.NODE_ENV === "production" && !process.env.RESEND_API_KEY?.trim()) {
     console.error("[Auth] Email not configured: RESEND_API_KEY is not set");
@@ -222,21 +247,23 @@ async function sendMagicLinkHandler(request: express.Request, response: express.
 
   if (memoryFallbackAllowed()) {
     const url = `${frontendURL}/auth/verify?token=${encodeURIComponent(token)}`;
-    return response.json({
+    const result: DevMagicLinkResponse = {
       mode: "development",
       token,
       url,
       message: "Dev mode: use this token directly",
-    });
+    };
+    return response.json(result);
   }
 
   try {
     const user = await db.user.findUnique({ where: { email }, select: { name: true } });
     await sendMagicLink(email, token, user?.name ?? undefined);
-    return response.json({
+    const result: ProdMagicLinkResponse = {
       mode: "production",
       message: "Check your email for a sign-in link",
-    });
+    };
+    return response.json(result);
   } catch (emailError) {
     try {
       await deleteMagicToken(tokenKey);
