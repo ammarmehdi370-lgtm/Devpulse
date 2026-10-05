@@ -16,7 +16,6 @@ import {
   Sun,
   HardDriveDownload,
   UserRound,
-  UserRoundPlus,
   Trash2,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
@@ -86,7 +85,9 @@ export const SiteSettingsPage: React.FC = () => {
       setIsHydrated(true);
     } catch (storageError) {
       console.error("Unable to load Devpulse settings.", storageError);
-      setError("Saved settings could not be loaded. You can still change them for this session.");
+      setError(
+        "Saved settings could not be loaded. You can still change them for this session.",
+      );
       setIsHydrated(true);
     }
   }, []);
@@ -98,7 +99,9 @@ export const SiteSettingsPage: React.FC = () => {
       );
     } catch (storageError) {
       console.error("Unable to load billing preferences.", storageError);
-      setBillingError("Billing preferences could not be loaded from this device.");
+      setBillingError(
+        "Billing preferences could not be loaded from this device.",
+      );
     }
   }, []);
 
@@ -119,7 +122,9 @@ export const SiteSettingsPage: React.FC = () => {
         const request = window.indexedDB.deleteDatabase(NATIVE_HANDLE_DB);
         request.onsuccess = () => resolve();
         request.onerror = () =>
-          reject(request.error ?? new Error("Could not remove local file access."));
+          reject(
+            request.error ?? new Error("Could not remove local file access."),
+          );
         request.onblocked = () =>
           reject(new Error("Close other Devpulse tabs, then try again."));
       });
@@ -159,7 +164,9 @@ export const SiteSettingsPage: React.FC = () => {
       setError("");
     } catch (storageError) {
       console.error("Unable to save Devpulse settings.", storageError);
-      setError("Settings changed for this session but could not be saved on this device.");
+      setError(
+        "Settings changed for this session but could not be saved on this device.",
+      );
     }
   };
 
@@ -405,20 +412,6 @@ export const SiteSettingsPage: React.FC = () => {
                 {user.role}
                 {user.handle ? ` · @${user.handle}` : ""}
               </div>
-              <button
-                type="button"
-                onClick={() => setPage("account-connections")}
-                className="settings-navigation-row mt-3"
-              >
-                <span className="settings-row-icon text-[#0DF5C4]">
-                  <UserRoundPlus className="h-4 w-4" />
-                </span>
-                <span className="min-w-0 flex-1 text-left">
-                  <strong>Add or link an account</strong>
-                  <small>Preview available identity providers</small>
-                </span>
-                <ChevronRight className="h-4 w-4 text-[#77788c]" />
-              </button>
             </section>
 
             <section className="settings-panel">
@@ -599,11 +592,12 @@ export const SiteSettingsPage: React.FC = () => {
             >
               {deletionDialog === "device" ? (
                 <>
-                  This clears saved Devpulse workspace and editor data, settings,
-                  saved file snapshots, and folder-access references from this
-                  browser, then signs you out. It will <strong className="text-white">not</strong>{" "}
-                  delete your original files and folders from the computer or
-                  your remote account. Important: this app currently keeps some
+                  This clears saved Devpulse workspace and editor data,
+                  settings, saved file snapshots, and folder-access references
+                  from this browser, then signs you out. It will{" "}
+                  <strong className="text-white">not</strong> delete your
+                  original files and folders from the computer or your remote
+                  account. Important: this app currently keeps some
                   workspace/editor data only on this device and does not sync
                   those local copies to your account. Anything not already
                   present in your original files may be lost.
@@ -614,7 +608,10 @@ export const SiteSettingsPage: React.FC = () => {
                   server data after a 30-day grace period. You could cancel
                   during that period. However, account deletion is not connected
                   to a backend in this app, so this option cannot currently
-                  schedule a deletion. <strong className="text-white">Nothing will be deleted or scheduled.</strong>
+                  schedule a deletion.{" "}
+                  <strong className="text-white">
+                    Nothing will be deleted or scheduled.
+                  </strong>
                 </>
               )}
             </p>
@@ -635,7 +632,9 @@ export const SiteSettingsPage: React.FC = () => {
                   className="inline-flex items-center gap-2 rounded-xl border border-red-300/20 bg-red-400/15 px-4 py-2.5 text-xs font-semibold text-red-100 transition hover:bg-red-400/25 disabled:cursor-wait disabled:opacity-60"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  {isRemovingDeviceData ? "Removing data…" : "Remove data and sign out"}
+                  {isRemovingDeviceData
+                    ? "Removing data…"
+                    : "Remove data and sign out"}
                 </button>
               )}
             </div>

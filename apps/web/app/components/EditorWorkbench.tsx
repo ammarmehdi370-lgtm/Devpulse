@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useCallback,
+  useState,
+  useRef,
+} from "react";
 import { useApp, EditorFile } from "../context/AppContext";
 import {
   FolderTree,
@@ -32,6 +39,9 @@ import {
   Code2,
   FolderOpen,
   ChevronRight,
+  Search,
+  SearchCode,
+  Command,
 } from "lucide-react";
 import {
   FriendlyHint,
@@ -39,6 +49,7 @@ import {
   friendlyAlert,
   friendlyConfirm,
 } from "./FriendlyHelpers";
+import { FindController, FindResult } from "./FindController";
 
 type NativeEditorHandle =
   | { kind: "directory"; handle: FileSystemDirectoryHandle }
@@ -99,6 +110,14 @@ const isTextEditorFile = (name: string) => {
 };
 
 type ChangedLineKind = "added" | "modified";
+type EditorSearchMode = "file" | "workspace" | "quick-open" | null;
+
+interface WorkspaceSearchMatch {
+  file: EditorFile;
+  line: number;
+  column: number;
+  text: string;
+}
 
 const getLineChanges = (savedText: string, currentText: string) => {
   const savedLines = savedText ? savedText.split("\n") : [];
@@ -162,10 +181,9 @@ const storeNativeHandle = async (
   const db = await openNativeHandleDb();
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction(NATIVE_HANDLE_STORE, "readwrite");
-    transaction.objectStore(NATIVE_HANDLE_STORE).put(
-      nativeHandle,
-      NATIVE_HANDLE_KEY,
-    );
+    transaction
+      .objectStore(NATIVE_HANDLE_STORE)
+      .put(nativeHandle, NATIVE_HANDLE_KEY);
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
       reject(transaction.error || new Error("Unable to save folder access."));
@@ -291,6 +309,7 @@ export const EditorWorkbench: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [aiQuery, setAiQuery] = useState("");
+  const aiQueryInputRef = useRef<HTMLInputElement>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiHistory, setAiHistory] = useState<
     Array<{ sender: string; text: string; code?: string }>
@@ -313,6 +332,67 @@ export const EditorWorkbench: React.FC = () => {
   );
   const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
   const [isChangesOpen, setIsChangesOpen] = useState(false);
+  const [isEditorHintDismissed, setIsEditorHintDismissed] = useState(false);
+  const [searchMode, setSearchMode] = useState<EditorSearchMode>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [findResult, setFindResult] = useState<FindResult>({
+    matches: [],
+    index: -1,
+    error: null,
+  });
+  const [findMatchCase, setFindMatchCase] = useState(false);
+  const [findWholeWord, setFindWholeWord] = useState(false);
+  const [findUseRegex, setFindUseRegex] = useState(false);
+  const [isReplaceOpen, setIsReplaceOpen] = useState(false);
+  const [replaceQuery, setReplaceQuery] = useState("");
+  const [findInSelection, setFindInSelection] = useState(false);
+  const [findSelectionRange, setFindSelectionRange] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [findHistoryTick, setFindHistoryTick] = useState(0);
+  const [initialFindCursor, setInitialFindCursor] = useState(0);
+  const [quickOpenSelection, setQuickOpenSelection] = useState(0);
+  const [pendingSearchJump, setPendingSearchJump] = useState<{
+    fileId: string;
+    line: number;
+    column: number;
+  } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const editorTextAreaRef = useRef<HTMLTextAreaElement>(null);
+  const editorHighlightRef = useRef<HTMLPreElement>(null);
+  const findControllerRef = useRef<FindController | null>(null);
+  const replaceUndoRef = useRef<{
+    fileId: string;
+    before: string;
+    after: string;
+  } | null>(null);
+  if (!findControllerRef.current) {
+    findControllerRef.current = new FindController();
+  }
+
+  useEffect(() => {
+    try {
+      setIsEditorHintDismissed(
+        window.localStorage.getItem("devpulse-editor-hint-dismissed") ===
+          "true",
+      );
+    } catch (error) {
+      console.error("Unable to restore editor hint preference.", error);
+    }
+  }, []);
+
+  const dismissEditorHint = (permanently = false) => {
+    if (permanently) {
+      try {
+        window.localStorage.setItem("devpulse-editor-hint-dismissed", "true");
+      } catch (error) {
+        console.error("Unable to save editor hint preference.", error);
+      }
+    }
+    setIsEditorHintDismissed(true);
+  };
 
   const activeFile =
     openFiles.find((f) => f.id === activeFileId) || openFiles[0];
@@ -321,6 +401,227 @@ export const EditorWorkbench: React.FC = () => {
     ? getLineChanges(savedFileContents[activeFile.id] || "", currentCode)
     : { changedLines: new Map<number, ChangedLineKind>(), removedAtLine: null };
   const dirtyFiles = treeFiles.filter((file) => file.isDirty);
+  const activeFileMatches = findResult.matches;
+  const activeFileMatchIndex = findResult.index;
+  const activeFileMatch = activeFileMatches[activeFileMatchIndex] ?? null;
+  const workspaceSearchMatches = useMemo<WorkspaceSearchMatch[]>(() => {
+    if (searchMode !== "workspace" || !searchQuery.trim()) return [];
+
+    const matches: WorkspaceSearchMatch[] = [];
+    const query = searchQuery.trim().toLowerCase();
+    for (const file of treeFiles) {
+      const content = fileContents[file.id] || "";
+      const lines = content.split("\n");
+      for (let line = 0; line < lines.length; line++) {
+        const text = lines[line] || "";
+        const normalizedText = text.toLowerCase();
+        let column = normalizedText.indexOf(query);
+        while (column !== -1) {
+          matches.push({ file, line, column, text });
+          column = normalizedText.indexOf(query, column + query.length);
+        }
+      }
+    }
+    return matches;
+  }, [fileContents, searchMode, searchQuery, treeFiles]);
+  const quickOpenItems = useMemo(() => {
+    if (searchMode !== "quick-open") return [];
+    const query = searchQuery.trim().toLowerCase();
+    return [
+      ...treeFiles
+        .filter((file) => file.path.toLowerCase().includes(query))
+        .map((file) => ({ kind: "file" as const, path: file.path, file })),
+      ...treeFolders
+        .filter((path) => path.toLowerCase().includes(query))
+        .map((path) => ({ kind: "folder" as const, path })),
+    ].sort((first, second) => first.path.localeCompare(second.path));
+  }, [searchMode, searchQuery, treeFiles, treeFolders]);
+
+  useEffect(() => {
+    if (searchMode) searchInputRef.current?.focus();
+  }, [searchMode]);
+
+  useEffect(() => {
+    if (searchMode !== "file") {
+      setFindResult({ matches: [], index: -1, error: null });
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const controller = findControllerRef.current!;
+      controller.setSelection(findInSelection ? findSelectionRange : null);
+      setFindResult(
+        controller.search(currentCode, searchQuery, initialFindCursor),
+      );
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [
+    currentCode,
+    findHistoryTick,
+    findInSelection,
+    findSelectionRange,
+    findMatchCase,
+    findUseRegex,
+    findWholeWord,
+    initialFindCursor,
+    searchMode,
+    searchQuery,
+  ]);
+
+  useEffect(() => {
+    if (
+      !pendingSearchJump ||
+      pendingSearchJump.fileId !== activeFile?.id ||
+      !editorTextAreaRef.current
+    ) {
+      return;
+    }
+    const lineStart =
+      currentCode.split("\n").slice(0, pendingSearchJump.line).join("\n")
+        .length + (pendingSearchJump.line > 0 ? 1 : 0);
+    const selectionStart = lineStart + pendingSearchJump.column;
+    const selectionEnd = Math.min(
+      selectionStart + searchQuery.length,
+      currentCode.length,
+    );
+    editorTextAreaRef.current.focus();
+    editorTextAreaRef.current.setSelectionRange(selectionStart, selectionEnd);
+    setPendingSearchJump(null);
+  }, [activeFile?.id, currentCode, pendingSearchJump, searchQuery]);
+
+  useLayoutEffect(() => {
+    if (searchMode !== "file") return;
+    const editor = editorTextAreaRef.current;
+    const highlights = editorHighlightRef.current;
+    if (!editor || !highlights) return;
+    highlights.scrollTop = editor.scrollTop;
+    highlights.scrollLeft = editor.scrollLeft;
+    if (activeFileMatches.length === 0) return;
+    const match = activeFileMatch;
+    if (!match) return;
+    editor.setSelectionRange(match.start, match.end);
+    const lineIndex = currentCode.slice(0, match.start).split("\n").length - 1;
+    const lineHeight = Number.parseFloat(
+      window.getComputedStyle(editor).lineHeight,
+    );
+    if (Number.isFinite(lineHeight)) {
+      const visibleLineCount = Math.max(
+        1,
+        Math.floor(editor.clientHeight / lineHeight),
+      );
+      const scrollLine = Math.max(
+        0,
+        lineIndex - Math.floor(visibleLineCount / 2),
+      );
+      editor.scrollTop = scrollLine * lineHeight;
+    }
+    highlights.scrollTop = editor.scrollTop;
+    highlights.scrollLeft = editor.scrollLeft;
+  }, [activeFileMatch, activeFileMatches.length, currentCode, searchMode]);
+
+  const openFileFind = useCallback(() => {
+    if (searchMode === "file") {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+      return;
+    }
+    const editor = editorTextAreaRef.current;
+    const selectionStart = editor?.selectionStart ?? 0;
+    const selectionEnd = editor?.selectionEnd ?? 0;
+    const selectedText =
+      editor && selectionEnd > selectionStart
+        ? editor.value.slice(selectionStart, selectionEnd)
+        : "";
+    const selectedRange =
+      selectionEnd > selectionStart
+        ? { start: selectionStart, end: selectionEnd }
+        : null;
+    setFindSelectionRange(selectedRange);
+    findControllerRef.current!.open(
+      selectedText,
+      findInSelection ? selectedRange : null,
+    );
+    setInitialFindCursor(selectionStart);
+    setSearchQuery(selectedText);
+    setSearchMode("file");
+    window.requestAnimationFrame(() => {
+      const input = searchInputRef.current;
+      input?.focus();
+      if (selectedText) input?.select();
+    });
+  }, [findInSelection, searchMode]);
+
+  const closeFileFind = useCallback(() => {
+    findControllerRef.current!.close();
+    setFindResult({ matches: [], index: -1, error: null });
+    setSearchMode(null);
+    setIsReplaceOpen(false);
+    window.requestAnimationFrame(() => editorTextAreaRef.current?.focus());
+  }, []);
+
+  const navigateFileSearch = useCallback(
+    (direction: -1 | 1) => {
+      if (activeFileMatches.length === 0) return;
+      setFindResult(
+        direction === 1
+          ? findControllerRef.current!.next()
+          : findControllerRef.current!.prev(),
+      );
+      searchInputRef.current?.focus();
+    },
+    [activeFileMatches],
+  );
+
+  const replaceCurrentFindMatch = () => {
+    if (!activeFile || !activeFileMatch) return;
+    const updated = findControllerRef.current!.replace(
+      currentCode,
+      replaceQuery,
+    );
+    replaceUndoRef.current = {
+      fileId: activeFile.id,
+      before: currentCode,
+      after: updated,
+    };
+    updateFileContent(activeFile.id, updated);
+    setFindResult(findControllerRef.current!.search(updated, searchQuery));
+  };
+
+  const replaceAllFindMatches = useCallback(() => {
+    if (!activeFile || !activeFileMatches.length) return;
+    const updated = findControllerRef.current!.replaceAll(
+      currentCode,
+      replaceQuery,
+    );
+    replaceUndoRef.current = {
+      fileId: activeFile.id,
+      before: currentCode,
+      after: updated,
+    };
+    updateFileContent(activeFile.id, updated);
+    setFindResult(findControllerRef.current!.search(updated, searchQuery));
+  }, [
+    activeFile,
+    activeFileMatches.length,
+    currentCode,
+    replaceQuery,
+    searchQuery,
+    updateFileContent,
+  ]);
+
+  const toggleFindOption = useCallback((option: "case" | "word" | "regex") => {
+    const controller = findControllerRef.current!;
+    if (option === "case") {
+      controller.toggleCase();
+      setFindMatchCase((enabled) => !enabled);
+    } else if (option === "word") {
+      controller.toggleWord();
+      setFindWholeWord((enabled) => !enabled);
+    } else {
+      controller.toggleRegex();
+      setFindUseRegex((enabled) => !enabled);
+    }
+    setFindHistoryTick((tick) => tick + 1);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -338,7 +639,9 @@ export const EditorWorkbench: React.FC = () => {
 
   const openNativeFolder = async () => {
     if (dirtyFiles.length > 0) {
-      setSaveError("Save or discard the current changes before opening another folder.");
+      setSaveError(
+        "Save or discard the current changes before opening another folder.",
+      );
       setIsClosePromptOpen(true);
       return;
     }
@@ -366,7 +669,9 @@ export const EditorWorkbench: React.FC = () => {
 
   const openNativeFile = async () => {
     if (dirtyFiles.length > 0) {
-      setSaveError("Save or discard the current changes before opening another file.");
+      setSaveError(
+        "Save or discard the current changes before opening another file.",
+      );
       setIsClosePromptOpen(true);
       return;
     }
@@ -703,14 +1008,15 @@ export const EditorWorkbench: React.FC = () => {
         "This file was opened without disk write access. Reopen it using Open File or Open Folder in a browser that supports local file access.",
       );
     }
-    const permissionHandle = nativeHandle.handle as typeof nativeHandle.handle & {
-      queryPermission?: (descriptor: {
-        mode: "readwrite";
-      }) => Promise<PermissionState>;
-      requestPermission?: (descriptor: {
-        mode: "readwrite";
-      }) => Promise<PermissionState>;
-    };
+    const permissionHandle =
+      nativeHandle.handle as typeof nativeHandle.handle & {
+        queryPermission?: (descriptor: {
+          mode: "readwrite";
+        }) => Promise<PermissionState>;
+        requestPermission?: (descriptor: {
+          mode: "readwrite";
+        }) => Promise<PermissionState>;
+      };
     let permission = await permissionHandle.queryPermission?.({
       mode: "readwrite",
     });
@@ -774,6 +1080,8 @@ export const EditorWorkbench: React.FC = () => {
     }
     setNativeHandle(null);
     closeEditorProject();
+    setSearchMode(null);
+    setPendingSearchJump(null);
     setIsClosePromptOpen(false);
   };
 
@@ -786,19 +1094,196 @@ export const EditorWorkbench: React.FC = () => {
   };
 
   useEffect(() => {
-    const handleSaveShortcut = (event: KeyboardEvent) => {
+    const handleEditorShortcut = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && searchMode !== null) {
+        event.preventDefault();
+        if (searchMode === "file") closeFileFind();
+        else setSearchMode(null);
+        return;
+      }
+      if (searchMode === "file" && event.key === "F3") {
+        event.preventDefault();
+        navigateFileSearch(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (searchMode === "file" && event.altKey) {
+        const key = event.key.toLowerCase();
+        if (key === "c") toggleFindOption("case");
+        else if (key === "w") toggleFindOption("word");
+        else if (key === "r") toggleFindOption("regex");
+        else return;
+        event.preventDefault();
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey) || !isEditorProjectOpen) return;
+
+      const key = event.key.toLowerCase();
       if (
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === "s" &&
-        isEditorProjectOpen
+        key === "z" &&
+        replaceUndoRef.current &&
+        replaceUndoRef.current.fileId === activeFile?.id &&
+        currentCode === replaceUndoRef.current.after
       ) {
         event.preventDefault();
+        updateFileContent(
+          replaceUndoRef.current.fileId,
+          replaceUndoRef.current.before,
+        );
+        replaceUndoRef.current = null;
+      } else if (key === "enter" && event.altKey) {
+        if (searchMode === "file") {
+          event.preventDefault();
+          replaceAllFindMatches();
+        }
+      } else if (key === "h") {
+        event.preventDefault();
+        if (searchMode !== "file") openFileFind();
+        setIsReplaceOpen((open) => !open);
+      } else if (key === "f" && !event.shiftKey) {
+        event.preventDefault();
+        openFileFind();
+      } else if (key === "s") {
+        event.preventDefault();
         void handleSaveFile();
+      } else if (key === "f" && event.shiftKey) {
+        event.preventDefault();
+        setSearchQuery("");
+        setSearchMode("workspace");
+        setIsFileTreeOpen(true);
+      } else if (key === "p" && !event.shiftKey) {
+        event.preventDefault();
+        setSearchQuery("");
+        setQuickOpenSelection(0);
+        setSearchMode("quick-open");
+      } else if (key === "i") {
+        event.preventDefault();
+        setIsAiDrawerOpen(true);
+        window.requestAnimationFrame(() => aiQueryInputRef.current?.focus());
       }
     };
-    window.addEventListener("keydown", handleSaveShortcut);
-    return () => window.removeEventListener("keydown", handleSaveShortcut);
-  }, [handleSaveFile, isEditorProjectOpen]);
+    window.addEventListener("keydown", handleEditorShortcut);
+    return () => window.removeEventListener("keydown", handleEditorShortcut);
+  }, [
+    closeFileFind,
+    currentCode,
+    handleSaveFile,
+    isEditorProjectOpen,
+    activeFile?.id,
+    navigateFileSearch,
+    openFileFind,
+    replaceAllFindMatches,
+    searchMode,
+    setIsAiDrawerOpen,
+    setIsFileTreeOpen,
+    toggleFindOption,
+    updateFileContent,
+  ]);
+
+  const openWorkspaceSearchMatch = (match: WorkspaceSearchMatch) => {
+    setPendingSearchJump({
+      fileId: match.file.id,
+      line: match.line,
+      column: match.column,
+    });
+    openFileInEditor(match.file);
+    setSearchMode(null);
+  };
+
+  const openQuickOpenItem = (
+    item: (typeof quickOpenItems)[number] | undefined,
+  ) => {
+    if (!item) return;
+    if (item.kind === "file") {
+      openFileInEditor(item.file);
+      setSelectedFolder(item.path.split("/").slice(0, -1).join("/"));
+      setSearchMode(null);
+      return;
+    }
+
+    setSelectedFolder(item.path);
+    setIsFileTreeOpen(true);
+    setCollapsedFolders((previous) => {
+      const next = new Set(previous);
+      const segments = item.path.split("/");
+      for (let index = 1; index <= segments.length; index++) {
+        next.delete(segments.slice(0, index).join("/"));
+      }
+      return next;
+    });
+    setSearchMode(null);
+  };
+
+  const handleSearchInputKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (searchMode === "file") closeFileFind();
+      else setSearchMode(null);
+      return;
+    }
+    if (searchMode === "file" && event.key === "ArrowDown") {
+      event.preventDefault();
+      setSearchQuery(findControllerRef.current!.historyMove(1));
+      setFindHistoryTick((tick) => tick + 1);
+      return;
+    }
+    if (searchMode === "file" && event.key === "ArrowUp") {
+      event.preventDefault();
+      setSearchQuery(findControllerRef.current!.historyMove(-1));
+      setFindHistoryTick((tick) => tick + 1);
+      return;
+    }
+    if (searchMode === "file" && event.key === "F3") {
+      event.preventDefault();
+      navigateFileSearch(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (
+      searchMode === "file" &&
+      event.key === "Enter" &&
+      event.altKey &&
+      event.ctrlKey
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      replaceAllFindMatches();
+      return;
+    }
+    if (
+      searchMode === "file" &&
+      event.key === "Enter" &&
+      activeFileMatches.length > 0
+    ) {
+      event.preventDefault();
+      navigateFileSearch(event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (searchMode === "file" && event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === "c") toggleFindOption("case");
+      else if (key === "w") toggleFindOption("word");
+      else if (key === "r") toggleFindOption("regex");
+      else return;
+      event.preventDefault();
+      return;
+    }
+    if (searchMode !== "quick-open") return;
+
+    if (event.key === "ArrowDown" && quickOpenItems.length > 0) {
+      event.preventDefault();
+      setQuickOpenSelection((index) => (index + 1) % quickOpenItems.length);
+    } else if (event.key === "ArrowUp" && quickOpenItems.length > 0) {
+      event.preventDefault();
+      setQuickOpenSelection(
+        (index) => (index - 1 + quickOpenItems.length) % quickOpenItems.length,
+      );
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      openQuickOpenItem(quickOpenItems[quickOpenSelection]);
+    }
+  };
 
   // Dynamic AI Chat
   const handleSendAi = async (e: React.FormEvent) => {
@@ -889,260 +1374,289 @@ export const EditorWorkbench: React.FC = () => {
         <div className="editor-welcome-card relative z-10 w-full max-w-5xl rounded-[22px] border border-white/[0.10] bg-gradient-to-br from-[#191922]/[0.99] via-[#111118]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_36px_100px_rgba(0,0,0,0.62),0_14px_42px_rgba(108,99,255,0.11),inset_0_1px_0_rgba(255,255,255,0.07)] ring-1 ring-black/30 backdrop-blur-xl sm:rounded-2xl lg:rounded-[28px]">
           <div className="editor-welcome-accent" aria-hidden="true" />
           <div className="editor-welcome-content space-y-4 p-3.5 lg:space-y-8 lg:p-10">
-          {isEditorLoading && (
-            <div className="flex items-center gap-2 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/5 px-3 py-2 text-xs text-[#0DF5C4]">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              Loading your project…
-            </div>
-          )}
-          {editorError && (
-            <div role="alert" className="rounded-lg border border-[#f87171]/30 bg-[#f87171]/10 px-3 py-2 text-xs text-[#fca5a5]">
-              {editorError}
-            </div>
-          )}
-          <header className="editor-welcome-header flex flex-col gap-2 border-b border-white/[0.07] pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5 lg:pb-7">
-            <div className="flex min-w-0 items-center gap-4">
-            <div
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-[0_10px_26px_rgba(13,245,196,0.20),inset_0_1px_0_rgba(255,255,255,0.35)] lg:h-14 lg:w-14"
-              style={{ backgroundColor: theme.primary }}
-            >
-              <Code2 className="h-7 w-7 text-[#09090e]" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <h1 className="text-[21px] font-bold tracking-tight lg:text-[28px]">
-                  <span className="bg-gradient-to-r from-[#f8fafc] via-[#dbeafe] to-[#a5b4fc] bg-clip-text text-transparent">
-                    Maestro
-                  </span>{" "}
-                  <span className="text-white">Code Studio</span>
-                </h1>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#5ef0ce]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" />
-                  Ready
-                </span>
+            {isEditorLoading && (
+              <div className="flex items-center gap-2 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/5 px-3 py-2 text-xs text-[#0DF5C4]">
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                Loading your project…
               </div>
-              <p className="mt-1 max-w-xl text-xs leading-5 text-[#9292a9] lg:mt-1.5 lg:text-sm lg:leading-6">
-                Open a local project or start with a new file.
-              </p>
-            </div>
-            </div>
-            <div className="flex w-fit items-center gap-2 rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] px-3 py-2 text-[11px] text-[#b0b0c2] shadow-[0_6px_18px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.07)]">
-              <Folder className="h-4 w-4 text-[#a5a1ff]" />
-              <span>Private to this workspace</span>
-            </div>
-          </header>
-
-          <div className="editor-welcome-grid grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-10">
-            <section className="editor-welcome-start space-y-2 lg:space-y-4" aria-labelledby="editor-start-title">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <h2 id="editor-start-title" className="text-sm font-semibold text-white">
-                    Start a project
-                  </h2>
-                  <p className="mt-1 text-xs text-[#777791]">
-                    Choose how you’d like to begin.
-                  </p>
-                </div>
-                <span className="pb-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[#66667f]">
-                  From your device
-                </span>
+            )}
+            {editorError && (
+              <div
+                role="alert"
+                className="rounded-lg border border-[#f87171]/30 bg-[#f87171]/10 px-3 py-2 text-xs text-[#fca5a5]"
+              >
+                {editorError}
               </div>
-
-              <div className="editor-welcome-actions-stack space-y-1.5 lg:space-y-2.5">
-                <button
-                  onClick={() => void openNativeFolder()}
-                  className="editor-welcome-action group flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-[#0DF5C4]/25 bg-gradient-to-r from-[#0DF5C4]/[0.08] to-[#151522] px-3 py-2 text-left text-white shadow-[0_10px_28px_rgba(13,245,196,0.08),inset_0_1px_0_rgba(255,255,255,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-[#0DF5C4]/55 hover:from-[#0DF5C4]/[0.13] hover:shadow-[0_16px_36px_rgba(13,245,196,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/70 lg:min-h-[74px] lg:gap-3.5 lg:px-4 lg:py-3"
+            )}
+            <header className="editor-welcome-header flex flex-col gap-2 border-b border-white/[0.07] pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5 lg:pb-7">
+              <div className="flex min-w-0 items-center gap-4">
+                <div
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-[0_10px_26px_rgba(13,245,196,0.20),inset_0_1px_0_rgba(255,255,255,0.35)] lg:h-14 lg:w-14"
+                  style={{ backgroundColor: theme.primary }}
                 >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#0DF5C4]/20 bg-[#0DF5C4]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                    <FolderOpen className="h-5 w-5 text-[#0DF5C4]" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-semibold text-white transition-colors group-hover:text-[#78f5db]">
-                      Open a folder
-                    </span>
-                    <span className="mt-1 block text-xs text-[#85859e]">
-                      Best for projects · save edits in place
-                    </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#0DF5C4]" />
-                </button>
-
-                <button
-                  onClick={() => void openNativeFile()}
-                  className="editor-welcome-action group flex min-h-[56px] w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#171720] to-[#12121a] px-3 py-2 text-left text-white shadow-[0_8px_22px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#6C63FF]/45 hover:shadow-[0_14px_30px_rgba(108,99,255,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6C63FF]/70 lg:min-h-[68px] lg:gap-3.5 lg:px-4 lg:py-3"
-                >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                    <File className="h-5 w-5 text-[#9690ff]" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-semibold">Open a single file</span>
-                    <span className="mt-1 block text-xs text-[#85859e]">
-                      Quick edit · open one file
-                    </span>
-                  </span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#9690ff]" />
-                </button>
-
-                <div className="grid grid-cols-2 gap-1.5 pt-0 lg:gap-2.5 lg:pt-1">
-                  <button
-                    onClick={() => setIsCreatingFile(true)}
-                    className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
-                  >
-                    <FilePlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
-                    <span>
-                      <span className="block text-xs font-semibold text-white">New file</span>
-                      <span className="mt-1 block text-[10px] text-[#777791]">Create a blank file</span>
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setIsCreatingFolder(true)}
-                    className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
-                  >
-                    <FolderPlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
-                    <span>
-                      <span className="block text-xs font-semibold text-white">New folder</span>
-                      <span className="mt-1 block text-[10px] text-[#777791]">Organize your files</span>
-                    </span>
-                  </button>
+                  <Code2 className="h-7 w-7 text-[#09090e]" />
                 </div>
-              </div>
-            </section>
-
-            <section className="editor-welcome-workspaces space-y-2 lg:space-y-4" aria-labelledby="editor-workspaces-title">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <h2 id="editor-workspaces-title" className="text-sm font-semibold text-white">
-                    Your workspaces
-                  </h2>
-                  <p className="mt-1 text-xs text-[#777791]">
-                    Continue where you left off.
-                  </p>
-                </div>
-                <span className="rounded-full border border-[#29283a] bg-[#151520] px-2.5 py-1 text-[10px] font-mono text-[#85859e]">
-                  {workspaces.length}
-                </span>
-              </div>
-              <div className="space-y-2.5 text-xs">
-                {workspaces.length === 0 ? (
-                  <div className="editor-welcome-empty flex min-h-[116px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.12] bg-gradient-to-br from-white/[0.025] to-transparent px-4 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:min-h-[220px] lg:px-6 lg:py-8">
-                    <span className="editor-welcome-empty-icon flex h-9 w-9 items-center justify-center rounded-xl border border-[#6C63FF]/25 bg-[#6C63FF]/10 shadow-[0_8px_24px_rgba(108,99,255,0.16),inset_0_1px_0_rgba(255,255,255,0.07)] lg:h-12 lg:w-12 lg:rounded-2xl">
-                      <FolderTree className="h-4 w-4 text-[#9690ff] lg:h-5 lg:w-5" />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <h1 className="text-[21px] font-bold tracking-tight lg:text-[28px]">
+                      <span className="bg-gradient-to-r from-[#f8fafc] via-[#dbeafe] to-[#a5b4fc] bg-clip-text text-transparent">
+                        Maestro
+                      </span>{" "}
+                      <span className="text-white">Code Studio</span>
+                    </h1>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#5ef0ce]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" />
+                      Ready
                     </span>
-                    <h3 className="mt-2.5 text-sm font-semibold text-white lg:mt-4">
-                      No workspaces yet
-                    </h3>
-                    <p className="mt-1 max-w-xs text-[11px] leading-4 text-[#85859e] lg:mt-1.5 lg:text-xs lg:leading-5">
-                      Browse workspaces to launch a cloud environment, or open a local project above.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setPage("workspaces")}
-                      className="mt-2.5 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-[#09090e] shadow-[0_8px_22px_rgba(108,99,255,0.22),inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_30px_rgba(108,99,255,0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 lg:mt-5 lg:py-2.5"
-                      style={{ backgroundColor: theme.secondary }}
-                    >
-                      Browse workspaces
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
                   </div>
-                ) : (
-                  workspaces.map((workspace) => (
-                    <button
-                      key={workspace.id}
-                      type="button"
-                      onClick={() => {
-                        void loadEditorProject().then(() =>
-                          setLoadedProjectName(workspace.name),
-                        );
-                      }}
-                      className="w-full flex items-center gap-3 rounded-xl border border-[#29283a] bg-[#151520] p-3.5 text-left text-white transition hover:border-[#0DF5C4]/40 hover:bg-[#191927] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/60"
+                  <p className="mt-1 max-w-xl text-xs leading-5 text-[#9292a9] lg:mt-1.5 lg:text-sm lg:leading-6">
+                    Open a local project or start with a new file.
+                  </p>
+                </div>
+              </div>
+              <div className="flex w-fit items-center gap-2 rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] px-3 py-2 text-[11px] text-[#b0b0c2] shadow-[0_6px_18px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.07)]">
+                <Folder className="h-4 w-4 text-[#a5a1ff]" />
+                <span>Private to this workspace</span>
+              </div>
+            </header>
+
+            <div className="editor-welcome-grid grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-10">
+              <section
+                className="editor-welcome-start space-y-2 lg:space-y-4"
+                aria-labelledby="editor-start-title"
+              >
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <h2
+                      id="editor-start-title"
+                      className="text-sm font-semibold text-white"
                     >
-                      <Sparkles className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold">
-                          {workspace.name}
+                      Start a project
+                    </h2>
+                    <p className="mt-1 text-xs text-[#777791]">
+                      Choose how you’d like to begin.
+                    </p>
+                  </div>
+                  <span className="pb-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[#66667f]">
+                    From your device
+                  </span>
+                </div>
+
+                <div className="editor-welcome-actions-stack space-y-1.5 lg:space-y-2.5">
+                  <button
+                    onClick={() => void openNativeFolder()}
+                    className="editor-welcome-action group flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-[#0DF5C4]/25 bg-gradient-to-r from-[#0DF5C4]/[0.08] to-[#151522] px-3 py-2 text-left text-white shadow-[0_10px_28px_rgba(13,245,196,0.08),inset_0_1px_0_rgba(255,255,255,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-[#0DF5C4]/55 hover:from-[#0DF5C4]/[0.13] hover:shadow-[0_16px_36px_rgba(13,245,196,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/70 lg:min-h-[74px] lg:gap-3.5 lg:px-4 lg:py-3"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#0DF5C4]/20 bg-[#0DF5C4]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                      <FolderOpen className="h-5 w-5 text-[#0DF5C4]" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold text-white transition-colors group-hover:text-[#78f5db]">
+                        Open a folder
+                      </span>
+                      <span className="mt-1 block text-xs text-[#85859e]">
+                        Best for projects · save edits in place
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#0DF5C4]" />
+                  </button>
+
+                  <button
+                    onClick={() => void openNativeFile()}
+                    className="editor-welcome-action group flex min-h-[56px] w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#171720] to-[#12121a] px-3 py-2 text-left text-white shadow-[0_8px_22px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#6C63FF]/45 hover:shadow-[0_14px_30px_rgba(108,99,255,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6C63FF]/70 lg:min-h-[68px] lg:gap-3.5 lg:px-4 lg:py-3"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                      <File className="h-5 w-5 text-[#9690ff]" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold">
+                        Open a single file
+                      </span>
+                      <span className="mt-1 block text-xs text-[#85859e]">
+                        Quick edit · open one file
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#9690ff]" />
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-1.5 pt-0 lg:gap-2.5 lg:pt-1">
+                    <button
+                      onClick={() => setIsCreatingFile(true)}
+                      className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
+                    >
+                      <FilePlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
+                      <span>
+                        <span className="block text-xs font-semibold text-white">
+                          New file
                         </span>
-                        <span className="mt-1 block truncate font-mono text-[10px] text-[#777791]">
-                          {workspace.repo} / {workspace.branch} · {workspace.status}
+                        <span className="mt-1 block text-[10px] text-[#777791]">
+                          Create a blank file
                         </span>
                       </span>
                     </button>
-                  ))
-                )}
-              </div>
-            </section>
-          </div>
+                    <button
+                      onClick={() => setIsCreatingFolder(true)}
+                      className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
+                    >
+                      <FolderPlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
+                      <span>
+                        <span className="block text-xs font-semibold text-white">
+                          New folder
+                        </span>
+                        <span className="mt-1 block text-[10px] text-[#777791]">
+                          Organize your files
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              </section>
 
-          {/* New File Modal */}
-          {isCreatingFile && (
-            <form
-              onSubmit={handleCreateNewFile}
-              className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
-            >
-              <div className="text-xs font-bold text-white font-mono">
-                Enter File Name
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  placeholder="e.g. app.ts, main.py, server.js"
-                  value={newFileNameInput}
-                  onChange={(e) => setNewFileNameInput(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
-                  style={{ backgroundColor: theme.primary }}
-                >
-                  Create & Open
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingFile(false)}
-                  className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
-          {isCreatingFolder && (
-            <form
-              onSubmit={handleCreateNewFolder}
-              className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
-            >
-              <div className="text-xs font-bold text-white font-mono">
-                Create Workspace Folder
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  placeholder="e.g. src, components, tests"
-                  value={newFolderNameInput}
-                  onChange={(event) => setNewFolderNameInput(event.target.value)}
-                  className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
-                  style={{ backgroundColor: theme.primary }}
-                >
-                  Create Folder
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingFolder(false)}
-                  className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
+              <section
+                className="editor-welcome-workspaces space-y-2 lg:space-y-4"
+                aria-labelledby="editor-workspaces-title"
+              >
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <h2
+                      id="editor-workspaces-title"
+                      className="text-sm font-semibold text-white"
+                    >
+                      Your workspaces
+                    </h2>
+                    <p className="mt-1 text-xs text-[#777791]">
+                      Continue where you left off.
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-[#29283a] bg-[#151520] px-2.5 py-1 text-[10px] font-mono text-[#85859e]">
+                    {workspaces.length}
+                  </span>
+                </div>
+                <div className="space-y-2.5 text-xs">
+                  {workspaces.length === 0 ? (
+                    <div className="editor-welcome-empty flex min-h-[116px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.12] bg-gradient-to-br from-white/[0.025] to-transparent px-4 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:min-h-[220px] lg:px-6 lg:py-8">
+                      <span className="editor-welcome-empty-icon flex h-9 w-9 items-center justify-center rounded-xl border border-[#6C63FF]/25 bg-[#6C63FF]/10 shadow-[0_8px_24px_rgba(108,99,255,0.16),inset_0_1px_0_rgba(255,255,255,0.07)] lg:h-12 lg:w-12 lg:rounded-2xl">
+                        <FolderTree className="h-4 w-4 text-[#9690ff] lg:h-5 lg:w-5" />
+                      </span>
+                      <h3 className="mt-2.5 text-sm font-semibold text-white lg:mt-4">
+                        No workspaces yet
+                      </h3>
+                      <p className="mt-1 max-w-xs text-[11px] leading-4 text-[#85859e] lg:mt-1.5 lg:text-xs lg:leading-5">
+                        Browse workspaces to launch a cloud environment, or open
+                        a local project above.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setPage("workspaces")}
+                        className="mt-2.5 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-[#09090e] shadow-[0_8px_22px_rgba(108,99,255,0.22),inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_30px_rgba(108,99,255,0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 lg:mt-5 lg:py-2.5"
+                        style={{ backgroundColor: theme.secondary }}
+                      >
+                        Browse workspaces
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    workspaces.map((workspace) => (
+                      <button
+                        key={workspace.id}
+                        type="button"
+                        onClick={() => {
+                          void loadEditorProject().then(() =>
+                            setLoadedProjectName(workspace.name),
+                          );
+                        }}
+                        className="w-full flex items-center gap-3 rounded-xl border border-[#29283a] bg-[#151520] p-3.5 text-left text-white transition hover:border-[#0DF5C4]/40 hover:bg-[#191927] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/60"
+                      >
+                        <Sparkles className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-semibold">
+                            {workspace.name}
+                          </span>
+                          <span className="mt-1 block truncate font-mono text-[10px] text-[#777791]">
+                            {workspace.repo} / {workspace.branch} ·{" "}
+                            {workspace.status}
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+            </div>
+
+            {/* New File Modal */}
+            {isCreatingFile && (
+              <form
+                onSubmit={handleCreateNewFile}
+                className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
+              >
+                <div className="text-xs font-bold text-white font-mono">
+                  Enter File Name
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    placeholder="e.g. app.ts, main.py, server.js"
+                    value={newFileNameInput}
+                    onChange={(e) => setNewFileNameInput(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
+                    style={{ backgroundColor: theme.primary }}
+                  >
+                    Create & Open
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingFile(false)}
+                    className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+            {isCreatingFolder && (
+              <form
+                onSubmit={handleCreateNewFolder}
+                className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
+              >
+                <div className="text-xs font-bold text-white font-mono">
+                  Create Workspace Folder
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    placeholder="e.g. src, components, tests"
+                    value={newFolderNameInput}
+                    onChange={(event) =>
+                      setNewFolderNameInput(event.target.value)
+                    }
+                    className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
+                    style={{ backgroundColor: theme.primary }}
+                  >
+                    Create Folder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingFolder(false)}
+                    className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       </div>
@@ -1170,94 +1684,315 @@ export const EditorWorkbench: React.FC = () => {
         className="hidden"
       />
 
-      {/* Top Breadcrumb & Quick Controls */}
-      <div className="h-10 bg-[#0e0e16] border-b border-[#1c1c2b] px-4 flex items-center justify-between shrink-0 text-xs font-mono z-20">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsFileTreeOpen((prev) => !prev)}
-            title="Toggle File Explorer Drawer"
-            className="p-1 rounded hover:bg-[#1a1a28] text-[#8e8ea8] hover:text-white"
-          >
-            {isFileTreeOpen ? (
-              <PanelLeftClose className="w-4 h-4" />
-            ) : (
-              <PanelLeftOpen className="w-4 h-4 text-[#0DF5C4]" />
-            )}
-          </button>
-
-          <div className="flex items-center gap-1.5 text-[#7e7e9a]">
-            <span className="text-white font-semibold">
-              {loadedProjectName}
-            </span>
-            <span>/</span>
-            <span className="text-white font-bold">
-              {activeFile ? activeFile.name : "No file open"}
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* Open another file / folder */}
-          <button
-            onClick={() => void openNativeFolder()}
-            className="hidden sm:flex items-center gap-1 text-[11px] text-[#8e8ea8] hover:text-white px-2 py-1 rounded bg-[#161624] border border-[#242436]"
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-[#0DF5C4]" />
-            <span>Open Folder</span>
-          </button>
-          {dirtyFiles.length > 0 && (
+      {/* Project navigation and editor actions */}
+      <header className="z-20 shrink-0 border-b border-[#1c1c2b] bg-gradient-to-b from-[#11111a] to-[#0e0e16] font-mono text-xs">
+        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-white/[0.035] px-3 sm:px-4">
+          <div className="flex min-w-0 items-center gap-3">
             <button
-              onClick={() => setIsChangesOpen(true)}
-              className="hidden sm:flex items-center gap-1 text-[11px] text-[#0DF5C4] hover:text-white px-2 py-1 rounded bg-[#0DF5C4]/10 border border-[#0DF5C4]/30"
+              onClick={() => setIsFileTreeOpen((prev) => !prev)}
+              title="Toggle File Explorer"
+              aria-label="Toggle File Explorer"
+              className="rounded-lg p-1.5 text-[#8e8ea8] transition hover:bg-white/[0.06] hover:text-white"
             >
-              Show Changes ({dirtyFiles.length})
+              {isFileTreeOpen ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4 text-[#0DF5C4]" />
+              )}
             </button>
-          )}
-
-          <button
-            onClick={handleRunCode}
-            disabled={isRunningCode || !activeFile}
-            className="px-3 py-1 rounded-lg bg-[#0DF5C4]/15 hover:bg-[#0DF5C4]/25 border border-[#0DF5C4]/40 text-[#0DF5C4] font-semibold text-xs flex items-center gap-1.5 transition-all active:scale-95"
-          >
-            <Play
-              className={`w-3 h-3 fill-current ${isRunningCode ? "animate-spin" : ""}`}
-            />
-            <span>{isRunningCode ? "Running..." : "Run"}</span>
-          </button>
-
-          <button
-            onClick={handleSaveFile}
-            disabled={isSaving || !activeFile?.isDirty}
-            title="Save changes (Ctrl+S)"
-            className="px-3 py-1 rounded-lg bg-[#6C63FF]/15 hover:bg-[#6C63FF]/25 border border-[#6C63FF]/40 text-[#c8c4ff] disabled:opacity-40 font-semibold text-xs flex items-center gap-1.5 transition-all"
-          >
-            <span>{isSaving ? "Saving..." : "Save"}</span>
-            <kbd className="hidden xl:inline text-[9px] text-[#8f89db]">
-              Ctrl+S
-            </kbd>
-          </button>
-
-          <button
-            onClick={() => setIsAiDrawerOpen((prev) => !prev)}
-            title="Toggle AI Assistant Drawer"
-            className="p-1 rounded hover:bg-[#1a1a28] text-[#8e8ea8] hover:text-white flex items-center gap-1 text-xs"
-          >
-            <Bot className="w-4 h-4" style={{ color: theme.primary }} />
-            <span className="hidden md:inline text-[11px]">AI</span>
-            {isAiDrawerOpen ? (
-              <PanelRightClose className="w-3.5 h-3.5 ml-0.5" />
-            ) : (
-              <PanelRightOpen className="w-3.5 h-3.5 ml-0.5 text-[#6C63FF]" />
-            )}
-          </button>
+            <div className="flex min-w-0 items-center gap-2 text-[#77778f]">
+              <span className="max-w-[35vw] truncate font-semibold text-[#c8c8d8]">
+                {loadedProjectName}
+              </span>
+              <span className="text-[#4e4e65]">/</span>
+              <span className="max-w-[35vw] truncate font-semibold text-white">
+                {activeFile?.path || "No file open"}
+              </span>
+              {activeFile?.isDirty && (
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0DF5C4]"
+                  title="Unsaved changes"
+                />
+              )}
+            </div>
+          </div>
+          <span className="hidden items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-[#63637a] xl:flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4] shadow-[0_0_9px_rgba(13,245,196,.6)]" />
+            Workspace
+          </span>
         </div>
-      </div>
+        <div className="relative flex min-h-10 items-center justify-between gap-2 px-3 sm:px-4">
+          {searchMode === "quick-open" ? (
+            <div className="flex w-full items-center gap-2 rounded-lg border border-[#6C63FF]/35 bg-black/25 px-2.5 py-1.5 shadow-[0_0_20px_rgba(108,99,255,0.08)]">
+              <Command className="h-3.5 w-3.5 shrink-0 text-[#0DF5C4]" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setQuickOpenSelection(0);
+                }}
+                onKeyDown={handleSearchInputKeyDown}
+                placeholder="Search files and folders by name..."
+                aria-label="Quick open files and folders"
+                autoComplete="off"
+                spellCheck={false}
+                className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-[#77778f]"
+              />
+              <span className="hidden text-[9px] text-[#77778f] sm:inline">
+                ↑ ↓ select · Enter open
+              </span>
+              <button
+                type="button"
+                onClick={() => setSearchMode(null)}
+                title="Close (Esc)"
+                aria-label="Close Quick Open"
+                className="rounded p-1 text-[#8e8ea8] transition hover:bg-white/[0.07] hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+
+              <div className="absolute left-3 right-3 top-full z-50 mt-2 max-h-[min(56vh,460px)] overflow-y-auto rounded-xl border border-white/[0.12] bg-[#11111b]/[0.99] p-1.5 shadow-[0_22px_65px_rgba(0,0,0,0.65),0_0_30px_rgba(108,99,255,0.1)] backdrop-blur-xl">
+                {quickOpenItems.length === 0 ? (
+                  <p className="px-3 py-5 text-center text-[11px] text-[#77778f]">
+                    {searchQuery.trim()
+                      ? "No files or folders match your search."
+                      : "This workspace has no files or folders yet."}
+                  </p>
+                ) : (
+                  quickOpenItems.slice(0, 100).map((item, index) => (
+                    <button
+                      key={`${item.kind}-${item.path}`}
+                      type="button"
+                      onMouseEnter={() => setQuickOpenSelection(index)}
+                      onClick={() => openQuickOpenItem(item)}
+                      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${
+                        index === quickOpenSelection
+                          ? "bg-[#6C63FF]/[0.14] text-white"
+                          : "text-[#aaaabd] hover:bg-white/[0.045]"
+                      }`}
+                    >
+                      {item.kind === "file" ? (
+                        <FileCode className="h-3.5 w-3.5 shrink-0 text-[#a5a1ff]" />
+                      ) : (
+                        <Folder className="h-3.5 w-3.5 shrink-0 text-[#FFAE64]" />
+                      )}
+                      <span className="truncate font-mono text-[10px]">
+                        {item.path}
+                      </span>
+                      <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wide text-[#66667d]">
+                        {item.kind}
+                      </span>
+                    </button>
+                  ))
+                )}
+                {quickOpenItems.length > 100 && (
+                  <p className="px-3 py-2 text-center text-[9px] text-[#66667d]">
+                    Showing first 100 results — refine your search.
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void openNativeFolder()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5 text-[10px] text-[#a2a2b7] transition hover:border-[#0DF5C4]/25 hover:bg-[#0DF5C4]/[0.06] hover:text-white sm:text-[11px]"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 text-[#0DF5C4]" />
+                  <span>Open Folder</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void openNativeFile()}
+                  title="Open File"
+                  aria-label="Open File"
+                  className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-white/15 hover:bg-white/[0.06] hover:text-white"
+                >
+                  <File className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSearchMode("workspace");
+                  }}
+                  title="Search in Files (Ctrl+Shift+F)"
+                  aria-label="Search in Files"
+                  className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-[#6C63FF]/30 hover:bg-[#6C63FF]/[0.07] hover:text-white"
+                >
+                  <SearchCode className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                {dirtyFiles.length > 0 && (
+                  <button
+                    onClick={() => setIsChangesOpen(true)}
+                    className="hidden items-center gap-1 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/[0.06] px-2.5 py-1.5 text-[10px] text-[#0DF5C4] transition hover:bg-[#0DF5C4]/10 sm:flex"
+                  >
+                    Show Changes ({dirtyFiles.length})
+                  </button>
+                )}
+                <button
+                  onClick={handleSaveFile}
+                  disabled={isSaving || !activeFile?.isDirty}
+                  title="Save changes (Ctrl+S)"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#6C63FF]/30 bg-[#6C63FF]/[0.10] px-2.5 py-1.5 text-[10px] font-semibold text-[#c8c4ff] transition hover:bg-[#6C63FF]/20 disabled:opacity-40 sm:text-[11px]"
+                >
+                  <span>{isSaving ? "Saving..." : "Save"}</span>
+                  <kbd className="hidden text-[9px] text-[#8f89db] lg:inline">
+                    Ctrl S
+                  </kbd>
+                </button>
+                <button
+                  onClick={handleRunCode}
+                  disabled={isRunningCode || !activeFile}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#0DF5C4]/35 bg-[#0DF5C4]/[0.10] px-3 py-1.5 text-[10px] font-semibold text-[#0DF5C4] transition hover:bg-[#0DF5C4]/[0.18] active:scale-[.98] disabled:opacity-40 sm:text-[11px]"
+                >
+                  <Play
+                    className={`h-3 w-3 fill-current ${isRunningCode ? "animate-spin" : ""}`}
+                  />
+                  <span>{isRunningCode ? "Running..." : "Run"}</span>
+                </button>
+                <button
+                  onClick={() => setIsAiDrawerOpen((prev) => !prev)}
+                  title="Toggle AI Assistant"
+                  aria-label="Toggle AI Assistant"
+                  className="flex items-center gap-1 rounded-lg p-1.5 text-[#8e8ea8] transition hover:bg-white/[0.06] hover:text-white"
+                >
+                  <Bot className="h-4 w-4" style={{ color: theme.primary }} />
+                  <span className="hidden text-[11px] md:inline">AI</span>
+                  {isAiDrawerOpen ? (
+                    <PanelRightClose className="ml-0.5 h-3.5 w-3.5" />
+                  ) : (
+                    <PanelRightOpen className="ml-0.5 h-3.5 w-3.5 text-[#6C63FF]" />
+                  )}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </header>
 
       {/* Main 3-Pane Body */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Pane: Files Explorer Drawer (Collapsible) */}
         {isFileTreeOpen && (
-          <div className="w-64 bg-[#0d0d15] border-r border-[#1c1c2b] flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto">
+          <div className="relative w-64 bg-[#0d0d15] border-r border-[#1c1c2b] flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto">
+            {searchMode === "workspace" && (
+              <section className="absolute inset-0 z-10 flex flex-col overflow-hidden border-r border-[#a5a1ff]/15 bg-gradient-to-b from-[#171724] via-[#10101a] to-[#0c0c13] shadow-[18px_0_45px_rgba(0,0,0,0.32),inset_-1px_0_0_rgba(165,161,255,0.08)]">
+                <div className="border-b border-white/[0.07] bg-gradient-to-r from-[#6C63FF]/[0.10] via-transparent to-[#0DF5C4]/[0.04] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)]">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#a5a1ff]/20 bg-gradient-to-br from-[#6C63FF]/20 to-[#0DF5C4]/[0.08] shadow-[0_4px_14px_rgba(108,99,255,0.16)]">
+                        <SearchCode className="h-3.5 w-3.5 text-[#b5b1ff]" />
+                      </div>
+                      <div>
+                        <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#d6d4f4]">
+                          Search
+                        </h2>
+                        <p className="mt-0.5 text-[9px] text-[#73738e]">
+                          Across workspace files
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSearchMode(null)}
+                      title="Close search (Esc)"
+                      aria-label="Close workspace search"
+                      className="rounded-lg border border-white/[0.06] bg-white/[0.025] p-1.5 text-[#85859e] transition hover:border-white/[0.12] hover:bg-white/[0.07] hover:text-white"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-xl border border-[#a5a1ff]/25 bg-[#090910]/80 px-2.5 py-2 shadow-[0_6px_22px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.045)] transition focus-within:border-[#a5a1ff]/55 focus-within:shadow-[0_0_0_3px_rgba(108,99,255,0.12),0_8px_25px_rgba(0,0,0,0.35)]">
+                    <Search className="h-3.5 w-3.5 shrink-0 text-[#a5a1ff]" />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      onKeyDown={handleSearchInputKeyDown}
+                      placeholder="Search in files..."
+                      aria-label="Search text across workspace files"
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-[#66667f]"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        title="Clear search"
+                        aria-label="Clear search"
+                        className="rounded p-0.5 text-[#77778f] hover:text-white"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between px-0.5">
+                    <span className="text-[9px] uppercase tracking-[0.12em] text-[#686880]">
+                      {searchQuery.trim() ? "Results" : "Find text in project"}
+                    </span>
+                    {searchQuery.trim() && (
+                      <span className="rounded-full border border-[#a5a1ff]/15 bg-[#6C63FF]/[0.08] px-2 py-0.5 text-[9px] font-medium text-[#bbb7ff]">
+                        {workspaceSearchMatches.length}{" "}
+                        {workspaceSearchMatches.length === 1
+                          ? "match"
+                          : "matches"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-1 overflow-y-auto p-2">
+                  {!searchQuery.trim() ? (
+                    <div className="mt-4 rounded-xl border border-white/[0.05] bg-white/[0.018] px-3 py-4 text-center">
+                      <SearchCode className="mx-auto h-5 w-5 text-[#77749e]" />
+                      <p className="mt-2 text-[10px] text-[#85859e]">
+                        Search all files in this workspace
+                      </p>
+                      <p className="mt-1 text-[9px] text-[#5f5f75]">
+                        Press Esc to close
+                      </p>
+                    </div>
+                  ) : workspaceSearchMatches.length === 0 ? (
+                    <p className="rounded-xl border border-white/[0.05] bg-white/[0.018] px-3 py-5 text-center text-[10px] text-[#77778f]">
+                      No matches found.
+                    </p>
+                  ) : (
+                    workspaceSearchMatches.map((match, index) => (
+                      <button
+                        key={`${match.file.id}-${match.line}-${match.column}-${index}`}
+                        type="button"
+                        onClick={() => openWorkspaceSearchMatch(match)}
+                        className="group w-full rounded-xl border border-transparent bg-white/[0.018] px-2.5 py-2 text-left transition hover:border-[#a5a1ff]/20 hover:bg-gradient-to-r hover:from-[#6C63FF]/[0.10] hover:to-[#0DF5C4]/[0.035] hover:shadow-[0_5px_18px_rgba(0,0,0,0.24)]"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <FileCode className="h-3 w-3 shrink-0 text-[#9a95ec] group-hover:text-[#c2bfff]" />
+                          <span className="truncate font-mono text-[9px] text-[#c7c5e4] group-hover:text-white">
+                            {match.file.path}
+                          </span>
+                        </span>
+                        <span className="mt-1.5 flex min-w-0 items-center gap-2 pl-[18px]">
+                          <span className="shrink-0 rounded border border-white/[0.05] bg-black/20 px-1 text-[8px] text-[#70708a]">
+                            {match.line + 1}
+                          </span>
+                          <span className="truncate font-mono text-[9px] text-[#85859a] group-hover:text-[#c4c4d5]">
+                            {match.text.trim() || "(empty line)"}
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+            )}
             <div className="p-3 space-y-4">
               {/* Header with Project Name + Action Icons */}
               <div className="flex items-center justify-between pb-2 border-b border-[#1a1a28]">
@@ -1463,6 +2198,206 @@ export const EditorWorkbench: React.FC = () => {
 
           {/* Interactive Code Editor Area */}
           <div className="flex-1 flex overflow-hidden relative font-mono text-xs">
+            {searchMode === "file" && (
+              <section className="absolute right-4 top-3 z-30 w-[min(390px,calc(100%-2rem))] overflow-hidden rounded-2xl border border-white/[0.13] bg-gradient-to-br from-[#191923]/[0.99] via-[#11111b]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_28px_80px_rgba(0,0,0,0.72),0_10px_34px_rgba(108,99,255,0.14),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl">
+                <div className="h-px bg-gradient-to-r from-[#0DF5C4]/70 via-[#6C63FF]/60 to-[#FF9E64]/40" />
+                <div className="flex items-center gap-2 border-b border-white/[0.07] px-3 py-2.5">
+                  <Search className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setSearchQuery(event.target.value);
+                      setQuickOpenSelection(0);
+                    }}
+                    onKeyDownCapture={(event) => {
+                      if (event.key === "F3") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        navigateFileSearch(event.shiftKey ? -1 : 1);
+                      } else if (
+                        event.altKey &&
+                        ["c", "w", "r"].includes(event.key.toLowerCase())
+                      ) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        toggleFindOption(
+                          event.key.toLowerCase() === "c"
+                            ? "case"
+                            : event.key.toLowerCase() === "w"
+                              ? "word"
+                              : "regex",
+                        );
+                      }
+                    }}
+                    onKeyDown={handleSearchInputKeyDown}
+                    placeholder="Find in current file..."
+                    aria-label="Find in current file"
+                    aria-invalid={Boolean(
+                      findResult.error ||
+                      (searchQuery && activeFileMatches.length === 0),
+                    )}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className={`min-w-0 flex-1 rounded-md border px-1 py-1 text-xs text-white outline-none placeholder:text-[#66667c] ${
+                      findResult.error ||
+                      (searchQuery && activeFileMatches.length === 0)
+                        ? "border-[#ff6b7a]/70"
+                        : "border-transparent bg-transparent"
+                    }`}
+                  />
+                  {searchMode === "file" && (
+                    <>
+                      <span
+                        aria-live="polite"
+                        className={`whitespace-nowrap text-[10px] ${
+                          findResult.error ||
+                          (searchQuery && activeFileMatches.length === 0)
+                            ? "text-[#ff9e9e]"
+                            : "text-[#84849b]"
+                        }`}
+                      >
+                        {findResult.error
+                          ? "Invalid regex"
+                          : activeFileMatches.length === 0
+                            ? "No results"
+                            : `${activeFileMatchIndex + 1} of ${activeFileMatches.length}`}
+                      </span>
+                      {[
+                        {
+                          label: "Match Case",
+                          value: findMatchCase,
+                          toggle: () => toggleFindOption("case"),
+                          text: "Aa",
+                        },
+                        {
+                          label: "Match Whole Word",
+                          value: findWholeWord,
+                          toggle: () => toggleFindOption("word"),
+                          text: "ab",
+                        },
+                        {
+                          label: "Use Regular Expression",
+                          value: findUseRegex,
+                          toggle: () => toggleFindOption("regex"),
+                          text: ".*",
+                        },
+                      ].map((option) => (
+                        <button
+                          key={option.label}
+                          type="button"
+                          title={option.label}
+                          aria-label={option.label}
+                          aria-pressed={option.value}
+                          onClick={option.toggle}
+                          className={`rounded-md px-1 py-1 font-mono text-[10px] transition ${
+                            option.value
+                              ? "bg-[#6C63FF]/25 text-[#c5c0ff]"
+                              : "text-[#77778f] hover:bg-white/[0.07] hover:text-white"
+                          }`}
+                        >
+                          {option.text}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        title="Find in Selection"
+                        aria-label="Find in Selection"
+                        aria-pressed={findInSelection}
+                        onClick={() => {
+                          findControllerRef.current!.setSelection(
+                            findInSelection ? null : findSelectionRange,
+                          );
+                          setFindInSelection((enabled) => !enabled);
+                          setFindHistoryTick((tick) => tick + 1);
+                        }}
+                        className={`rounded-md px-1 py-1 text-[10px] ${
+                          findInSelection
+                            ? "bg-[#6C63FF]/25 text-[#c5c0ff]"
+                            : "text-[#77778f] hover:bg-white/[0.07] hover:text-white"
+                        }`}
+                      >
+                        Sel
+                      </button>
+                      <button
+                        type="button"
+                        title="Toggle Replace (Ctrl+H)"
+                        aria-label="Toggle Replace"
+                        aria-expanded={isReplaceOpen}
+                        onClick={() => setIsReplaceOpen((open) => !open)}
+                        className="rounded-md px-1 py-1 text-[10px] text-[#77778f] transition hover:bg-white/[0.07] hover:text-white"
+                      >
+                        ▾
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    title="Previous match (Shift+Enter)"
+                    aria-label="Previous match"
+                    disabled={activeFileMatches.length === 0}
+                    onClick={() => navigateFileSearch(-1)}
+                    className="rounded-lg px-1.5 py-1 text-[#8e8ea8] transition hover:bg-white/[0.07] hover:text-white disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    title="Next match (Enter)"
+                    aria-label="Next match"
+                    disabled={activeFileMatches.length === 0}
+                    onClick={() => navigateFileSearch(1)}
+                    className="rounded-lg px-1.5 py-1 text-[#8e8ea8] transition hover:bg-white/[0.07] hover:text-white disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={closeFileFind}
+                    title="Close (Esc)"
+                    aria-label="Close search"
+                    className="rounded p-1 text-[#77778f] transition hover:bg-white/[0.07] hover:text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-white/[0.06] px-3 py-2 text-[9px] text-[#696980]">
+                  <span>{findResult.error ?? "Current file"}</span>
+                  <span>Enter to cycle · Esc to close</span>
+                </div>
+                {searchMode === "file" && isReplaceOpen && (
+                  <div className="flex items-center gap-2 border-t border-white/[0.06] px-3 py-2">
+                    <input
+                      ref={replaceInputRef}
+                      value={replaceQuery}
+                      onChange={(event) => setReplaceQuery(event.target.value)}
+                      aria-label="Replace with"
+                      placeholder="Replace with..."
+                      className="min-w-0 flex-1 rounded-md border border-white/[0.09] bg-black/20 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-[#66667c] focus:border-[#6C63FF]/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={replaceCurrentFindMatch}
+                      disabled={!activeFileMatch}
+                      className="rounded-md border border-white/[0.1] px-2 py-1.5 text-[10px] text-[#aaa9c2] hover:bg-white/[0.06] disabled:opacity-40"
+                    >
+                      Replace
+                    </button>
+                    <button
+                      type="button"
+                      onClick={replaceAllFindMatches}
+                      disabled={!activeFileMatches.length}
+                      title="Replace All (Ctrl+Alt+Enter)"
+                      className="rounded-md border border-white/[0.1] px-2 py-1.5 text-[10px] text-[#aaa9c2] hover:bg-white/[0.06] disabled:opacity-40"
+                    >
+                      Replace All
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
             {!activeFile ? (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-[#656582] space-y-3">
                 <FileCode className="w-10 h-10 text-[#45455c]" />
@@ -1526,8 +2461,7 @@ export const EditorWorkbench: React.FC = () => {
                           }
                           className="font-bold"
                         >
-                          {activeFileChanges.changedLines.get(index) ===
-                          "added"
+                          {activeFileChanges.changedLines.get(index) === "added"
                             ? "+"
                             : "~"}
                         </span>
@@ -1538,16 +2472,144 @@ export const EditorWorkbench: React.FC = () => {
                 </div>
 
                 {/* Editable Code Buffer */}
-                <div className="flex-1 relative overflow-auto bg-[#09090f]">
+                <div className="flex-1 relative overflow-hidden bg-[#09090f]">
+                  {currentCode.length === 0 && !isEditorHintDismissed && (
+                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
+                      <section className="pointer-events-auto relative w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.11] bg-gradient-to-br from-[#1a1a26]/[0.97] via-[#12121b]/[0.98] to-[#0d0d14]/[0.99] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.58),0_8px_34px_rgba(108,99,255,0.12),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl sm:p-6">
+                        <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#9b95ff]/80 to-transparent" />
+                        <button
+                          type="button"
+                          onClick={() => dismissEditorHint()}
+                          aria-label="Dismiss editor tips"
+                          title="Dismiss"
+                          className="absolute right-3 top-3 rounded-lg p-1.5 text-[#77778f] transition hover:bg-white/[0.06] hover:text-white"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#a5a1ff]/20 bg-gradient-to-br from-[#6C63FF]/20 to-[#0DF5C4]/[0.06] text-[#aaa5ff] shadow-[0_6px_20px_rgba(108,99,255,0.12)]">
+                            <Code2 className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 pt-0.5">
+                            <h2 className="text-sm font-semibold tracking-tight text-[#f0f0f7]">
+                              A clean canvas
+                            </h2>
+                            <p className="mt-1.5 text-[11px] leading-relaxed text-[#9999ae]">
+                              Start typing, or ask AI to create a first draft.
+                              Language is detected from the file extension.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-5 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAiDrawerOpen(true);
+                              window.requestAnimationFrame(() =>
+                                aiQueryInputRef.current?.focus(),
+                              );
+                            }}
+                            className="inline-flex items-center gap-2 rounded-lg border border-[#a5a1ff]/25 bg-[#6C63FF]/[0.13] px-3 py-2 text-[10px] font-semibold text-[#d3d0ff] transition hover:border-[#a5a1ff]/45 hover:bg-[#6C63FF]/[0.2] hover:shadow-[0_6px_20px_rgba(108,99,255,0.16)]"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Generate with AI
+                            <kbd className="rounded border border-white/[0.1] bg-black/20 px-1 py-0.5 text-[9px] text-[#aaa5cf]">
+                              Ctrl I
+                            </kbd>
+                          </button>
+                          <span className="text-[10px] text-[#77778d]">
+                            or start typing
+                          </span>
+                        </div>
+                        <div className="mt-4 flex items-center justify-between border-t border-white/[0.06] pt-3">
+                          <span className="text-[9px] text-[#68687e]">
+                            This tip disappears when you start coding
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => dismissEditorHint(true)}
+                            className="text-[9px] font-medium text-[#85859d] transition hover:text-white"
+                          >
+                            Don&apos;t show again
+                          </button>
+                        </div>
+                      </section>
+                    </div>
+                  )}
+                  {searchMode === "file" && searchQuery.length > 0 && (
+                    <pre
+                      ref={editorHighlightRef}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 left-0 right-4 z-0 overflow-hidden p-4 font-mono text-xs leading-5 text-transparent whitespace-pre-wrap break-words"
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: "0.75rem",
+                        lineHeight: "1.25rem",
+                        letterSpacing: "normal",
+                        tabSize: 2,
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "break-word",
+                      }}
+                    >
+                      {(() => {
+                        const fragments: React.ReactNode[] = [];
+                        let cursor = 0;
+                        activeFileMatches.forEach((match) => {
+                          if (match.start > cursor) {
+                            fragments.push(
+                              currentCode.slice(cursor, match.start),
+                            );
+                          }
+                          fragments.push(
+                            <mark
+                              key={`${match.start}-${match.end}`}
+                              className="rounded-sm"
+                              style={{
+                                backgroundColor:
+                                  match.start === activeFileMatch?.start
+                                    ? "rgba(255, 140, 0, 0.6)"
+                                    : "rgba(255, 213, 0, 0.35)",
+                                color: "transparent",
+                                boxShadow:
+                                  match.start === activeFileMatch?.start
+                                    ? "0 0 0 1px rgba(255, 140, 0, 0.6)"
+                                    : undefined,
+                              }}
+                            >
+                              {currentCode.slice(match.start, match.end)}
+                            </mark>,
+                          );
+                          cursor = match.end;
+                        });
+                        fragments.push(currentCode.slice(cursor));
+                        return fragments;
+                      })()}
+                    </pre>
+                  )}
                   <textarea
+                    ref={editorTextAreaRef}
                     value={currentCode}
-                    onChange={(e) =>
-                      updateFileContent(activeFile.id, e.target.value)
-                    }
+                    onChange={(e) => {
+                      replaceUndoRef.current = null;
+                      updateFileContent(activeFile.id, e.target.value);
+                    }}
+                    onScroll={(event) => {
+                      const highlights = editorHighlightRef.current;
+                      if (!highlights) return;
+                      highlights.scrollTop = event.currentTarget.scrollTop;
+                      highlights.scrollLeft = event.currentTarget.scrollLeft;
+                    }}
                     spellCheck={false}
-                    className="w-full h-full p-4 bg-transparent text-[#dcdceb] font-mono text-xs leading-5 resize-none focus:outline-none selection:bg-[#6C63FF]/30 select-text"
-                    style={{ tabSize: 2 }}
-                    placeholder="Type code here..."
+                    className="absolute inset-0 z-10 h-full w-full resize-none overflow-auto bg-transparent p-4 font-mono text-xs leading-5 text-[#dcdceb] focus:outline-none selection:bg-[#8b82ff]/55 selection:text-white select-text"
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: "0.75rem",
+                      lineHeight: "1.25rem",
+                      letterSpacing: "normal",
+                      tabSize: 2,
+                      whiteSpace: "pre-wrap",
+                      caretColor: "#f4f4ff",
+                    }}
                   />
                 </div>
               </>
@@ -1688,6 +2750,7 @@ export const EditorWorkbench: React.FC = () => {
             <div className="p-3 border-t border-[#1c1c2b] bg-[#0e0e16]">
               <form onSubmit={handleSendAi} className="relative">
                 <input
+                  ref={aiQueryInputRef}
                   type="text"
                   placeholder="Ask AI to write or fix code..."
                   value={aiQuery}
@@ -1718,7 +2781,10 @@ export const EditorWorkbench: React.FC = () => {
             className="w-full max-w-md space-y-4 rounded-2xl border border-[#303044] bg-[#11111a] p-5 shadow-2xl"
           >
             <div>
-              <h2 id="close-folder-title" className="text-base font-bold text-white">
+              <h2
+                id="close-folder-title"
+                className="text-base font-bold text-white"
+              >
                 Unsaved changes
               </h2>
               <p className="mt-1 text-xs leading-relaxed text-[#a1a1b7]">
@@ -1771,7 +2837,10 @@ export const EditorWorkbench: React.FC = () => {
           >
             <div className="flex items-center justify-between border-b border-[#29293a] p-4">
               <div>
-                <h2 id="editor-changes-title" className="text-sm font-bold text-white">
+                <h2
+                  id="editor-changes-title"
+                  className="text-sm font-bold text-white"
+                >
                   Changes
                 </h2>
                 <p className="mt-1 text-[11px] text-[#8b8ba8]">

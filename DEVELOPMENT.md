@@ -139,6 +139,10 @@ pnpm --filter @devpulse/web dev
 
 Open http://localhost:3000.
 
+The development server writes its build output to `apps/web/.next-dev`, separate
+from the production build output in `apps/web/.next`. This prevents a production
+build from replacing chunks used by a running development server.
+
 Production-style frontend build and start:
 
 ```bash

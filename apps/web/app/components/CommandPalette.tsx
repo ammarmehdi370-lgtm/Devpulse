@@ -15,7 +15,6 @@ import {
   Radio,
   ArrowRight,
   Settings2,
-  UserRoundPlus,
 } from "lucide-react";
 
 export const CommandPalette: React.FC = () => {
@@ -124,13 +123,6 @@ export const CommandPalette: React.FC = () => {
       action: () => setPage("settings"),
     },
     {
-      id: "goto-account-connections",
-      label: "Add or Link an Account",
-      category: "Account",
-      icon: UserRoundPlus,
-      action: () => setPage("account-connections"),
-    },
-    {
       id: "goto-chat",
       label: "Open Team Chat",
       category: "Navigation",
@@ -219,7 +211,8 @@ export const CommandPalette: React.FC = () => {
         <div className="max-h-[min(60vh,420px)] space-y-1 overflow-y-auto px-2 pb-3">
           {filtered.length === 0 ? (
             <div className="mx-1 my-2 rounded-xl border border-dashed border-white/[0.09] px-4 py-8 text-center text-xs text-[#85869a]">
-              No results for <span className="font-medium text-[#c6c6d2]">{query}</span>
+              No results for{" "}
+              <span className="font-medium text-[#c6c6d2]">{query}</span>
             </div>
           ) : (
             filtered.map((cmd) => {
@@ -238,7 +231,9 @@ export const CommandPalette: React.FC = () => {
                       <Icon className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate font-medium text-white">{cmd.label}</div>
+                      <div className="truncate font-medium text-white">
+                        {cmd.label}
+                      </div>
                       <div className="mt-1 text-[10px] text-[#77798d]">
                         {cmd.category}
                       </div>

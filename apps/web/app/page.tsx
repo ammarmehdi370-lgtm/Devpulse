@@ -18,7 +18,6 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ModalHost } from "./components/FriendlyHelpers";
 import { ApiSandboxPage } from "./components/ApiSandboxPage";
 import { SiteSettingsPage } from "./components/SiteSettingsPage";
-import { AccountConnectionsPage } from "./components/AccountConnectionsPage";
 import { PaymentMethodsPage } from "./components/PaymentMethodsPage";
 
 const PanelLoading = () => (
@@ -123,7 +122,6 @@ function MainAppContent() {
       {page === "cloud-core" && <CloudCoreDashboard />}
       {page === "api-sandbox" && <ApiSandboxPage />}
       {page === "settings" && <SiteSettingsPage />}
-      {page === "account-connections" && <AccountConnectionsPage />}
       {page === "payment-methods" && <PaymentMethodsPage />}
     </AppShell>
   );

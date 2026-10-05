@@ -18,7 +18,6 @@ export type PageType =
   | "cloud-core"
   | "api-sandbox"
   | "settings"
-  | "account-connections"
   | "payment-methods";
 
 export interface ThemeConfig {
@@ -619,9 +618,7 @@ const readStoredActivityEvents = (): ActivityEvent[] => {
     const storedEvents = JSON.parse(
       window.localStorage.getItem(ACTIVITY_STORAGE_KEY) || "[]",
     ) as unknown;
-    return Array.isArray(storedEvents)
-      ? (storedEvents as ActivityEvent[])
-      : [];
+    return Array.isArray(storedEvents) ? (storedEvents as ActivityEvent[]) : [];
   } catch {
     return [];
   }
@@ -974,9 +971,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setColorModeState(storedColorMode);
     document.body.setAttribute("data-theme", storedTheme.id);
     document.documentElement.setAttribute("data-theme-mode", storedColorMode);
-    document.documentElement.style.setProperty("--primary", storedTheme.primary);
-    document.documentElement.style.setProperty("--secondary", storedTheme.secondary);
-    document.documentElement.style.setProperty("--tertiary", storedTheme.tertiary);
+    document.documentElement.style.setProperty(
+      "--primary",
+      storedTheme.primary,
+    );
+    document.documentElement.style.setProperty(
+      "--secondary",
+      storedTheme.secondary,
+    );
+    document.documentElement.style.setProperty(
+      "--tertiary",
+      storedTheme.tertiary,
+    );
     setWorkspaces(readStoredWorkspaces());
     setActivityEvents(readStoredActivityEvents());
     try {
@@ -1060,15 +1066,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const addActivityEvent = (
     event: Omit<ActivityEvent, "id" | "timestamp" | "actor">,
   ) => {
-    setActivityEvents((previous) => [
-      {
-        ...event,
-        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        timestamp: new Date().toISOString(),
-        actor: user.handle,
-      },
-      ...previous,
-    ].slice(0, 500));
+    setActivityEvents((previous) =>
+      [
+        {
+          ...event,
+          id: `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          timestamp: new Date().toISOString(),
+          actor: user.handle,
+        },
+        ...previous,
+      ].slice(0, 500),
+    );
   };
 
   const nextTourStep = () => {
@@ -1170,7 +1178,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     };
     setUser(updatedUser);
     try {
-      window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updatedUser));
+      window.localStorage.setItem(
+        USER_STORAGE_KEY,
+        JSON.stringify(updatedUser),
+      );
       window.localStorage.removeItem(LOGGED_OUT_STORAGE_KEY);
     } catch {}
     setPage(hasCompletedThemeSelection() ? "workspaces" : "theme");
@@ -1181,7 +1192,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       method: "POST",
       credentials: "include",
     }).catch((error: unknown) => {
-      console.error("Unable to notify the authentication service of sign-out.", error);
+      console.error(
+        "Unable to notify the authentication service of sign-out.",
+        error,
+      );
     });
     const loggedOutUser: UserProfile = { ...user, isAuthenticated: false };
     setUser(loggedOutUser);
@@ -1826,9 +1840,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       prev.map((f) => (f.id === fileId ? { ...f, isDirty } : f)),
     );
     setTreeFiles((prev) =>
-      prev.map((file) =>
-        file.id === fileId ? { ...file, isDirty } : file,
-      ),
+      prev.map((file) => (file.id === fileId ? { ...file, isDirty } : file)),
     );
   };
 
@@ -1900,9 +1912,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     const newFile = createLocalEditorFile(path || name);
     setTreeFiles((prev) => [...prev, newFile]);
     setTreeFolders((prev) =>
-      Array.from(
-        new Set([...prev, ...getParentFolderPaths([newFile.path])]),
-      ),
+      Array.from(new Set([...prev, ...getParentFolderPaths([newFile.path])])),
     );
     setFileContents((prev) => ({
       ...prev,
@@ -1925,7 +1935,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const createNewFolder = (path: string) => {
     setTreeFolders((prev) =>
-      Array.from(new Set([...prev, ...getParentFolderPaths([`${path}/.folder`]), path])),
+      Array.from(
+        new Set([...prev, ...getParentFolderPaths([`${path}/.folder`]), path]),
+      ),
     );
     addActivityEvent({
       category: "Code",

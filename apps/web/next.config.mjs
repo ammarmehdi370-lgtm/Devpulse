@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   transpilePackages: ["@devpulse/ui", "@devpulse/types", "@devpulse/utils"],
   experimental: { typedRoutes: true },
   async headers() {
