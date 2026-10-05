@@ -17,19 +17,51 @@ type CompletionRequest = { code: string; language: string; fileName: string; pre
 
 const app = express();
 const port = Number(process.env.AI_PORT ?? 4002);
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-const anthropic = anthropicApiKey && !anthropicApiKey.includes("your-actual-key-here")
-  ? new Anthropic({ apiKey: anthropicApiKey, timeout: 30_000 })
-  : null;
 const defaultModel = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
+let anthropicClient: Anthropic | null = null;
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 redis?.on("error", () => undefined);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-app.get("/health", (_request, response) =>
-  response.json({ status: "ok", service: "ai" }),
-);
+
+function getAnthropicClient(): Anthropic {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey || apiKey.includes("your-actual-key-here")) {
+    throw new Error(
+      "ANTHROPIC_API_KEY is not set.\n" +
+      "Get one at console.anthropic.com\n" +
+      "Add to .env: ANTHROPIC_API_KEY=sk-ant-...",
+    );
+  }
+  if (!anthropicClient) anthropicClient = new Anthropic({ apiKey, timeout: 30_000 });
+  return anthropicClient;
+}
+
+function anthropicConfigured(): boolean {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  return Boolean(apiKey && !apiKey.includes("your-actual-key-here"));
+}
+
+if (!anthropicConfigured()) {
+  console.warn(
+    "[AI] WARNING: ANTHROPIC_API_KEY not set.\n" +
+    "[AI] AI features will return errors.\n" +
+    "[AI] Get key at console.anthropic.com",
+  );
+} else {
+  console.log("[AI] Anthropic client configured");
+}
+
+app.get("/health", (_request, response) => {
+  const configured = anthropicConfigured();
+  return response.status(configured ? 200 : 503).json({
+    status: configured ? "ok" : "degraded",
+    configured,
+    ...(configured ? { model: defaultModel } : { message: "ANTHROPIC_API_KEY not set" }),
+    timestamp: new Date().toISOString(),
+  });
+});
 
 function buildSystemPrompt(body: ChatRequest): string {
   const parts: string[] = [];
@@ -85,16 +117,34 @@ function handleAnthropicError(response: express.Response, error: unknown): void 
 
 app.post("/v1/chat", async (request, response) => {
   const body = request.body as ChatRequest;
-  if (!anthropic)
-    return response.status(503).json({ error: "AI service not configured. Add ANTHROPIC_API_KEY to .env", code: "AI_NOT_CONFIGURED" });
-  if (!Array.isArray(body.messages))
-    return response.status(400).json({ error: "messages must be an array" });
-
   const acceptHeader = request.get("accept") ?? "";
   const wantsEventStream = acceptHeader
     .split(",")
     .some((value) => value.trim().split(";", 1)[0] === "text/event-stream");
+  if (!anthropicConfigured()) {
+    const error = {
+      type: "error",
+      code: "AI_NOT_CONFIGURED",
+      message: "AI service is not configured. Ask your admin to set ANTHROPIC_API_KEY.",
+    };
+    if (wantsEventStream) {
+      response.setHeader("Content-Type", "text/event-stream");
+      response.setHeader("Cache-Control", "no-cache");
+      response.setHeader("Connection", "keep-alive");
+      response.setHeader("X-Accel-Buffering", "no");
+      response.status(200).write(`data: ${JSON.stringify(error)}\n\n`);
+      return response.end();
+    }
+    return response.status(503).json({
+      error: "AI_NOT_CONFIGURED",
+      message: "AI service is not configured.",
+    });
+  }
+  if (!Array.isArray(body.messages))
+    return response.status(400).json({ error: "messages must be an array" });
+
   if (wantsEventStream) {
+    const anthropic = getAnthropicClient();
     response.setHeader("Content-Type", "text/event-stream");
     response.setHeader("Cache-Control", "no-cache");
     response.setHeader("Connection", "keep-alive");
@@ -107,10 +157,15 @@ app.post("/v1/chat", async (request, response) => {
       response.end();
     });
     stream.on("error", (error) => {
-      const errorMessage = error instanceof Anthropic.APIError && error.status === 401
-        ? "AI service not configured. Add ANTHROPIC_API_KEY to .env"
+      const isUnauthorized = error instanceof Anthropic.APIError && error.status === 401;
+      const errorMessage = isUnauthorized
+        ? "AI service is not configured. Ask your admin to set ANTHROPIC_API_KEY."
         : error instanceof Error ? error.message : "AI provider request failed";
-      response.write(`data: ${JSON.stringify({ type: "error", message: errorMessage })}\n\n`);
+      response.write(`data: ${JSON.stringify({
+        type: "error",
+        ...(isUnauthorized ? { code: "AI_NOT_CONFIGURED" } : {}),
+        message: errorMessage,
+      })}\n\n`);
       response.end();
     });
     request.on("close", () => stream.controller.abort());
@@ -118,6 +173,7 @@ app.post("/v1/chat", async (request, response) => {
   }
 
   try {
+    const anthropic = getAnthropicClient();
     const result = await anthropic.messages.create({
       model: body.model ?? defaultModel,
       max_tokens: 1024,
@@ -134,12 +190,13 @@ app.post("/v1/chat", async (request, response) => {
 
 app.post("/v1/complete", async (request, response) => {
   const body = request.body as CompletionRequest;
-  if (!anthropic) return response.json({ suggestion: "" });
+  if (!anthropicConfigured()) return response.status(503).json({ error: "AI_NOT_CONFIGURED", message: "AI service is not configured." });
   if (typeof body.prefix !== "string" || typeof body.code !== "string") return response.status(400).json({ error: "code and prefix must be strings" });
   const key = `devpulse:complete:${crypto.createHash("md5").update(`${body.language}${body.prefix}`).digest("hex")}`;
   try {
     const cached = await redis?.get(key);
     if (cached !== null && cached !== undefined) return response.json({ suggestion: cached });
+    const anthropic = getAnthropicClient();
     const result = await anthropic.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 100,

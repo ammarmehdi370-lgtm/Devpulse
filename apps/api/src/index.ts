@@ -876,6 +876,9 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
     const upstream = await fetch(`${process.env.AI_URL ?? "http://localhost:4002"}/v1/chat`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify(parsed.data) });
     if (!upstream.ok || !upstream.body) {
       const details = await upstream.text();
+      if (upstream.status === 503 && details.includes("AI_NOT_CONFIGURED")) {
+        return response.status(503).type("application/json").send(details);
+      }
       return response.status(upstream.status || 502).json({ error: "AI service request failed", details });
     }
     setSSEHeaders(response);
@@ -885,12 +888,14 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
     let assistantContent = "";
     let tokensUsed: number | undefined;
     let upstreamSentDone = false;
+    let upstreamHadError = false;
     const writeEvent = (event: string): void => {
       if (!event.startsWith("data: ")) return;
       try {
-        const value = JSON.parse(event.slice(6)) as { type?: string; content?: string; tokensUsed?: number; message?: string };
+        const value = JSON.parse(event.slice(6)) as { type?: string; content?: string; tokensUsed?: number; message?: string; code?: string };
         if (value.type === "chunk") assistantContent += value.content ?? "";
         if (value.type === "done") { tokensUsed = value.tokensUsed; upstreamSentDone = true; }
+        if (value.type === "error") upstreamHadError = true;
         response.write(`${event}\n\n`);
       } catch { response.write(`data: ${JSON.stringify({ type: "error", message: "Invalid AI stream response" })}\n\n`); }
     };
@@ -903,6 +908,10 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
       if (chunk.done) break;
     }
     if (buffer.trim()) writeEvent(buffer.trim());
+    if (upstreamHadError) {
+      response.end();
+      return;
+    }
     await db.aIUsage.update({ where: { id: authenticated.aiUsage!.id }, data: { requestCount: { increment: 1 }, tokenCount: { increment: tokensUsed ?? 0 } } });
     if (conversationId && assistantContent) {
       await db.aIMessage.create({ data: { conversationId, role: "ASSISTANT", content: assistantContent, tokensUsed } });

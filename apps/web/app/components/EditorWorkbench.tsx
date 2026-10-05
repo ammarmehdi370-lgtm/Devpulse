@@ -20,7 +20,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type SelectionSnapshot = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; selectedText: string };
 type AiCommand = "/fix" | "/explain" | "/test" | "/comment" | "/refactor" | "/optimize";
-type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; isError?: boolean; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
+type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; isError?: boolean; errorCode?: string; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
 type AiConversationSummary = { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: string; preview?: string };
 type AiDbMessage = { id: string; role: "USER" | "ASSISTANT"; content: string; command?: string | null; hasCode?: boolean; codeLanguage?: string | null; appliedToFileId?: string | null; createdAt: string };
 type OutputTab = "terminal" | "output" | "problems" | "history";
@@ -280,15 +280,16 @@ const extractCode = (text: string) =>
 const extractCodeLanguage = (text: string) =>
   text.match(/```([\w#+-]+)?\s*[\s\S]*?```/)?.[1] || "text";
 
-const parseSseLine = (line: string) => {
-  if (!line.startsWith("data:")) return "";
+const parseSseLine = (line: string): { content?: string; code?: string; message?: string } | null => {
+  if (!line.startsWith("data:")) return null;
   const payload = line.slice(5).trim();
-  if (!payload || payload === "[DONE]") return "";
+  if (!payload || payload === "[DONE]") return null;
   try {
-    const parsed = JSON.parse(payload) as { type?: string; content?: string; text?: string; delta?: string };
-    return parsed.type === "chunk" ? parsed.content || "" : parsed.text || parsed.delta || "";
+    const parsed = JSON.parse(payload) as { type?: string; content?: string; text?: string; delta?: string; code?: string; message?: string };
+    if (parsed.type === "error") return { code: parsed.code, message: parsed.message };
+    return { content: parsed.type === "chunk" ? parsed.content || "" : parsed.text || parsed.delta || "" };
   } catch {
-    return payload;
+    return { content: payload };
   }
 };
 
@@ -431,6 +432,7 @@ const AiPanel: React.FC<{
   useEffect(() => { setCommandMenuDismissed(false); }, [commandQuery]);
   useEffect(() => { if (commandQuery && commandMatches.length && !commandMenuDismissed) announce(`${commandMatches.length} commands available. Use arrow keys.`); }, [announce, commandMatches.length, commandMenuDismissed, commandQuery]);
   const visibleMessages = historyExpanded ? messages : messages.slice(-Math.max(1, Math.min(historyCount || messages.length, messages.length)));
+  const aiNotConfigured = messages.some((message) => message.errorCode === "AI_NOT_CONFIGURED");
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (commandQuery && commandMatches.length && !commandMenuDismissed) {
       if (event.key === "ArrowDown") { event.preventDefault(); setCommandIndex((index) => (index + 1) % commandMatches.length); return; }
@@ -444,8 +446,8 @@ const AiPanel: React.FC<{
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-[#28243c] px-3"><Zap className={`h-4 w-4 text-purple-400 ${isStreaming ? "animate-pulse" : ""}`} /><span className="font-bold text-white">Devpulse AI</span><span className="ml-auto text-[9px] text-slate-500">This conversation · {conversation?.messageCount ?? messages.length} messages</span>{conversation && <button onClick={onExportConversation} title="Export conversation" className="text-[10px] text-cyan-300">Export ↓</button>}<button onClick={onClearHistory} title="Clear conversation history" className="text-[10px] text-slate-500">Clear</button><button onClick={onClose} className="text-slate-500 hover:text-white"><X className="h-4 w-4" /></button></div>
     <PreviousConversations conversations={previousConversations} onLoad={(selected) => onLoadConversation?.(selected)} />
     {isLargeFileOpen && activeFile && <LargeFileAiBanner fileName={activeFile.name} sizeBytes={largeFileSizeBytes} selectionIsSmall={selectionIsSmall} />}
-    <div className="flex-1 space-y-3 overflow-y-auto p-3">{historyCount > 0 && <button onClick={() => setHistoryExpanded((expanded) => !expanded)} className="text-[10px] text-slate-600">[{historyCount} previous messages] {historyExpanded ? "Hide" : "Show"}</button>}{visibleMessages.map((message) => <div key={message.id} className={message.role === "user" ? "ml-6" : "mr-2 border-l-2 border-purple-500 pl-2"}><div className={message.role === "user" ? "bg-[#5B21B6] p-2 text-white" : "bg-[#191923] p-2 text-slate-300"}>{message.role === "user" && message.command && <span className="mb-1 inline-block bg-purple-300/20 px-1.5 py-0.5 text-[9px] text-purple-200">{message.command}</span>}<div className="whitespace-pre-wrap text-[11px] leading-5">{message.text || (message.streaming ? "Thinking..." : "")}{message.streaming && <span className="ml-1 animate-pulse text-purple-300">▌</span>}{message.streaming && !message.text && <ShimmerLines count={3} className="mt-3 w-4/5" />}</div>{message.role === "assistant" && message.text && !message.streaming && <><div className="mt-2 flex items-center justify-between text-[9px] text-slate-500"><span>{extractCodeLanguage(message.text).toUpperCase()}</span><button onClick={() => onCopy(message)}>{copiedId === message.id ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}</button></div><ApplyPreview message={message} activeFile={activeFile} content={activeContent} cursor={cursor} onApply={(nextContent) => { onApply({ ...message, text: nextContent }); }} /></>}</div></div>)}</div>
-    <div className="border-t border-[#28243c] p-3"><ContextIndicator file={activeFile} cursor={cursor} selection={selection} enabled={contextVisible} onClear={() => { setContextVisible(false); window.dispatchEvent(new Event("devpulse-ai-clear-context")); }} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div id="ai-command-listbox" role="listbox" aria-label="AI commands" className="mb-2 border border-[#44346d] bg-[#161624] p-1">{commandMatches.map((command, index) => <button id={`ai-command-${command.value.slice(1)}`} role="option" aria-selected={index === commandIndex} key={command.value} onClick={() => { setInput(`${command.value} `); setCommandMenuDismissed(true); announce(`${command.label} selected — ${command.description}`); }} className={`flex w-full justify-between px-2 py-1 text-left text-[10px] ${index === commandIndex ? "bg-purple-500/20 text-white" : "text-slate-400"}`}><span>{command.label}</span><span>{command.description}</span></button>)}</div>}<form onSubmit={onSubmit} className="flex items-end gap-2"><textarea aria-label="Ask Devpulse AI" disabled={isStreaming || aiDisabled || usage.status === "unauthenticated"} aria-disabled={isStreaming || aiDisabled || usage.status === "unauthenticated" ? "true" : "false"} aria-describedby={usageExhausted ? "ai-limit-message" : undefined} aria-expanded={Boolean(commandQuery && commandMatches.length && !commandMenuDismissed)} aria-controls="ai-command-listbox" aria-activedescendant={commandQuery && commandMatches.length && !commandMenuDismissed && (commandMatches[commandIndex] || commandMatches[0]) ? `ai-command-${(commandMatches[commandIndex] || commandMatches[0])!.value.slice(1)}` : undefined} value={input} onChange={(event) => { setInput(event.target.value); setCommandIndex(0); setCommandMenuDismissed(false); }} onKeyDown={handleInputKeyDown} rows={2} placeholder={isLargeFileOpen && selectionIsSmall ? "Ask about your selection (small enough for AI)" : isLargeFileOpen ? "AI disabled — select a small section first" : usage.status === "unauthenticated" ? "Sign in again to use Devpulse AI" : usageExhausted ? "Monthly limit reached" : "Ask Devpulse AI anything..."} className="min-w-0 flex-1 resize-none border border-[#332b50] bg-[#0d0d16] p-2 text-[11px] text-white outline-none disabled:opacity-50" /> <button aria-label="Send" disabled={isStreaming || aiDisabled || usage.status === "unauthenticated" || !input.trim()} className="bg-[#7C3AED] p-2 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form><div className="mt-2 text-[9px] text-slate-600">/fix /explain /test /comment /refactor /optimize</div><UsageMeter usage={usage} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div className="sr-only" role="status">{commandMatches.length} commands available. Use arrow keys.</div>}{liveRegion}</div>
+    <div className="flex-1 space-y-3 overflow-y-auto p-3">{historyCount > 0 && <button onClick={() => setHistoryExpanded((expanded) => !expanded)} className="text-[10px] text-slate-600">[{historyCount} previous messages] {historyExpanded ? "Hide" : "Show"}</button>}{visibleMessages.map((message) => <div key={message.id} className={message.role === "user" ? "ml-6" : "mr-2 border-l-2 border-purple-500 pl-2"}>{message.errorCode === "AI_NOT_CONFIGURED" ? <div role="status" className="rounded border border-amber-400/30 bg-amber-500/10 p-3 text-[11px] text-slate-300"><div className="mb-2 font-semibold text-amber-200">⚙️ AI not configured</div><p>The Devpulse AI service needs an Anthropic API key to work.</p><p className="mt-3 font-medium text-white">For developers:</p><p className="mt-1">Add <code className="text-amber-200">ANTHROPIC_API_KEY</code> to .env</p><p>Get one at console.anthropic.com</p></div> : <div className={message.role === "user" ? "bg-[#5B21B6] p-2 text-white" : "bg-[#191923] p-2 text-slate-300"}>{message.role === "user" && message.command && <span className="mb-1 inline-block bg-purple-300/20 px-1.5 py-0.5 text-[9px] text-purple-200">{message.command}</span>}<div className="whitespace-pre-wrap text-[11px] leading-5">{message.text || (message.streaming ? "Thinking..." : "")}{message.streaming && <span className="ml-1 animate-pulse text-purple-300">▌</span>}{message.streaming && !message.text && <ShimmerLines count={3} className="mt-3 w-4/5" />}</div>{message.role === "assistant" && message.text && !message.streaming && <><div className="mt-2 flex items-center justify-between text-[9px] text-slate-500"><span>{extractCodeLanguage(message.text).toUpperCase()}</span><button onClick={() => onCopy(message)}>{copiedId === message.id ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}</button></div><ApplyPreview message={message} activeFile={activeFile} content={activeContent} cursor={cursor} onApply={(nextContent) => { onApply({ ...message, text: nextContent }); }} /></>}</div>}</div>)}</div>
+    <div className="border-t border-[#28243c] p-3"><ContextIndicator file={activeFile} cursor={cursor} selection={selection} enabled={contextVisible} onClear={() => { setContextVisible(false); window.dispatchEvent(new Event("devpulse-ai-clear-context")); }} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div id="ai-command-listbox" role="listbox" aria-label="AI commands" className="mb-2 border border-[#44346d] bg-[#161624] p-1">{commandMatches.map((command, index) => <button id={`ai-command-${command.value.slice(1)}`} role="option" aria-selected={index === commandIndex} key={command.value} onClick={() => { setInput(`${command.value} `); setCommandMenuDismissed(true); announce(`${command.label} selected — ${command.description}`); }} className={`flex w-full justify-between px-2 py-1 text-left text-[10px] ${index === commandIndex ? "bg-purple-500/20 text-white" : "text-slate-400"}`}><span>{command.label}</span><span>{command.description}</span></button>)}</div>}<form onSubmit={onSubmit} className="flex items-end gap-2"><textarea aria-label="Ask Devpulse AI" disabled={isStreaming || aiDisabled || usage.status === "unauthenticated"} aria-disabled={isStreaming || aiDisabled || usage.status === "unauthenticated" ? "true" : "false"} aria-describedby={usageExhausted ? "ai-limit-message" : undefined} aria-expanded={Boolean(commandQuery && commandMatches.length && !commandMenuDismissed)} aria-controls="ai-command-listbox" aria-activedescendant={commandQuery && commandMatches.length && !commandMenuDismissed && (commandMatches[commandIndex] || commandMatches[0]) ? `ai-command-${(commandMatches[commandIndex] || commandMatches[0])!.value.slice(1)}` : undefined} value={input} onChange={(event) => { setInput(event.target.value); setCommandIndex(0); setCommandMenuDismissed(false); }} onKeyDown={handleInputKeyDown} rows={2} placeholder={isLargeFileOpen && selectionIsSmall ? "Ask about your selection (small enough for AI)" : isLargeFileOpen ? "AI disabled — select a small section first" : aiNotConfigured ? "AI is not configured — contact admin" : usage.status === "unauthenticated" ? "Sign in again to use Devpulse AI" : usageExhausted ? "Monthly limit reached" : "Ask Devpulse AI anything..."} className="min-w-0 flex-1 resize-none border border-[#332b50] bg-[#0d0d16] p-2 text-[11px] text-white outline-none disabled:opacity-50" /> <button aria-label="Send" disabled={isStreaming || aiDisabled || usage.status === "unauthenticated" || !input.trim()} className="bg-[#7C3AED] p-2 text-white disabled:opacity-40"><Send className="h-4 w-4" /></button></form><div className="mt-2 text-[9px] text-slate-600">/fix /explain /test /comment /refactor /optimize</div><UsageMeter usage={usage} />{commandQuery && commandMatches.length > 0 && !commandMenuDismissed && <div className="sr-only" role="status">{commandMatches.length} commands available. Use arrow keys.</div>}{liveRegion}</div>
   </aside>;
 };
 
@@ -895,10 +897,51 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
         setUsage({ status: "unauthenticated" });
         return;
       }
-      if (!response.ok) throw new Error((await response.text()) || "AI request failed");
+      if (!response.ok) {
+        const errorBody: unknown = await response.json().catch(() => null);
+        const details = typeof errorBody === "object" && errorBody !== null
+          ? errorBody as { error?: string; code?: string; message?: string }
+          : {};
+        if (details.code === "AI_NOT_CONFIGURED" || details.error === "AI_NOT_CONFIGURED") {
+          setMessages((previous) => previous.map((message) => message.id === assistantId
+            ? { ...message, text: "", streaming: false, isError: true, errorCode: "AI_NOT_CONFIGURED" }
+            : message));
+          return;
+        }
+        throw new Error(details.message || details.error || `AI request failed (${response.status})`);
+      }
       if ((response.headers.get("content-type") || "").includes("text/event-stream") && response.body) {
         const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
-        while (true) { const chunk = await reader.read(); if (chunk.done) break; buffer += decoder.decode(chunk.value, { stream: true }); const lines = buffer.split("\n"); buffer = lines.pop() || ""; const text = lines.map(parseSseLine).join(""); if (text) { assistantContent += text; setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text: message.text + text } : message)); } }
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const event = parseSseLine(line);
+            if (!event) continue;
+            if (event.code === "AI_NOT_CONFIGURED") {
+              setMessages((previous) => previous.map((message) => message.id === assistantId
+                ? { ...message, text: "", isError: true, errorCode: "AI_NOT_CONFIGURED" }
+                : message));
+              continue;
+            }
+            if (event.message) {
+              setMessages((previous) => previous.map((message) => message.id === assistantId
+                ? { ...message, text: `AI error: ${event.message}`, isError: true }
+                : message));
+              continue;
+            }
+            const text = event.content ?? "";
+            if (text) {
+              assistantContent += text;
+              setMessages((previous) => previous.map((message) => message.id === assistantId
+                ? { ...message, text: message.text + text }
+                : message));
+            }
+          }
+        }
       } else {
         const result = await response.json() as { content?: { type: string; text?: string }[] }; const text = result.content?.filter((item) => item.type === "text").map((item) => item.text || "").join("\n") || "The AI returned no text."; assistantContent = text;
         setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text } : message));
