@@ -1,4 +1,4 @@
-.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets
+.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
 infra:
 	bash scripts/start-services.sh
 dev: infra
@@ -53,3 +53,14 @@ generate-secrets:
 	@printf "SESSION_SECRET=" && openssl rand -hex 32
 	@printf "JWT_PRIVATE_KEY_PATH=./keys/private.pem\n"
 	@printf "JWT_PUBLIC_KEY_PATH=./keys/public.pem\n"
+restore:
+	bash scripts/restore-dependencies.sh
+verify-install:
+	pnpm --filter @devpulse/api typecheck
+	pnpm --filter @devpulse/web typecheck
+	pnpm --filter @devpulse/ai typecheck
+	pnpm --filter @devpulse/database exec prisma validate
+	bash -c 'NODE_ENV=test SESSION_SECRET=devpulse-test-only-session-secret-0123456789 pnpm --filter @devpulse/api test'
+	pnpm --filter @devpulse/api lint
+	pnpm --filter @devpulse/web test
+	pnpm --filter @devpulse/web exec playwright test --list

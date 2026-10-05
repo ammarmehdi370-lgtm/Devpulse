@@ -80,7 +80,7 @@ function requireOAuthProvider(provider: "github" | "google"): express.RequestHan
   };
 }
 
-function verifyOAuthState(provider: "github" | "google") {
+function verifyOAuthState(_provider: "github" | "google") {
   return (request: express.Request, response: express.Response, next: express.NextFunction) => {
     const expected = (request.session as typeof request.session & { oauthState?: string }).oauthState;
     const received = typeof request.query.state === "string" ? request.query.state : "";
