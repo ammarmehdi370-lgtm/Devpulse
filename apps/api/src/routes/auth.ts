@@ -194,6 +194,14 @@ async function sendMagicLinkHandler(request: express.Request, response: express.
   const validation = z.object({ email: z.string().trim().email().max(254) }).safeParse(request.body);
   if (!validation.success) return response.status(400).json({ error: "Invalid email address" });
   const email = validation.data.email.toLowerCase();
+  if (process.env.NODE_ENV === "production" && !process.env.RESEND_API_KEY?.trim()) {
+    console.error("[Auth] Email not configured: RESEND_API_KEY is not set");
+    return response.status(503).json({
+      error: "EMAIL_NOT_CONFIGURED",
+      message: "Email delivery is not available. Try another sign-in method.",
+    });
+  }
+
   let attemptCount: number;
   try {
     attemptCount = await reserveMagicLinkAttempt(email);
@@ -214,17 +222,40 @@ async function sendMagicLinkHandler(request: express.Request, response: express.
 
   if (memoryFallbackAllowed()) {
     const url = `${frontendURL}/auth/verify?token=${encodeURIComponent(token)}`;
-    return response.json({ token, verificationToken: token, message: "Dev mode: use this token directly", url });
+    return response.json({
+      mode: "development",
+      token,
+      url,
+      message: "Dev mode: use this token directly",
+    });
   }
 
   try {
     const user = await db.user.findUnique({ where: { email }, select: { name: true } });
     await sendMagicLink(email, token, user?.name ?? undefined);
-    return response.json({ message: "Check your email for the sign-in link" });
+    return response.json({
+      mode: "production",
+      message: "Check your email for a sign-in link",
+    });
   } catch (emailError) {
-    await deleteMagicToken(tokenKey).catch(() => undefined);
-    console.error("Magic-link email send failed:", emailError);
-    return response.status(503).json({ error: "EMAIL_FAILED", message: "Could not send email. Try again." });
+    try {
+      await deleteMagicToken(tokenKey);
+    } catch (cleanupError) {
+      console.error("Failed to clean up unused magic-link token:", cleanupError);
+    }
+    const errorMessage = emailError instanceof Error ? emailError.message : String(emailError);
+    if (errorMessage.includes("RESEND_API_KEY")) {
+      console.error("[Auth] Email not configured:", errorMessage);
+      return response.status(503).json({
+        error: "EMAIL_NOT_CONFIGURED",
+        message: "Email delivery is not available. Try another sign-in method.",
+      });
+    }
+    console.error("[Auth] Magic-link email send failed:", emailError);
+    return response.status(503).json({
+      error: "EMAIL_FAILED",
+      message: "Could not send sign-in email. Please try again in a minute.",
+    });
   }
 }
 

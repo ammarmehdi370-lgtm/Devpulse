@@ -68,14 +68,46 @@ describe("API foundation", () => {
 
   it("returns a dev verification token without sending email", async () => {
     const email = `magic-${Date.now()}@example.com`;
-    const response = await request(app)
-      .post("/api/auth/magic-link/send")
-      .send({ email });
+    const originalApiKey = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    try {
+      const response = await request(app)
+        .post("/api/auth/magic-link/send")
+        .send({ email });
 
-    expect(response.status).toBe(200);
-    expect(response.body.token).toMatch(/^[a-f\d]{64}$/i);
-    expect(response.body.verificationToken).toBe(response.body.token);
-    expect(response.body.url).toContain(`/auth/verify?token=${response.body.token}`);
+      expect(response.status).toBe(200);
+      expect(response.body.mode).toBe("development");
+      expect(response.body.token).toMatch(/^[a-f\d]{64}$/i);
+      expect(response.body.url).toContain(`/auth/verify?token=${response.body.token}`);
+    } finally {
+      if (originalApiKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = originalApiKey;
+    }
+  });
+
+  it("returns a clear 503 in production when Resend is not configured", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    const originalApiKey = process.env.RESEND_API_KEY;
+    process.env.NODE_ENV = "production";
+    delete process.env.RESEND_API_KEY;
+
+    try {
+      const response = await request(app)
+        .post("/api/auth/magic-link/send")
+        .send({ email: `unconfigured-${Date.now()}@example.com` });
+
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual({
+        error: "EMAIL_NOT_CONFIGURED",
+        message: "Email delivery is not available. Try another sign-in method.",
+      });
+      expect(response.body).not.toHaveProperty("token");
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+      if (originalApiKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = originalApiKey;
+    }
   });
 
   it("limits magic-link sends to three per email per hour", async () => {

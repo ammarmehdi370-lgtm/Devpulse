@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
-import { setAccessToken } from "../lib/apiClient";
 import {
   Terminal,
   Zap,
@@ -22,6 +21,13 @@ type OAuthProviders = {
   magicLink: boolean;
 };
 
+type EmailLoginState =
+  | { status: "idle" }
+  | { status: "submitting" }
+  | { status: "sent"; email: string }
+  | { status: "dev-token"; url: string }
+  | { status: "error"; message: string };
+
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 function isOAuthProviders(value: unknown): value is OAuthProviders {
@@ -40,7 +46,7 @@ export const LoginPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [loginMethod, setLoginMethod] = useState("");
   const [authError, setAuthError] = useState("");
-  const [authNotice, setAuthNotice] = useState("");
+  const [emailLoginState, setEmailLoginState] = useState<EmailLoginState>({ status: "idle" });
   const [oauthProviders, setOAuthProviders] = useState<OAuthProviders | null>(null);
   const [oauthProviderError, setOAuthProviderError] = useState(false);
 
@@ -81,6 +87,61 @@ export const LoginPage: React.FC = () => {
     return () => controller.abort();
   }, []);
 
+  const handleEmailLogin = async () => {
+    const requestedEmail = email.trim();
+    if (!requestedEmail) {
+      setEmailLoginState({ status: "error", message: "Enter your email address to continue." });
+      return;
+    }
+
+    setEmailLoginState({ status: "submitting" });
+    setAuthError("");
+    try {
+      const response = await fetch(`${apiUrl}/api/auth/magic-link/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email: requestedEmail }),
+      });
+      const result = (await response.json()) as {
+        mode?: "development" | "production";
+        token?: string;
+        url?: string;
+        message?: string;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        const message = result.error === "EMAIL_NOT_CONFIGURED"
+          ? "Email login is not available right now. Use GitHub or Google to sign in."
+          : result.error === "EMAIL_FAILED"
+            ? "Could not send email. Please try again."
+            : result.message || "Unable to request a sign-in link.";
+        setEmailLoginState({ status: "error", message });
+        return;
+      }
+
+      if (result.mode === "development" && result.token) {
+        const verificationUrl = result.url
+          ?? `${window.location.origin}/auth/verify?token=${encodeURIComponent(result.token)}`;
+        setEmailLoginState({ status: "dev-token", url: verificationUrl });
+        return;
+      }
+
+      if (result.mode === "production") {
+        setEmailLoginState({ status: "sent", email: requestedEmail });
+        return;
+      }
+
+      throw new Error("The sign-in response was invalid. Please try again.");
+    } catch (error) {
+      setEmailLoginState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to send sign-in link.",
+      });
+    }
+  };
+
   // Live telemetry pulse
   useEffect(() => {
     const interval = setInterval(() => {
@@ -99,7 +160,6 @@ export const LoginPage: React.FC = () => {
     setIsLoading(true);
     setLoginMethod(provider);
     setAuthError("");
-    setAuthNotice("");
 
     if (provider === "gitlab" || provider === "sso") {
       // ── DEV BYPASS ────────────────────────────────────────────────────────
@@ -120,55 +180,6 @@ export const LoginPage: React.FC = () => {
       return;
     }
 
-    if (provider === "email") {
-      try {
-        const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/magic-link/send`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ email: email || "alex@devpulse.dev" }),
-          },
-        );
-        const result = (await response.json()) as {
-          token?: string;
-          verificationToken?: string;
-          message?: string;
-          error?: string;
-        };
-        if (!response.ok)
-          throw new Error(result.message || result.error || "Unable to request magic link");
-        const developmentToken = result.token || result.verificationToken;
-        if (!developmentToken) {
-          setAuthNotice(result.message || "Check your email for the sign-in link.");
-          setIsLoading(false);
-          return;
-        }
-        const verifyResponse = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/magic-link/verify`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ token: result.verificationToken }),
-          },
-        );
-        const verified = (await verifyResponse.json()) as {
-          accessToken?: string;
-          user?: { email: string; name?: string };
-          error?: string;
-        };
-        if (!verifyResponse.ok || !verified.user || !verified.accessToken)
-          throw new Error(verified.error || "Unable to verify magic link");
-        setAccessToken(verified.accessToken);
-        login(verified.user.email, verified.user.name || "Devpulse User");
-      } catch (error) {
-        setAuthError(error instanceof Error ? error.message : "Unable to send sign-in link");
-        setIsLoading(false);
-      }
-      return;
-    }
     login(email || "alex@devpulse.dev", "Alex");
   };
 
@@ -211,8 +222,6 @@ export const LoginPage: React.FC = () => {
               {authError}
             </div>
           )}
-          {authNotice && <div role="status" className="mb-5 border border-[#0DF5C4]/30 bg-[#0DF5C4]/10 px-4 py-3 text-xs text-[#9cebdc]">{authNotice}</div>}
-
           {/* Auth Providers */}
           <div className="space-y-3 mb-6">
             {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
@@ -289,32 +298,85 @@ export const LoginPage: React.FC = () => {
 
           {/* Email Input & Send Magic Link */}
           <div className="space-y-3">
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#666682]">
-                <Mail className="w-4 h-4" />
+            {emailLoginState.status === "sent" && (
+              <div role="status" className="rounded-xl border border-[#0DF5C4]/30 bg-[#0DF5C4]/10 p-5 text-sm text-[#9cebdc]">
+                <div className="flex items-center gap-2 font-semibold text-white">
+                  <CheckCircle2 className="h-5 w-5 text-[#0DF5C4]" />
+                  Check your email
+                </div>
+                <p className="mt-3 text-[#9cebdc]">We sent a sign-in link to</p>
+                <p className="mt-1 break-all font-mono text-white">{emailLoginState.email}</p>
+                <p className="mt-3 text-xs text-[#8c8ca5]">Link expires in 15 minutes.</p>
+                <button
+                  type="button"
+                  onClick={() => setEmailLoginState({ status: "idle" })}
+                  className="mt-4 text-xs font-medium text-[#b5afff] hover:text-white"
+                >
+                  ← Try a different email
+                </button>
               </div>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleLogin("email")}
-                placeholder="dev@company.com"
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#0b0b10] border border-[#27273a] text-white placeholder-[#585870] text-sm focus:outline-none focus:border-[#6C63FF] focus:ring-1 focus:ring-[#6C63FF] transition-all font-mono"
-              />
-            </div>
-
-            <button
-              onClick={() => handleLogin("email")}
-              disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl bg-[#1c1c28] hover:bg-[#252538] border border-[#31314a] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all group"
-            >
-              <span>
-                {isLoading && loginMethod === "email"
-                  ? "Dispatching Magic Link..."
-                  : "Send Magic Link"}
-              </span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-            </button>
+            )}
+            {emailLoginState.status === "dev-token" && (
+              <div role="status" className="rounded-xl border border-[#6C63FF]/40 bg-[#6C63FF]/10 p-5 text-sm">
+                <p className="font-semibold text-white">🛠 Dev mode</p>
+                <p className="mt-3 text-[#c4c0ff]">Click the link to sign in:</p>
+                <a
+                  href={emailLoginState.url}
+                  className="mt-3 inline-flex items-center gap-2 font-medium text-[#b5afff] hover:text-white"
+                >
+                  Sign in now <ArrowRight className="h-4 w-4" />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setEmailLoginState({ status: "idle" })}
+                  className="mt-4 block text-xs font-medium text-[#8c8ca5] hover:text-white"
+                >
+                  ← Try a different email
+                </button>
+              </div>
+            )}
+            {(emailLoginState.status === "idle"
+              || emailLoginState.status === "submitting"
+              || emailLoginState.status === "error") && (
+              <>
+                {emailLoginState.status === "error" && (
+                  <div role="alert" className="flex items-center gap-2 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    {emailLoginState.message}
+                  </div>
+                )}
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#666682]">
+                    <Mail className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      if (emailLoginState.status !== "idle" && emailLoginState.status !== "submitting") {
+                        setEmailLoginState({ status: "idle" });
+                      }
+                    }}
+                    onKeyDown={(event) => event.key === "Enter" && void handleEmailLogin()}
+                    placeholder="dev@company.com"
+                    autoComplete="email"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#0b0b10] border border-[#27273a] text-white placeholder-[#585870] text-sm focus:outline-none focus:border-[#6C63FF] focus:ring-1 focus:ring-[#6C63FF] transition-all font-mono"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleEmailLogin()}
+                  disabled={emailLoginState.status === "submitting"}
+                  className="w-full py-3 px-4 rounded-xl bg-[#1c1c28] hover:bg-[#252538] border border-[#31314a] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all group disabled:cursor-wait disabled:opacity-60"
+                >
+                  <span>
+                    {emailLoginState.status === "submitting" ? "Sending sign-in link..." : "Send Magic Link"}
+                  </span>
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              </>
+            )}
           </div>
 
           {/* Footer Security Badges */}
