@@ -265,7 +265,7 @@ The local services use these URLs:
 | Socket health | http://localhost:4001/health |
 | AI service    | http://localhost:4002        |
 | AI health     | http://localhost:4002/health |
-| PostgreSQL    | localhost:5432               |
+| PostgreSQL    | localhost:5433               |
 | Redis         | localhost:6379               |
 | MinIO API     | http://localhost:9000        |
 | MinIO console | http://localhost:9001        |

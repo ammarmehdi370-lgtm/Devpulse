@@ -218,7 +218,7 @@ async function main(): Promise<void> {
     create: {
       projectId: "demo-project",
       key: "DATABASE_URL",
-      value: "postgresql://localhost:5432/devpulse",
+      value: "postgresql://localhost:5433/devpulse",
       scope: "Development",
     },
   });
