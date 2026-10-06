@@ -49,7 +49,7 @@ services:
     image: node:20-bookworm
     restart: unless-stopped
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/web dev"
+    command: sh -c "corepack enable && pnpm --filter @devpulse/web dev -H 0.0.0.0"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:4000
       NEXT_PUBLIC_SOCKET_URL: http://localhost:4001
