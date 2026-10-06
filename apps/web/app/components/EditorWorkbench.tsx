@@ -2,12 +2,16 @@
 
 import React, {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useCallback,
   useState,
   useRef,
 } from "react";
+import Editor, {
+  loader as monacoLoader,
+  type Monaco,
+  type OnMount,
+} from "@monaco-editor/react";
 import { useApp, EditorFile } from "../context/AppContext";
 import {
   FolderTree,
@@ -42,6 +46,10 @@ import {
   Search,
   SearchCode,
   Command,
+  Settings2,
+  CircleHelp,
+  Pin,
+  Bell,
 } from "lucide-react";
 import {
   FriendlyHint,
@@ -50,6 +58,9 @@ import {
   friendlyConfirm,
 } from "./FriendlyHelpers";
 import { FindController, FindResult } from "./FindController";
+import { TerminalPanel } from "./TerminalPanel";
+import { runEditorPreview, sendAssistantPreview } from "../services/editorMocks";
+import { Button, Dropdown, IconButton, Kbd, Modal, Switch } from "./ide/Primitives";
 
 type NativeEditorHandle =
   | { kind: "directory"; handle: FileSystemDirectoryHandle }
@@ -65,6 +76,22 @@ interface FilePickerWindow extends Window {
 const NATIVE_HANDLE_DB = "devpulse-editor-handles";
 const NATIVE_HANDLE_STORE = "handles";
 const NATIVE_HANDLE_KEY = "active-workspace";
+monacoLoader.config({
+  paths: {
+    vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs",
+  },
+});
+
+const MONACO_THEME = "devpulse-ide";
+const getMonacoLanguageId = (language: string) =>
+  language === "jsx"
+    ? "javascript"
+    : language === "tsx"
+      ? "typescript"
+      : language;
+type MonacoDecoration = Parameters<
+  Monaco["editor"]["deltaDecorations"]
+>[1][number];
 const TEXT_FILE_EXTENSIONS = new Set([
   "c",
   "cc",
@@ -100,6 +127,25 @@ const TEXT_FILE_EXTENSIONS = new Set([
   "yaml",
   "yml",
 ]);
+const EDITOR_LANGUAGES = [
+  { id: "plaintext", name: "Plain Text" },
+  { id: "html", name: "HTML" },
+  { id: "css", name: "CSS" },
+  { id: "javascript", name: "JavaScript" },
+  { id: "typescript", name: "TypeScript" },
+  { id: "jsx", name: "JSX" },
+  { id: "tsx", name: "TSX" },
+  { id: "json", name: "JSON" },
+  { id: "markdown", name: "Markdown" },
+  { id: "python", name: "Python" },
+  { id: "java", name: "Java" },
+  { id: "cpp", name: "C++" },
+  { id: "go", name: "Go" },
+  { id: "php", name: "PHP" },
+  { id: "sql", name: "SQL" },
+  { id: "yaml", name: "YAML" },
+  { id: "shell", name: "Shell" },
+];
 
 const isTextEditorFile = (name: string) => {
   const normalizedName = name.toLowerCase();
@@ -272,6 +318,8 @@ const getDirectoryForPath = async (
 export const EditorWorkbench: React.FC = () => {
   const {
     theme,
+    colorMode,
+    isClientStorageHydrated,
     workspaces,
     setPage,
     isEditorProjectOpen,
@@ -288,12 +336,17 @@ export const EditorWorkbench: React.FC = () => {
     openFiles,
     activeFileId,
     setActiveFileId,
+    updateEditorFileLanguage,
     fileContents,
     savedFileContents,
     updateFileContent,
     saveFileContent,
     openFileInEditor,
     closeFileFromEditor,
+    reorderOpenFiles,
+    closeOtherFilesFromEditor,
+    closeAllFilesFromEditor,
+    renameEditorFile,
     createNewFile,
     deleteFile,
     loadUserLocalFiles,
@@ -303,13 +356,18 @@ export const EditorWorkbench: React.FC = () => {
     setIsFileTreeOpen,
     isAiDrawerOpen,
     setIsAiDrawerOpen,
+    isTerminalOpen,
+    setIsTerminalOpen,
     applyDiffToActiveFile,
+    addToast,
+    toasts,
+    removeToast,
   } = useApp();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [aiQuery, setAiQuery] = useState("");
-  const aiQueryInputRef = useRef<HTMLInputElement>(null);
+  const aiQueryInputRef = useRef<HTMLTextAreaElement>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiHistory, setAiHistory] = useState<
     Array<{ sender: string; text: string; code?: string }>
@@ -318,6 +376,40 @@ export const EditorWorkbench: React.FC = () => {
   const [newFileNameInput, setNewFileNameInput] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderNameInput, setNewFolderNameInput] = useState("");
+  const [aiPanelWidth, setAiPanelWidth] = useState(360);
+  const [explorerWidth, setExplorerWidth] = useState(256);
+  const [isResizingAiPanel, setIsResizingAiPanel] = useState(false);
+  const [isResizingExplorer, setIsResizingExplorer] = useState(false);
+  const [explorerFilter, setExplorerFilter] = useState("");
+  const [pinnedTabs, setPinnedTabs] = useState<string[]>([]);
+  const [tabMenu, setTabMenu] = useState<{
+    fileId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
+  const [isSplitEditor, setIsSplitEditor] = useState(false);
+  const [isZenMode, setIsZenMode] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [isBreadcrumbMenuOpen, setIsBreadcrumbMenuOpen] = useState(false);
+  const [editorCursor, setEditorCursor] = useState({ line: 1, column: 1 });
+  const [editorSelectionCount, setEditorSelectionCount] = useState(0);
+  const [editorDocumentStats, setEditorDocumentStats] = useState({
+    lines: 1,
+    chars: 0,
+  });
+  const [editorSettings, setEditorSettings] = useState({
+    fontSize: 12,
+    lineHeight: 20,
+    tabSize: 2,
+    minimap: false,
+    wordWrap: true,
+    fontFamily: "JetBrains Mono",
+    density: "comfortable" as "comfortable" | "compact",
+  });
   const [selectedFolder, setSelectedFolder] = useState("");
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     () => new Set(),
@@ -333,6 +425,15 @@ export const EditorWorkbench: React.FC = () => {
   const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
   const [isChangesOpen, setIsChangesOpen] = useState(false);
   const [isEditorHintDismissed, setIsEditorHintDismissed] = useState(false);
+  const [isLanguagePickerOpen, setIsLanguagePickerOpen] = useState(false);
+  const [isStatusLanguagePickerOpen, setIsStatusLanguagePickerOpen] = useState(false);
+  const [statusLanguageSearch, setStatusLanguageSearch] = useState("");
+  const [statusLanguageHighlight, setStatusLanguageHighlight] = useState(0);
+  const [statusLanguageMenuPosition, setStatusLanguageMenuPosition] = useState({
+    bottom: 0,
+    left: 0,
+    maxHeight: 320,
+  });
   const [searchMode, setSearchMode] = useState<EditorSearchMode>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [findResult, setFindResult] = useState<FindResult>({
@@ -359,9 +460,25 @@ export const EditorWorkbench: React.FC = () => {
     column: number;
   } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const languagePickerRef = useRef<HTMLDivElement>(null);
+  const statusLanguagePickerRef = useRef<HTMLDivElement>(null);
+  const statusLanguageTriggerRef = useRef<HTMLButtonElement>(null);
+  const statusLanguageSearchRef = useRef<HTMLInputElement>(null);
+  const statusLanguageOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const firstLanguageOptionRef = useRef<HTMLButtonElement>(null);
+  const pendingEditorChordRef = useRef(false);
+  const editorChordTimerRef = useRef<number | null>(null);
+  const aiPanelResizeStartRef = useRef<{ pointerX: number; width: number } | null>(
+    null,
+  );
+  const explorerResizeStartRef = useRef<{ pointerX: number; width: number } | null>(
+    null,
+  );
   const replaceInputRef = useRef<HTMLInputElement>(null);
-  const editorTextAreaRef = useRef<HTMLTextAreaElement>(null);
-  const editorHighlightRef = useRef<HTMLPreElement>(null);
+  const monacoEditorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+  const monacoFindDecorationsRef = useRef<string[]>([]);
+  const saveFileRef = useRef<() => void>(() => undefined);
   const findControllerRef = useRef<FindController | null>(null);
   const replaceUndoRef = useRef<{
     fileId: string;
@@ -383,6 +500,83 @@ export const EditorWorkbench: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("devpulse-ide-layout");
+      if (!stored) return;
+      const layout = JSON.parse(stored) as {
+        aiPanelWidth?: number;
+        explorerWidth?: number;
+        editorSettings?: typeof editorSettings;
+        pinnedTabs?: string[];
+      };
+      if (typeof layout.aiPanelWidth === "number") {
+        setAiPanelWidth(Math.max(280, Math.min(520, layout.aiPanelWidth)));
+      }
+      if (typeof layout.explorerWidth === "number") {
+        setExplorerWidth(Math.max(180, Math.min(360, layout.explorerWidth)));
+      }
+      if (layout.editorSettings) {
+        setEditorSettings((current) => ({ ...current, ...layout.editorSettings }));
+      }
+      if (Array.isArray(layout.pinnedTabs)) setPinnedTabs(layout.pinnedTabs);
+    } catch (error) {
+      console.error("Unable to restore IDE layout preferences.", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isClientStorageHydrated) return;
+    try {
+      window.localStorage.setItem(
+        "devpulse-ide-layout",
+        JSON.stringify({ aiPanelWidth, explorerWidth, editorSettings, pinnedTabs }),
+      );
+    } catch (error) {
+      console.error("Unable to save IDE layout preferences.", error);
+    }
+  }, [aiPanelWidth, editorSettings, explorerWidth, isClientStorageHydrated, pinnedTabs]);
+
+  useEffect(() => {
+    const handleEditorAction = (event: Event) => {
+      const action = (event as CustomEvent<string>).detail;
+      if (action === "quick-open") {
+        setSearchQuery("");
+        setQuickOpenSelection(0);
+        setSearchMode("quick-open");
+        window.requestAnimationFrame(() => searchInputRef.current?.focus());
+      } else if (action === "settings") {
+        setIsSettingsOpen(true);
+      } else if (action === "shortcuts") {
+        setIsShortcutsOpen(true);
+      } else if (action === "zen") {
+        setIsZenMode((current) => !current);
+      } else if (action === "terminal") {
+        setIsTerminalOpen((current) => !current);
+      }
+    };
+    window.addEventListener("devpulse:editor-action", handleEditorAction);
+    return () => window.removeEventListener("devpulse:editor-action", handleEditorAction);
+  });
+
+  useEffect(() => {
+    const handleIDEKeys = (event: KeyboardEvent) => {
+      if (event.key === "?" || ((event.ctrlKey || event.metaKey) && event.key === "/")) {
+        if (event.target instanceof HTMLElement && /INPUT|TEXTAREA/.test(event.target.tagName)) return;
+        event.preventDefault();
+        setIsShortcutsOpen((open) => !open);
+      } else if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        setIsZenMode((mode) => !mode);
+      } else if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+        event.preventDefault();
+        setIsSettingsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleIDEKeys);
+    return () => window.removeEventListener("keydown", handleIDEKeys);
+  }, []);
+
   const dismissEditorHint = (permanently = false) => {
     if (permanently) {
       try {
@@ -394,8 +588,190 @@ export const EditorWorkbench: React.FC = () => {
     setIsEditorHintDismissed(true);
   };
 
+  useEffect(() => {
+    if (!isResizingAiPanel) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const start = aiPanelResizeStartRef.current;
+      if (!start) return;
+      setAiPanelWidth(
+        Math.max(
+          280,
+          Math.min(
+            Math.min(520, window.innerWidth * 0.5),
+            start.width + start.pointerX - event.clientX,
+          ),
+        ),
+      );
+    };
+    const handlePointerUp = () => {
+      aiPanelResizeStartRef.current = null;
+      setIsResizingAiPanel(false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizingAiPanel]);
+
+  useEffect(() => {
+    if (!isResizingExplorer) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const start = explorerResizeStartRef.current;
+      if (!start) return;
+      setExplorerWidth(
+        Math.max(180, Math.min(360, start.width + event.clientX - start.pointerX)),
+      );
+    };
+    const handlePointerUp = () => {
+      explorerResizeStartRef.current = null;
+      setIsResizingExplorer(false);
+    };
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [isResizingExplorer]);
+
+  const selectEditorLanguage = (language: string) => {
+    const model = monacoEditorRef.current?.getModel();
+    if (model && monacoRef.current) {
+      monacoRef.current.editor.setModelLanguage(
+        model,
+        getMonacoLanguageId(language),
+      );
+    }
+    if (activeFile) updateEditorFileLanguage(activeFile.id, language);
+    setIsLanguagePickerOpen(false);
+    monacoEditorRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!isLanguagePickerOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !languagePickerRef.current?.contains(event.target)
+      ) {
+        setIsLanguagePickerOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsLanguagePickerOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isLanguagePickerOpen]);
+
   const activeFile =
     openFiles.find((f) => f.id === activeFileId) || openFiles[0];
+  const filteredStatusLanguages = useMemo(() => {
+    const query = statusLanguageSearch.trim().toLowerCase();
+    return EDITOR_LANGUAGES.filter((language) =>
+      language.name.toLowerCase().includes(query),
+    );
+  }, [statusLanguageSearch]);
+  const openStatusLanguagePicker = () => {
+    if (isStatusLanguagePickerOpen) {
+      setIsStatusLanguagePickerOpen(false);
+      return;
+    }
+    const triggerRect = statusLanguageTriggerRef.current?.getBoundingClientRect();
+    if (triggerRect) {
+      setStatusLanguageMenuPosition({
+        bottom: window.innerHeight - triggerRect.top + 6,
+        left: Math.max(
+          8,
+          Math.min(triggerRect.left, window.innerWidth - 228),
+        ),
+        maxHeight: Math.max(120, Math.min(320, triggerRect.top - 16)),
+      });
+    }
+    const currentIndex = EDITOR_LANGUAGES.findIndex(
+      (language) => language.id === activeFile?.language,
+    );
+    setStatusLanguageSearch("");
+    setStatusLanguageHighlight(Math.max(0, currentIndex));
+    setIsStatusLanguagePickerOpen((open) => !open);
+  };
+  const moveStatusLanguageHighlight = (offset: number) => {
+    if (!filteredStatusLanguages.length) return;
+    setStatusLanguageHighlight((current) => {
+      const next =
+        (current + offset + filteredStatusLanguages.length) %
+        filteredStatusLanguages.length;
+      window.requestAnimationFrame(() =>
+        statusLanguageOptionRefs.current[next]?.scrollIntoView({
+          block: "nearest",
+        }),
+      );
+      return next;
+    });
+  };
+  const handleStatusLanguageKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      moveStatusLanguageHighlight(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const language = filteredStatusLanguages[statusLanguageHighlight];
+      if (language && activeFile) {
+        selectEditorLanguage(language.id);
+        setIsStatusLanguagePickerOpen(false);
+      }
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setIsStatusLanguagePickerOpen(false);
+    }
+  };
+  useEffect(() => {
+    if (!isStatusLanguagePickerOpen) return;
+    statusLanguageSearchRef.current?.focus();
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !statusLanguagePickerRef.current?.contains(event.target)
+      ) {
+        setIsStatusLanguagePickerOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsStatusLanguagePickerOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isStatusLanguagePickerOpen]);
+  useEffect(() => {
+    if (statusLanguageHighlight >= filteredStatusLanguages.length) {
+      setStatusLanguageHighlight(Math.max(0, filteredStatusLanguages.length - 1));
+    }
+  }, [filteredStatusLanguages.length, statusLanguageHighlight]);
+  const sortedOpenFiles = useMemo(
+    () =>
+      [...openFiles].sort(
+        (first, second) =>
+          Number(pinnedTabs.includes(second.id)) -
+          Number(pinnedTabs.includes(first.id)),
+      ),
+    [openFiles, pinnedTabs],
+  );
   const currentCode = activeFile ? fileContents[activeFile.id] || "" : "";
   const activeFileChanges = activeFile
     ? getLineChanges(savedFileContents[activeFile.id] || "", currentCode)
@@ -471,10 +847,13 @@ export const EditorWorkbench: React.FC = () => {
     if (
       !pendingSearchJump ||
       pendingSearchJump.fileId !== activeFile?.id ||
-      !editorTextAreaRef.current
+      !monacoEditorRef.current
     ) {
       return;
     }
+    const editor = monacoEditorRef.current;
+    const model = editor.getModel();
+    if (!model) return;
     const lineStart =
       currentCode.split("\n").slice(0, pendingSearchJump.line).join("\n")
         .length + (pendingSearchJump.line > 0 ? 1 : 0);
@@ -483,40 +862,98 @@ export const EditorWorkbench: React.FC = () => {
       selectionStart + searchQuery.length,
       currentCode.length,
     );
-    editorTextAreaRef.current.focus();
-    editorTextAreaRef.current.setSelectionRange(selectionStart, selectionEnd);
+    const start = model.getPositionAt(selectionStart);
+    const end = model.getPositionAt(selectionEnd);
+    editor.focus();
+    editor.setSelection({
+      startLineNumber: start.lineNumber,
+      startColumn: start.column,
+      endLineNumber: end.lineNumber,
+      endColumn: end.column,
+    });
+    editor.revealPositionInCenter(start);
     setPendingSearchJump(null);
   }, [activeFile?.id, currentCode, pendingSearchJump, searchQuery]);
 
-  useLayoutEffect(() => {
-    if (searchMode !== "file") return;
-    const editor = editorTextAreaRef.current;
-    const highlights = editorHighlightRef.current;
-    if (!editor || !highlights) return;
-    highlights.scrollTop = editor.scrollTop;
-    highlights.scrollLeft = editor.scrollLeft;
-    if (activeFileMatches.length === 0) return;
-    const match = activeFileMatch;
-    if (!match) return;
-    editor.setSelectionRange(match.start, match.end);
-    const lineIndex = currentCode.slice(0, match.start).split("\n").length - 1;
-    const lineHeight = Number.parseFloat(
-      window.getComputedStyle(editor).lineHeight,
-    );
-    if (Number.isFinite(lineHeight)) {
-      const visibleLineCount = Math.max(
-        1,
-        Math.floor(editor.clientHeight / lineHeight),
-      );
-      const scrollLine = Math.max(
-        0,
-        lineIndex - Math.floor(visibleLineCount / 2),
-      );
-      editor.scrollTop = scrollLine * lineHeight;
+  useEffect(() => {
+    const editor = monacoEditorRef.current;
+    const model = editor?.getModel();
+    if (!editor || !model) return;
+    const decorations: MonacoDecoration[] = [];
+    if (searchMode === "file") {
+      activeFileMatches.forEach((match, index) => {
+        const start = model.getPositionAt(match.start);
+        const end = model.getPositionAt(match.end);
+        decorations.push({
+          range: {
+            startLineNumber: start.lineNumber,
+            startColumn: start.column,
+            endLineNumber: end.lineNumber,
+            endColumn: end.column,
+          },
+          options: {
+            inlineClassName:
+              index === activeFileMatchIndex
+                ? "editor-find-match-active"
+                : "editor-find-match",
+          },
+        });
+      });
     }
-    highlights.scrollTop = editor.scrollTop;
-    highlights.scrollLeft = editor.scrollLeft;
-  }, [activeFileMatch, activeFileMatches.length, currentCode, searchMode]);
+    activeFileChanges.changedLines.forEach((kind, lineIndex) => {
+      const lineNumber = lineIndex + 1;
+      if (lineNumber > model.getLineCount()) return;
+      decorations.push({
+        range: {
+          startLineNumber: lineNumber,
+          startColumn: 1,
+          endLineNumber: lineNumber,
+          endColumn: 1,
+        },
+        options: {
+          glyphMarginClassName:
+            kind === "added" ? "editor-glyph-added" : "editor-glyph-modified",
+        },
+      });
+    });
+    if (
+      activeFileChanges.removedAtLine !== null &&
+      activeFileChanges.removedAtLine < model.getLineCount()
+    ) {
+      const lineNumber = activeFileChanges.removedAtLine + 1;
+      decorations.push({
+        range: {
+          startLineNumber: lineNumber,
+          startColumn: 1,
+          endLineNumber: lineNumber,
+          endColumn: 1,
+        },
+        options: { glyphMarginClassName: "editor-glyph-removed" },
+      });
+    }
+    monacoFindDecorationsRef.current = editor.deltaDecorations(
+      monacoFindDecorationsRef.current,
+      decorations,
+    );
+    if (searchMode === "file" && activeFileMatch) {
+      const start = model.getPositionAt(activeFileMatch.start);
+      const end = model.getPositionAt(activeFileMatch.end);
+      editor.setSelection({
+        startLineNumber: start.lineNumber,
+        startColumn: start.column,
+        endLineNumber: end.lineNumber,
+        endColumn: end.column,
+      });
+      editor.revealPositionInCenter(start);
+    }
+  }, [
+    activeFileChanges.changedLines,
+    activeFileChanges.removedAtLine,
+    activeFileMatch,
+    activeFileMatchIndex,
+    activeFileMatches,
+    searchMode,
+  ]);
 
   const openFileFind = useCallback(() => {
     if (searchMode === "file") {
@@ -524,12 +961,16 @@ export const EditorWorkbench: React.FC = () => {
       searchInputRef.current?.select();
       return;
     }
-    const editor = editorTextAreaRef.current;
-    const selectionStart = editor?.selectionStart ?? 0;
-    const selectionEnd = editor?.selectionEnd ?? 0;
+    const editor = monacoEditorRef.current;
+    const model = editor?.getModel();
+    const selection = editor?.getSelection();
+    const selectionStart =
+      model && selection ? model.getOffsetAt(selection.getStartPosition()) : 0;
+    const selectionEnd =
+      model && selection ? model.getOffsetAt(selection.getEndPosition()) : 0;
     const selectedText =
-      editor && selectionEnd > selectionStart
-        ? editor.value.slice(selectionStart, selectionEnd)
+      model && selection && selectionEnd > selectionStart
+        ? model.getValueInRange(selection)
         : "";
     const selectedRange =
       selectionEnd > selectionStart
@@ -555,7 +996,7 @@ export const EditorWorkbench: React.FC = () => {
     setFindResult({ matches: [], index: -1, error: null });
     setSearchMode(null);
     setIsReplaceOpen(false);
-    window.requestAnimationFrame(() => editorTextAreaRef.current?.focus());
+    window.requestAnimationFrame(() => monacoEditorRef.current?.focus());
   }, []);
 
   const navigateFileSearch = useCallback(
@@ -875,7 +1316,7 @@ export const EditorWorkbench: React.FC = () => {
         {childFiles.map((file) => (
           <div
             key={file.id}
-            className={`group flex items-center justify-between rounded py-1.5 pr-2 text-left transition-colors cursor-pointer ${activeFile?.id === file.id ? "bg-[#1a1a2b] text-white font-semibold" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+            className={`group flex items-center justify-between rounded py-1.5 pr-2 text-left transition-colors cursor-pointer ${activeFile?.id === file.id ? "editor-explorer-active" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
             style={{ paddingLeft: `${depth * 12 + 24}px` }}
             onClick={() => openFileInEditor(file)}
           >
@@ -893,7 +1334,34 @@ export const EditorWorkbench: React.FC = () => {
               >
                 {file.iconType}
               </span>
-              <span className="truncate">{file.name}</span>
+              {renamingFileId === file.id ? (
+                <input
+                  autoFocus
+                  aria-label={`Rename ${file.name}`}
+                  className="ide-input min-w-0 flex-1 py-0"
+                  value={renameValue}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) => setRenameValue(event.target.value)}
+                  onBlur={() => {
+                    const nextName = renameValue.trim();
+                    if (nextName && nextName !== file.name) {
+                      renameEditorFile(file.id, nextName);
+                      addToast({ type: "success", title: "File renamed", description: nextName });
+                    }
+                    setRenamingFileId(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setRenameValue(file.name);
+                      setRenamingFileId(null);
+                    }
+                  }}
+                />
+              ) : (
+                <span className="truncate">{file.name}</span>
+              )}
               {file.isDirty && (
                 <span
                   title="Unsaved changes"
@@ -950,33 +1418,20 @@ export const EditorWorkbench: React.FC = () => {
     setIsRunningCode(true);
     setRunOutput(null);
     try {
-      const language =
-        activeFile?.language === "python"
-          ? "python"
-          : activeFile?.language === "rust"
-            ? "rust"
-            : activeFile?.language === "go"
-              ? "go"
-              : "javascript";
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/execute`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ language, code: currentCode }),
-        },
-      );
-      const result = await response.json();
+      if (!activeFile) return;
+      const result = await runEditorPreview({
+        path: activeFile.path,
+        language: activeFile.language,
+        code: currentCode,
+      });
       setRunOutput(
-        `${response.ok ? "Exit code" : "Execution error"}: ${result.exitCode ?? "unavailable"}\n${result.stdout || result.stderr || result.error || "No output"}`,
+        `${result.ok ? "Exit code" : "Execution error"}: ${result.exitCode}\n${result.output}`,
       );
-    } catch {
-      // Dynamic fallback simulation: realistic devbox execution output
-      setTimeout(() => {
-        setRunOutput(
-          `[Devbox VM Cloud Runner]\n✓ Container runtime: ubuntu:24.04-lts (pre-warmed)\n✓ Isolated microVM environment initialized in 19ms\n✓ File: ${activeFile?.name || "script.ts"} (${activeFile?.language || "typescript"})\n--------------------------------------------------\n[LOG] Initializing isolated microkernel...\n[LOG] Telemetry probes: 0 errors, 14ms latency.\n✓ Process completed successfully.\n[STATUS] Exit code: 0`,
-        );
-      }, 350);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Preview could not run.";
+      setRunOutput(`Preview error: ${message}`);
+      addToast({ type: "error", title: "Run preview failed", description: message });
     } finally {
       setIsRunningCode(false);
     }
@@ -996,6 +1451,99 @@ export const EditorWorkbench: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  saveFileRef.current = () => {
+    void handleSaveFile();
+  };
+
+  const handleMonacoBeforeMount = (monaco: Monaco) => {
+    monaco.editor.defineTheme(MONACO_THEME, {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "comment", foreground: "77778F", fontStyle: "italic" },
+        { token: "keyword", foreground: "A5A1FF" },
+        { token: "string", foreground: "A1CF73" },
+        { token: "number", foreground: "FFCB6B" },
+      ],
+      colors: {
+        "editor.background": "#09090f",
+        "editor.foreground": "#dcdceb",
+        "editorLineNumber.foreground": "#45455c",
+        "editorLineNumber.activeForeground": "#a5a1ff",
+        "editorCursor.foreground": "#0DF5C4",
+        "editor.selectionBackground": "#8b82ff55",
+        "editor.inactiveSelectionBackground": "#8b82ff33",
+        "editor.lineHighlightBackground": "#111118",
+        "editorIndentGuide.background1": "#ffffff0a",
+        "editorIndentGuide.activeBackground1": "#0DF5C455",
+        "editorBracketPairGuide.background1": "#ffffff12",
+        "editorBracketPairGuide.activeBackground1": "#0DF5C477",
+        "editorGutter.background": "#09090f",
+        "editorWidget.background": "#11131b",
+        "editorWidget.border": "#ffffff14",
+        "editor.findMatchBackground": "#6c63ff66",
+        "editor.findMatchHighlightBackground": "#6c63ff33",
+      },
+    });
+  };
+
+  const handleMonacoMount: OnMount = (editor, monaco) => {
+    monacoEditorRef.current = editor;
+    monacoRef.current = monaco;
+
+    const syncDocumentStats = () => {
+      const model = editor.getModel();
+      if (!model) return;
+      setEditorDocumentStats({
+        lines: model.getLineCount(),
+        chars: model.getValueLength(),
+      });
+    };
+    const syncSelectionCount = () => {
+      const model = editor.getModel();
+      const selections = editor.getSelections();
+      setEditorSelectionCount(
+        model && selections
+          ? selections.reduce(
+              (count, selection) =>
+                count + model.getValueLengthInRange(selection),
+              0,
+            )
+          : 0,
+      );
+    };
+
+    syncDocumentStats();
+    syncSelectionCount();
+    const position = editor.getPosition();
+    if (position) {
+      setEditorCursor({ line: position.lineNumber, column: position.column });
+    }
+    editor.onDidChangeCursorPosition(({ position: nextPosition }) => {
+      setEditorCursor({
+        line: nextPosition.lineNumber,
+        column: nextPosition.column,
+      });
+    });
+    editor.onDidChangeCursorSelection(syncSelectionCount);
+    editor.onDidChangeModelContent(syncDocumentStats);
+    editor.onDidChangeModel(() => {
+      syncDocumentStats();
+      syncSelectionCount();
+      const nextPosition = editor.getPosition();
+      if (nextPosition) {
+        setEditorCursor({
+          line: nextPosition.lineNumber,
+          column: nextPosition.column,
+        });
+      }
+    });
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+      () => saveFileRef.current(),
+    );
   };
 
   const writeFileToDisk = async (file: EditorFile, content: string) => {
@@ -1115,9 +1663,41 @@ export const EditorWorkbench: React.FC = () => {
         event.preventDefault();
         return;
       }
+      const key = event.key.toLowerCase();
+      if (pendingEditorChordRef.current && !event.ctrlKey && !event.metaKey) {
+        pendingEditorChordRef.current = false;
+        if (editorChordTimerRef.current !== null) {
+          window.clearTimeout(editorChordTimerRef.current);
+          editorChordTimerRef.current = null;
+        }
+        if (key === "m") {
+          event.preventDefault();
+          setIsLanguagePickerOpen(true);
+          window.requestAnimationFrame(() =>
+            firstLanguageOptionRef.current?.focus(),
+          );
+          return;
+        }
+      }
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        key === "k" &&
+        !event.shiftKey &&
+        isEditorProjectOpen
+      ) {
+        event.preventDefault();
+        pendingEditorChordRef.current = true;
+        if (editorChordTimerRef.current !== null) {
+          window.clearTimeout(editorChordTimerRef.current);
+        }
+        editorChordTimerRef.current = window.setTimeout(() => {
+          pendingEditorChordRef.current = false;
+          editorChordTimerRef.current = null;
+        }, 1200);
+        return;
+      }
       if (!(event.ctrlKey || event.metaKey) || !isEditorProjectOpen) return;
 
-      const key = event.key.toLowerCase();
       if (
         key === "z" &&
         replaceUndoRef.current &&
@@ -1162,7 +1742,13 @@ export const EditorWorkbench: React.FC = () => {
       }
     };
     window.addEventListener("keydown", handleEditorShortcut);
-    return () => window.removeEventListener("keydown", handleEditorShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleEditorShortcut);
+      if (editorChordTimerRef.current !== null) {
+        window.clearTimeout(editorChordTimerRef.current);
+        editorChordTimerRef.current = null;
+      }
+    };
   }, [
     closeFileFind,
     currentCode,
@@ -1295,53 +1881,28 @@ export const EditorWorkbench: React.FC = () => {
     setAiQuery("");
     setIsAiLoading(true);
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_AI_URL ?? "http://localhost:4002"}/v1/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: [
-              {
-                role: "user",
-                content: `Project: ${loadedProjectName || "Devpulse project"}\nActive file: ${activeFile?.path || "none"}\nBranch: main\nRequest: ${userPrompt}\n\nRespond with a concise explanation and, when useful, a complete code patch.`,
-              },
-            ],
-          }),
-        },
-      );
-      const result = (await response.json()) as {
-        content?: { type: string; text?: string }[];
-        error?: string;
-      };
-      if (!response.ok) throw new Error(result.error || "AI request failed");
-      const responseText =
-        result.content
-          ?.filter((item) => item.type === "text")
-          .map((item) => item.text || "")
-          .join("\n") || "The AI returned no text.";
+      const result = await sendAssistantPreview({
+        prompt: userPrompt,
+        projectName: loadedProjectName || "Local workspace",
+        activePath: activeFile?.path || null,
+        code: currentCode,
+      });
       setAiHistory((prev) => [
         ...prev,
-        { sender: "Devpulse AI", text: responseText, code: responseText },
+        {
+          sender: "Devpulse AI",
+          text: result.text,
+          code: result.code,
+        },
       ]);
-    } catch {
-      setTimeout(() => {
-        const patchCode = currentCode
-          ? currentCode.replace(
-              /console\.log\([^)]*\);?/,
-              `console.log("[Devpulse AI] Optimized microVM execution.");`,
-            )
-          : `// AI Generated Function\nexport function runTask() {\n  return { success: true, timestamp: Date.now() };\n}`;
-
-        setAiHistory((prev) => [
-          ...prev,
-          {
-            sender: "Devpulse AI",
-            text: `I've analyzed your prompt "${userPrompt}" in the context of ${activeFile?.name || "your file"}. Here is an optimized patch ready to apply to your editor.`,
-            code: patchCode,
-          },
-        ]);
-      }, 500);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Assistant preview failed.";
+      setAiHistory((prev) => [
+        ...prev,
+        { sender: "Devpulse AI", text: `Unable to respond: ${message}` },
+      ]);
+      addToast({ type: "error", title: "Assistant preview failed", description: message });
     } finally {
       setIsAiLoading(false);
     }
@@ -1350,7 +1911,7 @@ export const EditorWorkbench: React.FC = () => {
   // Editor welcome screen shown before a project is opened.
   if (!isEditorProjectOpen) {
     return (
-      <div className="editor-welcome-root relative flex min-h-full w-full items-start justify-center overflow-x-hidden bg-[#08080d] bg-grid-pattern px-3 py-3.5 font-sans text-[#e5e7eb] sm:items-center sm:px-4 sm:py-4 lg:px-8 lg:py-8">
+      <div className="editor-welcome-root relative flex h-full min-h-0 w-full flex-col items-center overflow-y-auto overflow-x-hidden bg-[#08080d] bg-grid-pattern px-3 py-3.5 font-sans text-[#e5e7eb] sm:px-4 sm:py-4 lg:px-8 lg:py-8">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_12%,rgba(13,245,196,0.08),transparent_38%),radial-gradient(ellipse_at_82%_72%,rgba(108,99,255,0.1),transparent_44%)]" />
         <div className="pointer-events-none absolute inset-x-[8%] top-[8%] h-40 rounded-full bg-[#6C63FF]/[0.07] blur-3xl" />
         {/* Hidden Native File & Folder Inputs */}
@@ -1371,7 +1932,7 @@ export const EditorWorkbench: React.FC = () => {
           className="hidden"
         />
 
-        <div className="editor-welcome-card relative z-10 w-full max-w-5xl rounded-[22px] border border-white/[0.10] bg-gradient-to-br from-[#191922]/[0.99] via-[#111118]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_36px_100px_rgba(0,0,0,0.62),0_14px_42px_rgba(108,99,255,0.11),inset_0_1px_0_rgba(255,255,255,0.07)] ring-1 ring-black/30 backdrop-blur-xl sm:rounded-2xl lg:rounded-[28px]">
+        <div className="editor-welcome-card relative z-10 my-auto w-full max-w-5xl shrink-0 rounded-[22px] border border-white/[0.10] bg-gradient-to-br from-[#191922]/[0.99] via-[#111118]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_36px_100px_rgba(0,0,0,0.62),0_14px_42px_rgba(108,99,255,0.11),inset_0_1px_0_rgba(255,255,255,0.07)] ring-1 ring-black/30 backdrop-blur-xl sm:rounded-2xl lg:rounded-[28px]">
           <div className="editor-welcome-accent" aria-hidden="true" />
           <div className="editor-welcome-content space-y-4 p-3.5 lg:space-y-8 lg:p-10">
             {isEditorLoading && (
@@ -1659,13 +2220,34 @@ export const EditorWorkbench: React.FC = () => {
             )}
           </div>
         </div>
+        <TerminalPanel
+          colorMode={colorMode}
+          isOpen={isTerminalOpen}
+          onClose={() => setIsTerminalOpen(false)}
+          primaryColor={theme.primary}
+          projectName={loadedProjectName}
+        />
       </div>
     );
   }
 
   // 2. Full Main Editor Workbench (Matches Screenshot 1 Pixel-Perfect with 100% Dynamic Files & Content)
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0b0b12] text-[#d6d6e6] overflow-hidden font-sans select-none">
+    <div
+      className={`editor-workbench-root flex h-full min-h-0 flex-col bg-[#0b0b12] text-[#d6d6e6] overflow-hidden font-sans select-none ${isZenMode ? "editor-workbench-zen" : ""} ${editorSettings.density === "compact" ? "editor-density-compact" : ""}`}
+      style={
+        {
+          "--ide-explorer-width": `${explorerWidth}px`,
+          "--ide-editor-font-size": `${editorSettings.fontSize}px`,
+          "--ide-editor-line-height": `${editorSettings.lineHeight}px`,
+          "--ide-editor-tab-size": editorSettings.tabSize,
+          "--ide-editor-font-family":
+            editorSettings.fontFamily === "JetBrains Mono"
+              ? "'JetBrains Mono', monospace"
+              : editorSettings.fontFamily,
+        } as React.CSSProperties
+      }
+    >
       {/* Hidden Native File & Folder Inputs for top toolbar */}
       <input
         type="file"
@@ -1685,7 +2267,7 @@ export const EditorWorkbench: React.FC = () => {
       />
 
       {/* Project navigation and editor actions */}
-      <header className="z-20 shrink-0 border-b border-[#1c1c2b] bg-gradient-to-b from-[#11111a] to-[#0e0e16] font-mono text-xs">
+      <header className="editor-workbench-header z-20 shrink-0 border-b border-[#1c1c2b] bg-gradient-to-b from-[#11111a] to-[#0e0e16] font-sans text-xs">
         <div className="flex min-h-11 items-center justify-between gap-3 border-b border-white/[0.035] px-3 sm:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -1701,13 +2283,50 @@ export const EditorWorkbench: React.FC = () => {
               )}
             </button>
             <div className="flex min-w-0 items-center gap-2 text-[#77778f]">
-              <span className="max-w-[35vw] truncate font-semibold text-[#c8c8d8]">
-                {loadedProjectName}
-              </span>
+              <button
+                type="button"
+                className="max-w-[35vw] truncate font-semibold text-[#c8c8d8]"
+                title="Navigate to workspace root"
+                onClick={() => {
+                  setSelectedFolder("");
+                  setIsFileTreeOpen(true);
+                }}
+              >
+                {editorProjectId.startsWith("local")
+                  ? "Local workspace"
+                  : loadedProjectName || "Local workspace"}
+              </button>
               <span className="text-[#4e4e65]">/</span>
-              <span className="max-w-[35vw] truncate font-semibold text-white">
-                {activeFile?.path || "No file open"}
-              </span>
+              <div className="relative min-w-0">
+                <button
+                  type="button"
+                  className="max-w-[35vw] truncate font-semibold text-white"
+                  aria-label="Browse file location"
+                  aria-expanded={isBreadcrumbMenuOpen}
+                  title={activeFile?.path || "No file open"}
+                  onClick={() => setIsBreadcrumbMenuOpen((open) => !open)}
+                >
+                  {activeFile?.path || "No file open"}
+                </button>
+                {isBreadcrumbMenuOpen && (
+                  <div className="editor-breadcrumb-menu" role="menu" aria-label="Workspace folders">
+                    {["", ...treeFolders].map((folder) => (
+                      <button
+                        type="button"
+                        key={folder || "workspace-root"}
+                        role="menuitem"
+                        onClick={() => {
+                          setSelectedFolder(folder);
+                          setIsFileTreeOpen(true);
+                          setIsBreadcrumbMenuOpen(false);
+                        }}
+                      >
+                        {folder || "Workspace root"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {activeFile?.isDirty && (
                 <span
                   className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0DF5C4]"
@@ -1721,7 +2340,7 @@ export const EditorWorkbench: React.FC = () => {
             Workspace
           </span>
         </div>
-        <div className="relative flex min-h-10 items-center justify-between gap-2 px-3 sm:px-4">
+        <div className="editor-toolbar-row relative flex min-h-10 items-center justify-between gap-2 px-3 sm:px-4">
           {searchMode === "quick-open" ? (
             <div className="flex w-full items-center gap-2 rounded-lg border border-[#6C63FF]/35 bg-black/25 px-2.5 py-1.5 shadow-[0_0_20px_rgba(108,99,255,0.08)]">
               <Command className="h-3.5 w-3.5 shrink-0 text-[#0DF5C4]" />
@@ -1796,11 +2415,11 @@ export const EditorWorkbench: React.FC = () => {
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-1.5">
+              <div className="editor-toolbar-group flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => void openNativeFolder()}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5 text-[10px] text-[#a2a2b7] transition hover:border-[#0DF5C4]/25 hover:bg-[#0DF5C4]/[0.06] hover:text-white sm:text-[11px]"
+                  className="editor-toolbar-button editor-toolbar-folder inline-flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5 text-[10px] text-[#a2a2b7] transition hover:border-[#0DF5C4]/25 hover:bg-[#0DF5C4]/[0.06] hover:text-white sm:text-[11px]"
                 >
                   <FolderOpen className="h-3.5 w-3.5 text-[#0DF5C4]" />
                   <span>Open Folder</span>
@@ -1810,7 +2429,7 @@ export const EditorWorkbench: React.FC = () => {
                   onClick={() => void openNativeFile()}
                   title="Open File"
                   aria-label="Open File"
-                  className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-white/15 hover:bg-white/[0.06] hover:text-white"
+                  className="editor-toolbar-button rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-white/15 hover:bg-white/[0.06] hover:text-white"
                 >
                   <File className="h-3.5 w-3.5" />
                 </button>
@@ -1822,16 +2441,16 @@ export const EditorWorkbench: React.FC = () => {
                   }}
                   title="Search in Files (Ctrl+Shift+F)"
                   aria-label="Search in Files"
-                  className="rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-[#6C63FF]/30 hover:bg-[#6C63FF]/[0.07] hover:text-white"
+                  className="editor-toolbar-button rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-[#6C63FF]/30 hover:bg-[#6C63FF]/[0.07] hover:text-white"
                 >
                   <SearchCode className="h-3.5 w-3.5" />
                 </button>
               </div>
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="editor-toolbar-group flex items-center gap-1.5 sm:gap-2">
                 {dirtyFiles.length > 0 && (
                   <button
                     onClick={() => setIsChangesOpen(true)}
-                    className="hidden items-center gap-1 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/[0.06] px-2.5 py-1.5 text-[10px] text-[#0DF5C4] transition hover:bg-[#0DF5C4]/10 sm:flex"
+                    className="editor-toolbar-button hidden items-center gap-1 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/[0.06] px-2.5 py-1.5 text-[10px] text-[#0DF5C4] transition hover:bg-[#0DF5C4]/10 sm:flex"
                   >
                     Show Changes ({dirtyFiles.length})
                   </button>
@@ -1840,7 +2459,7 @@ export const EditorWorkbench: React.FC = () => {
                   onClick={handleSaveFile}
                   disabled={isSaving || !activeFile?.isDirty}
                   title="Save changes (Ctrl+S)"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#6C63FF]/30 bg-[#6C63FF]/[0.10] px-2.5 py-1.5 text-[10px] font-semibold text-[#c8c4ff] transition hover:bg-[#6C63FF]/20 disabled:opacity-40 sm:text-[11px]"
+                  className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-[#6C63FF]/30 bg-[#6C63FF]/[0.10] px-2.5 py-1.5 text-[10px] font-semibold text-[#c8c4ff] transition hover:bg-[#6C63FF]/20 disabled:opacity-40 sm:text-[11px]"
                 >
                   <span>{isSaving ? "Saving..." : "Save"}</span>
                   <kbd className="hidden text-[9px] text-[#8f89db] lg:inline">
@@ -1850,7 +2469,7 @@ export const EditorWorkbench: React.FC = () => {
                 <button
                   onClick={handleRunCode}
                   disabled={isRunningCode || !activeFile}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#0DF5C4]/35 bg-[#0DF5C4]/[0.10] px-3 py-1.5 text-[10px] font-semibold text-[#0DF5C4] transition hover:bg-[#0DF5C4]/[0.18] active:scale-[.98] disabled:opacity-40 sm:text-[11px]"
+                  className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-[#0DF5C4]/35 bg-[#0DF5C4]/[0.10] px-3 py-1.5 text-[10px] font-semibold text-[#0DF5C4] transition hover:bg-[#0DF5C4]/[0.18] active:scale-[.98] disabled:opacity-40 sm:text-[11px]"
                 >
                   <Play
                     className={`h-3 w-3 fill-current ${isRunningCode ? "animate-spin" : ""}`}
@@ -1861,7 +2480,7 @@ export const EditorWorkbench: React.FC = () => {
                   onClick={() => setIsAiDrawerOpen((prev) => !prev)}
                   title="Toggle AI Assistant"
                   aria-label="Toggle AI Assistant"
-                  className="flex items-center gap-1 rounded-lg p-1.5 text-[#8e8ea8] transition hover:bg-white/[0.06] hover:text-white"
+                  className="editor-toolbar-button flex items-center gap-1 rounded-lg p-1.5 text-[#8e8ea8] transition hover:bg-white/[0.06] hover:text-white"
                 >
                   <Bot className="h-4 w-4" style={{ color: theme.primary }} />
                   <span className="hidden text-[11px] md:inline">AI</span>
@@ -1871,6 +2490,20 @@ export const EditorWorkbench: React.FC = () => {
                     <PanelRightOpen className="ml-0.5 h-3.5 w-3.5 text-[#6C63FF]" />
                   )}
                 </button>
+                <IconButton
+                  label="Open editor settings"
+                  shortcut="Ctrl+,"
+                  onClick={() => setIsSettingsOpen(true)}
+                >
+                  <Settings2 aria-hidden="true" />
+                </IconButton>
+                <IconButton
+                  label="Keyboard shortcuts"
+                  shortcut="?"
+                  onClick={() => setIsShortcutsOpen(true)}
+                >
+                  <CircleHelp aria-hidden="true" />
+                </IconButton>
               </div>
             </>
           )}
@@ -1878,10 +2511,12 @@ export const EditorWorkbench: React.FC = () => {
       </header>
 
       {/* Main 3-Pane Body */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="editor-workbench-panes flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {/* Left Pane: Files Explorer Drawer (Collapsible) */}
         {isFileTreeOpen && (
-          <div className="relative w-64 bg-[#0d0d15] border-r border-[#1c1c2b] flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto">
+          <div
+            className="editor-explorer-pane relative bg-[#0d0d15] border-r border-[#1c1c2b] flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto"
+          >
             {searchMode === "workspace" && (
               <section className="absolute inset-0 z-10 flex flex-col overflow-hidden border-r border-[#a5a1ff]/15 bg-gradient-to-b from-[#171724] via-[#10101a] to-[#0c0c13] shadow-[18px_0_45px_rgba(0,0,0,0.32),inset_-1px_0_0_rgba(165,161,255,0.08)]">
                 <div className="border-b border-white/[0.07] bg-gradient-to-r from-[#6C63FF]/[0.10] via-transparent to-[#0DF5C4]/[0.04] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)]">
@@ -1999,7 +2634,7 @@ export const EditorWorkbench: React.FC = () => {
                 <div className="flex items-center gap-2 truncate">
                   <div className="w-2.5 h-2.5 rounded bg-[#0DF5C4] shrink-0" />
                   <span className="font-bold text-white text-xs truncate">
-                    {loadedProjectName}
+                    {loadedProjectName || "Local workspace"}
                   </span>
                 </div>
 
@@ -2021,6 +2656,7 @@ export const EditorWorkbench: React.FC = () => {
                   <button
                     onClick={() => void openNativeFile()}
                     title="Open Local File"
+                    aria-label="Open Local File"
                     className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
                   >
                     <FolderOpen className="w-3.5 h-3.5" />
@@ -2029,9 +2665,24 @@ export const EditorWorkbench: React.FC = () => {
               </div>
 
               {/* Dynamic File List */}
-              <div className="space-y-1">
+              <div className="editor-explorer-tree space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-[#63637e] uppercase tracking-wider px-1">
                   <span>WORKSPACE FILES ({treeFiles.length})</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    value={explorerFilter}
+                    onChange={(event) => setExplorerFilter(event.target.value)}
+                    className="ide-input min-w-0 flex-1"
+                    placeholder="Filter files"
+                    aria-label="Filter workspace files"
+                  />
+                  <IconButton
+                    label="Collapse all folders"
+                    onClick={() => setCollapsedFolders(new Set(treeFolders))}
+                  >
+                    <ChevronRight aria-hidden="true" />
+                  </IconButton>
                 </div>
 
                 <button
@@ -2052,6 +2703,27 @@ export const EditorWorkbench: React.FC = () => {
                     >
                       + Create First File
                     </button>
+                  </div>
+                ) : explorerFilter.trim() ? (
+                  <div className="space-y-1">
+                    {treeFiles
+                      .filter((file) =>
+                        file.path
+                          .toLowerCase()
+                          .includes(explorerFilter.trim().toLowerCase()),
+                      )
+                      .map((file) => (
+                        <button
+                          type="button"
+                          key={file.id}
+                          onClick={() => openFileInEditor(file)}
+                          className={`flex w-full min-w-0 items-center gap-2 truncate rounded px-2 py-1.5 text-left ${activeFile?.id === file.id ? "editor-explorer-active" : "text-[#8b8ba8] hover:bg-[#141420]"}`}
+                          title={file.path}
+                        >
+                          <span className="editor-file-type">{file.iconType}</span>
+                          <span className="truncate">{file.path}</span>
+                        </button>
+                      ))}
                   </div>
                 ) : (
                   renderExplorerContents()
@@ -2133,7 +2805,7 @@ export const EditorWorkbench: React.FC = () => {
             </div>
 
             {/* Bottom Actions */}
-            <div className="p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] text-[#63637e]">
+            <div className="editor-explorer-footer p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] text-[#63637e]">
               <button
                 onClick={requestCloseProject}
                 className="hover:text-white"
@@ -2144,31 +2816,94 @@ export const EditorWorkbench: React.FC = () => {
             </div>
           </div>
         )}
+        {isFileTreeOpen && (
+          <div
+            className="ide-resizer ide-resizer-vertical editor-explorer-resizer"
+            role="separator"
+            tabIndex={0}
+            aria-label="Resize Explorer panel"
+            aria-orientation="vertical"
+            aria-valuenow={explorerWidth}
+            aria-valuemin={180}
+            aria-valuemax={360}
+            onPointerDown={(event) => {
+              explorerResizeStartRef.current = {
+                pointerX: event.clientX,
+                width: explorerWidth,
+              };
+              setIsResizingExplorer(true);
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onDoubleClick={() => setExplorerWidth(256)}
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              setExplorerWidth((width) =>
+                Math.max(180, Math.min(360, width + (event.key === "ArrowRight" ? 12 : -12))),
+              );
+            }}
+          />
+        )}
 
         {/* Center Pane: Active Code Editor */}
-        <div className="flex-1 flex flex-col bg-[#09090f] overflow-hidden">
+        <div className="editor-center-pane flex min-h-0 min-w-0 flex-1 flex-col bg-[#09090f] overflow-hidden">
           {/* Tabs Bar */}
-          <div className="h-9 bg-[#0c0c14] border-b border-[#1c1c2b] flex items-center justify-between overflow-x-auto px-2 shrink-0">
-            <div className="flex items-center gap-1">
+          <div className="editor-tabs-bar h-9 bg-[#0c0c14] border-b border-[#1c1c2b] flex items-center justify-between px-2 shrink-0">
+            <div className="editor-tabs-scroll flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
               {openFiles.length === 0 ? (
                 <span className="text-[11px] text-[#63637e] font-mono px-2">
                   No files open
                 </span>
               ) : (
-                openFiles.map((file) => (
+                sortedOpenFiles.map((file) => (
                   <div
                     key={file.id}
                     onClick={() => setActiveFileId(file.id)}
-                    className={`group h-8 px-3 rounded-t-lg flex items-center gap-2 text-xs font-mono border-t-2 transition-colors cursor-pointer ${
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("text/plain", file.id);
+                      event.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const fromFileId = event.dataTransfer.getData("text/plain");
+                      if (fromFileId) reorderOpenFiles(fromFileId, file.id);
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setTabMenu({ fileId: file.id, x: event.clientX, y: event.clientY });
+                    }}
+                    onKeyDown={(event) => {
+                      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+                      event.preventDefault();
+                      const nextIndex = sortedOpenFiles.findIndex((tab) => tab.id === file.id) +
+                        (event.key === "ArrowRight" ? 1 : -1);
+                      const next = sortedOpenFiles[(nextIndex + sortedOpenFiles.length) % sortedOpenFiles.length];
+                      if (next) {
+                        setActiveFileId(next.id);
+                        document.getElementById(`editor-tab-${next.id}`)?.focus();
+                      }
+                    }}
+                    id={`editor-tab-${file.id}`}
+                    role="tab"
+                    aria-selected={activeFile?.id === file.id}
+                    tabIndex={activeFile?.id === file.id ? 0 : -1}
+                    aria-label={`${file.name}${pinnedTabs.includes(file.id) ? ", pinned" : ""}`}
+                    title={file.path}
+                    className={`editor-file-tab group h-8 px-3 rounded-t-lg flex items-center gap-2 text-xs font-mono border-t-2 transition-colors cursor-pointer ${
                       activeFile?.id === file.id
                         ? "bg-[#09090f] text-white font-semibold border-[#6C63FF]"
                         : "bg-[#11111a] text-[#80809c] border-transparent hover:text-white"
                     }`}
                   >
-                    <span className="text-[10px] px-1 rounded bg-white/10 font-bold uppercase">
+                    <span className="editor-file-type text-[10px] px-1 rounded bg-white/10 font-bold uppercase">
                       {file.iconType}
                     </span>
-                    <span>{file.name}</span>
+                    <span className="editor-file-tab-name">{file.name}</span>
+                    {pinnedTabs.includes(file.id) && (
+                      <Pin className="h-3 w-3 text-[#0DF5C4]" aria-label="Pinned tab" />
+                    )}
                     {file.isDirty && (
                       <span
                         title="Unsaved changes"
@@ -2181,6 +2916,9 @@ export const EditorWorkbench: React.FC = () => {
                         e.stopPropagation();
                         closeFileFromEditor(file.id);
                       }}
+                      type="button"
+                      title={`Close ${file.name}`}
+                      aria-label={`Close ${file.name}`}
                       className="opacity-0 group-hover:opacity-100 hover:text-white text-[#63637e] p-0.5 rounded"
                     >
                       <X className="w-3 h-3" />
@@ -2190,14 +2928,26 @@ export const EditorWorkbench: React.FC = () => {
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-[#63637e] pr-2">
-              <Split className="w-3.5 h-3.5 cursor-pointer hover:text-white" />
-              <Columns className="w-3.5 h-3.5 cursor-pointer hover:text-white" />
+            <div className="editor-tabs-actions flex items-center gap-2 text-xs text-[#63637e] pr-2">
+              <IconButton
+                label={isSplitEditor ? "Close split editor" : "Split editor"}
+                onClick={() => setIsSplitEditor((split) => !split)}
+                aria-pressed={isSplitEditor}
+              >
+                <Split aria-hidden="true" />
+              </IconButton>
+              <IconButton
+                label={isZenMode ? "Exit focus mode" : "Focus editor"}
+                shortcut="Ctrl+Shift+Z"
+                onClick={() => setIsZenMode((mode) => !mode)}
+              >
+                <Columns aria-hidden="true" />
+              </IconButton>
             </div>
           </div>
 
           {/* Interactive Code Editor Area */}
-          <div className="flex-1 flex overflow-hidden relative font-mono text-xs">
+          <div className={`editor-code-area relative flex min-h-[180px] flex-1 overflow-hidden font-mono text-xs ${isSplitEditor ? "editor-split-view" : ""}`}>
             {searchMode === "file" && (
               <section className="absolute right-4 top-3 z-30 w-[min(390px,calc(100%-2rem))] overflow-hidden rounded-2xl border border-white/[0.13] bg-gradient-to-br from-[#191923]/[0.99] via-[#11111b]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_28px_80px_rgba(0,0,0,0.72),0_10px_34px_rgba(108,99,255,0.14),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl">
                 <div className="h-px bg-gradient-to-r from-[#0DF5C4]/70 via-[#6C63FF]/60 to-[#FF9E64]/40" />
@@ -2419,198 +3169,120 @@ export const EditorWorkbench: React.FC = () => {
               </div>
             ) : (
               <>
-                {/* Line Numbers */}
-                <div
-                  aria-label="Line numbers and change markers"
-                  className="w-14 bg-[#09090f] py-4 px-2 text-right select-none border-r border-[#181824] shrink-0"
-                >
-                  {currentCode.split("\n").map((_, index) => (
-                    <div
-                      key={index}
-                      className={`flex h-5 items-center justify-end gap-1 text-[11px] ${
-                        activeFileChanges.changedLines.has(index)
-                          ? activeFileChanges.changedLines.get(index) ===
-                            "added"
-                            ? "text-[#0DF5C4]"
-                            : "text-[#fbbf24]"
-                          : "text-[#45455c]"
-                      }`}
-                    >
-                      {activeFileChanges.removedAtLine === index && (
-                        <span
-                          aria-label="Lines removed"
-                          title="Lines removed"
-                          className="font-bold text-[#f87171]"
-                        >
-                          −
-                        </span>
-                      )}
-                      {activeFileChanges.changedLines.has(index) && (
-                        <span
-                          aria-label={
-                            activeFileChanges.changedLines.get(index) ===
-                            "added"
-                              ? "Added line"
-                              : "Modified line"
-                          }
-                          title={
-                            activeFileChanges.changedLines.get(index) ===
-                            "added"
-                              ? "Added line"
-                              : "Modified line"
-                          }
-                          className="font-bold"
-                        >
-                          {activeFileChanges.changedLines.get(index) === "added"
-                            ? "+"
-                            : "~"}
-                        </span>
-                      )}
-                      <span>{index + 1}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Editable Code Buffer */}
-                <div className="flex-1 relative overflow-hidden bg-[#09090f]">
+                <div className="relative flex-1 overflow-hidden bg-[#09090f]">
                   {currentCode.length === 0 && !isEditorHintDismissed && (
-                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
-                      <section className="pointer-events-auto relative w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.11] bg-gradient-to-br from-[#1a1a26]/[0.97] via-[#12121b]/[0.98] to-[#0d0d14]/[0.99] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.58),0_8px_34px_rgba(108,99,255,0.12),inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl sm:p-6">
-                        <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-[#9b95ff]/80 to-transparent" />
+                    <div className="editor-empty-hint" aria-label="Editor tips">
+                      <button
+                        type="button"
+                        className="editor-empty-hint-action"
+                        onClick={() => {
+                          setIsAiDrawerOpen(true);
+                          window.requestAnimationFrame(() =>
+                            aiQueryInputRef.current?.focus(),
+                          );
+                        }}
+                      >
+                        Generate code
+                      </button>
+                      <span className="editor-empty-hint-shortcut"> · <Kbd>Ctrl+I</Kbd> · </span>
+                      <span className="editor-language-hint" ref={languagePickerRef}>
                         <button
                           type="button"
-                          onClick={() => dismissEditorHint()}
-                          aria-label="Dismiss editor tips"
-                          title="Dismiss"
-                          className="absolute right-3 top-3 rounded-lg p-1.5 text-[#77778f] transition hover:bg-white/[0.06] hover:text-white"
+                          className="editor-empty-hint-action"
+                          aria-haspopup="listbox"
+                          aria-expanded={isLanguagePickerOpen}
+                          onClick={() =>
+                            setIsLanguagePickerOpen((open) => !open)
+                          }
                         >
-                          <X className="h-3.5 w-3.5" />
+                          select a Language
                         </button>
-                        <div className="flex items-start gap-3">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#a5a1ff]/20 bg-gradient-to-br from-[#6C63FF]/20 to-[#0DF5C4]/[0.06] text-[#aaa5ff] shadow-[0_6px_20px_rgba(108,99,255,0.12)]">
-                            <Code2 className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0 pt-0.5">
-                            <h2 className="text-sm font-semibold tracking-tight text-[#f0f0f7]">
-                              A clean canvas
-                            </h2>
-                            <p className="mt-1.5 text-[11px] leading-relaxed text-[#9999ae]">
-                              Start typing, or ask AI to create a first draft.
-                              Language is detected from the file extension.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mt-5 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsAiDrawerOpen(true);
-                              window.requestAnimationFrame(() =>
-                                aiQueryInputRef.current?.focus(),
-                              );
-                            }}
-                            className="inline-flex items-center gap-2 rounded-lg border border-[#a5a1ff]/25 bg-[#6C63FF]/[0.13] px-3 py-2 text-[10px] font-semibold text-[#d3d0ff] transition hover:border-[#a5a1ff]/45 hover:bg-[#6C63FF]/[0.2] hover:shadow-[0_6px_20px_rgba(108,99,255,0.16)]"
+                        {isLanguagePickerOpen && (
+                          <span
+                            className="editor-language-menu"
+                            role="listbox"
+                            aria-label="Select editor language"
                           >
-                            <Sparkles className="h-3.5 w-3.5" />
-                            Generate with AI
-                            <kbd className="rounded border border-white/[0.1] bg-black/20 px-1 py-0.5 text-[9px] text-[#aaa5cf]">
-                              Ctrl I
-                            </kbd>
-                          </button>
-                          <span className="text-[10px] text-[#77778d]">
-                            or start typing
+                            {EDITOR_LANGUAGES.map((language, index) => (
+                              <button
+                                key={language.id}
+                                ref={
+                                  index === 0 ? firstLanguageOptionRef : null
+                                }
+                                type="button"
+                                role="option"
+                                aria-selected={
+                                  activeFile?.language === language.id
+                                }
+                                className="editor-language-option"
+                                onClick={() =>
+                                  selectEditorLanguage(language.id)
+                                }
+                              >
+                                {language.name}
+                              </button>
+                            ))}
                           </span>
-                        </div>
-                        <div className="mt-4 flex items-center justify-between border-t border-white/[0.06] pt-3">
-                          <span className="text-[9px] text-[#68687e]">
-                            This tip disappears when you start coding
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => dismissEditorHint(true)}
-                            className="text-[9px] font-medium text-[#85859d] transition hover:text-white"
-                          >
-                            Don&apos;t show again
-                          </button>
-                        </div>
-                      </section>
+                        )}
+                      </span>
+                      <span className="editor-empty-hint-shortcut"> · <Kbd>Ctrl+K M</Kbd> · </span>
+                      <button
+                        type="button"
+                        className="editor-empty-hint-action"
+                        onClick={() => dismissEditorHint(true)}
+                      >
+                        dismiss
+                      </button>
                     </div>
                   )}
-                  {searchMode === "file" && searchQuery.length > 0 && (
-                    <pre
-                      ref={editorHighlightRef}
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-y-0 left-0 right-4 z-0 overflow-hidden p-4 font-mono text-xs leading-5 text-transparent whitespace-pre-wrap break-words"
-                      style={{
-                        fontFamily: "monospace",
-                        fontSize: "0.75rem",
-                        lineHeight: "1.25rem",
-                        letterSpacing: "normal",
-                        tabSize: 2,
-                        whiteSpace: "pre-wrap",
-                        overflowWrap: "break-word",
-                      }}
-                    >
-                      {(() => {
-                        const fragments: React.ReactNode[] = [];
-                        let cursor = 0;
-                        activeFileMatches.forEach((match) => {
-                          if (match.start > cursor) {
-                            fragments.push(
-                              currentCode.slice(cursor, match.start),
-                            );
-                          }
-                          fragments.push(
-                            <mark
-                              key={`${match.start}-${match.end}`}
-                              className="rounded-sm"
-                              style={{
-                                backgroundColor:
-                                  match.start === activeFileMatch?.start
-                                    ? "rgba(255, 140, 0, 0.6)"
-                                    : "rgba(255, 213, 0, 0.35)",
-                                color: "transparent",
-                                boxShadow:
-                                  match.start === activeFileMatch?.start
-                                    ? "0 0 0 1px rgba(255, 140, 0, 0.6)"
-                                    : undefined,
-                              }}
-                            >
-                              {currentCode.slice(match.start, match.end)}
-                            </mark>,
-                          );
-                          cursor = match.end;
-                        });
-                        fragments.push(currentCode.slice(cursor));
-                        return fragments;
-                      })()}
-                    </pre>
-                  )}
-                  <textarea
-                    ref={editorTextAreaRef}
+                  <Editor
+                    path={activeFile.path}
+                    language={getMonacoLanguageId(activeFile.language)}
                     value={currentCode}
-                    onChange={(e) => {
+                    theme={MONACO_THEME}
+                    beforeMount={handleMonacoBeforeMount}
+                    onMount={handleMonacoMount}
+                    onChange={(value) => {
                       replaceUndoRef.current = null;
-                      updateFileContent(activeFile.id, e.target.value);
+                      updateFileContent(activeFile.id, value ?? "");
                     }}
-                    onScroll={(event) => {
-                      const highlights = editorHighlightRef.current;
-                      if (!highlights) return;
-                      highlights.scrollTop = event.currentTarget.scrollTop;
-                      highlights.scrollLeft = event.currentTarget.scrollLeft;
-                    }}
-                    spellCheck={false}
-                    className="absolute inset-0 z-10 h-full w-full resize-none overflow-auto bg-transparent p-4 font-mono text-xs leading-5 text-[#dcdceb] focus:outline-none selection:bg-[#8b82ff]/55 selection:text-white select-text"
-                    style={{
-                      fontFamily: "monospace",
-                      fontSize: "0.75rem",
-                      lineHeight: "1.25rem",
-                      letterSpacing: "normal",
-                      tabSize: 2,
-                      whiteSpace: "pre-wrap",
-                      caretColor: "#f4f4ff",
+                    keepCurrentModel
+                    saveViewState
+                    width={isSplitEditor ? "50%" : "100%"}
+                    height="100%"
+                    className="editor-monaco-host"
+                    options={{
+                      automaticLayout: true,
+                      fontFamily: editorSettings.fontFamily,
+                      fontSize: editorSettings.fontSize,
+                      lineHeight: editorSettings.lineHeight,
+                      tabSize: editorSettings.tabSize,
+                      minimap: { enabled: editorSettings.minimap },
+                      scrollBeyondLastLine: false,
+                      smoothScrolling: true,
+                      bracketPairColorization: { enabled: true },
+                      guides: {
+                        indentation: true,
+                        bracketPairs: true,
+                        highlightActiveIndentation: true,
+                      },
+                      wordWrap: editorSettings.wordWrap ? "on" : "off",
+                      glyphMargin: true,
+                      renderLineHighlight: "line",
+                      padding: { top: 16, bottom: 16 },
+                      cursorSmoothCaretAnimation: "on",
+                      fontLigatures: true,
+                      contextmenu: true,
                     }}
                   />
+                  {isSplitEditor && (
+                    <pre
+                      className="editor-split-preview"
+                      aria-label="Split editor preview"
+                    >
+                      {currentCode}
+                    </pre>
+                  )}
                 </div>
               </>
             )}
@@ -2637,34 +3309,195 @@ export const EditorWorkbench: React.FC = () => {
             </div>
           )}
 
+          <TerminalPanel
+            colorMode={colorMode}
+            isOpen={isTerminalOpen}
+            onClose={() => setIsTerminalOpen(false)}
+            primaryColor={theme.primary}
+            projectName={loadedProjectName}
+          />
+
           {/* Bottom Editor Status Bar */}
-          <div className="h-6 bg-[#0c0c14] border-t border-[#181824] px-3 flex items-center justify-between text-[11px] font-mono text-[#6c6c88] shrink-0">
-            <div className="flex items-center gap-4">
-              <span className="text-[#0DF5C4] flex items-center gap-1">
-                <GitBranch className="w-3 h-3" />
+          <div className="editor-status-bar h-6 bg-[#0c0c14] border-t border-[#181824] px-3 flex items-center justify-between text-[11px] font-mono text-[#6c6c88] shrink-0">
+            <div className="editor-status-group editor-status-left">
+              <button
+                type="button"
+                className="editor-status-branch text-[#0DF5C4] flex items-center gap-1"
+                title="Current branch (preview)"
+                onClick={() => addToast({ type: "info", title: "Local preview branch", description: "Git integration will be connected by the backend." })}
+              >
+                <GitBranch className="h-3 w-3" />
                 local*
+              </button>
+              <span className="editor-status-position">
+                Ln {editorCursor.line}, Col {editorCursor.column}
               </span>
-              <span>
-                {activeFile
-                  ? `${currentCode.split("\n").length} Lines`
-                  : "0 Lines"}
+              <span className="editor-status-lines">
+                {activeFile ? `${editorDocumentStats.lines} Lines` : "0 Lines"}
               </span>
-              <span>{currentCode.length} Chars</span>
+              {editorSelectionCount > 0 && (
+                <span className="editor-status-selection">
+                  {editorSelectionCount} Selected
+                </span>
+              )}
+              <span className="editor-status-chars">
+                {editorDocumentStats.chars} Chars
+              </span>
             </div>
 
-            <div className="flex items-center gap-4">
-              <span>Port: 3000</span>
-              <span>UTF-8</span>
-              <span className="text-white uppercase">
-                {activeFile?.language || "Plain Text"}
-              </span>
+            <div className="editor-status-group editor-status-right">
+              <button
+                type="button"
+                className="editor-status-port"
+                title="Open integrated terminal"
+                onClick={() => setIsTerminalOpen(true)}
+              >
+                Port: 3000
+              </button>
+              <button
+                type="button"
+                className="editor-status-encoding"
+                title="Encoding: UTF-8"
+                onClick={() => addToast({ type: "info", title: "UTF-8 encoding", description: "Encoding selection is a UI preview." })}
+              >
+                UTF-8
+              </button>
+              <Dropdown
+                ref={statusLanguagePickerRef}
+                label="Language mode"
+                className="editor-status-language-dropdown"
+              >
+                <button
+                  type="button"
+                  ref={statusLanguageTriggerRef}
+                  className="editor-status-language"
+                  aria-label="Change language mode"
+                  aria-haspopup="listbox"
+                  aria-expanded={isStatusLanguagePickerOpen}
+                  title="Change language mode"
+                  disabled={!activeFile}
+                  onClick={openStatusLanguagePicker}
+                >
+                  {EDITOR_LANGUAGES.find(
+                    (language) => language.id === activeFile?.language,
+                  )?.name || "Plain Text"}
+                </button>
+                {isStatusLanguagePickerOpen && (
+                  <div
+                    className="editor-status-language-menu"
+                    role="listbox"
+                    aria-label="Select language"
+                    style={{
+                      bottom: statusLanguageMenuPosition.bottom,
+                      left: statusLanguageMenuPosition.left,
+                      maxHeight: statusLanguageMenuPosition.maxHeight,
+                    }}
+                  >
+                    <input
+                      ref={statusLanguageSearchRef}
+                      className="editor-status-language-search"
+                      type="search"
+                      aria-label="Search languages"
+                      placeholder="Search languages"
+                      value={statusLanguageSearch}
+                      onChange={(event) => {
+                        setStatusLanguageSearch(event.target.value);
+                        setStatusLanguageHighlight(0);
+                      }}
+                      onKeyDown={handleStatusLanguageKeyDown}
+                    />
+                    <div className="editor-status-language-options">
+                      {filteredStatusLanguages.length ? (
+                        filteredStatusLanguages.map((language, index) => (
+                          <button
+                            key={language.id}
+                            ref={(element) => {
+                              statusLanguageOptionRefs.current[index] = element;
+                            }}
+                            type="button"
+                            role="option"
+                            aria-selected={activeFile?.language === language.id}
+                            className={`editor-status-language-option ${
+                              statusLanguageHighlight === index ? "is-highlighted" : ""
+                            }`}
+                            onMouseEnter={() => setStatusLanguageHighlight(index)}
+                            onClick={() => {
+                              if (activeFile) selectEditorLanguage(language.id);
+                              setIsStatusLanguagePickerOpen(false);
+                            }}
+                          >
+                            <span>{language.name}</span>
+                            {activeFile?.language === language.id && (
+                              <Check aria-hidden="true" />
+                            )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="editor-status-language-empty">
+                          No languages found
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </Dropdown>
+              <button
+                type="button"
+                className="editor-status-notifications"
+                aria-label={`Open notifications (${toasts.length})`}
+                title="Open notifications"
+                onClick={() => setIsNotificationCenterOpen(true)}
+              >
+                <Bell className="h-3 w-3" />
+                {toasts.length > 0 && <span>{toasts.length}</span>}
+              </button>
+              <button
+                type="button"
+                className="editor-status-settings"
+                aria-label="Open editor settings"
+                title="Editor settings (Ctrl+,)"
+                onClick={() => setIsSettingsOpen(true)}
+              >
+                <Settings2 className="h-3 w-3" />
+              </button>
             </div>
           </div>
         </div>
 
         {/* Right Pane: AI Assistant Drawer (Collapsible) */}
         {isAiDrawerOpen && (
-          <div className="w-80 lg:w-96 bg-[#0c0c14] border-l border-[#1c1c2b] flex flex-col justify-between shrink-0 font-sans text-xs overflow-hidden">
+          <div
+            className={`editor-ai-drawer-shell ${isResizingAiPanel ? "editor-ai-drawer-resizing" : ""}`}
+            style={{ width: aiPanelWidth }}
+          >
+            <div
+              className="editor-ai-resize-handle"
+              role="separator"
+              tabIndex={0}
+              aria-label="Resize AI Assistant panel"
+              aria-orientation="vertical"
+              aria-valuenow={aiPanelWidth}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                aiPanelResizeStartRef.current = {
+                  pointerX: event.clientX,
+                  width: aiPanelWidth,
+                };
+                setIsResizingAiPanel(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight")
+                  return;
+                event.preventDefault();
+                setAiPanelWidth((width) =>
+                  Math.max(
+                    280,
+                    Math.min(520, width + (event.key === "ArrowLeft" ? 12 : -12)),
+                  ),
+                );
+              }}
+            />
+            <div className="editor-ai-panel bg-[#0c0c14] border-l border-[#1c1c2b] flex flex-col justify-between shrink-0 font-sans text-xs overflow-hidden">
             {/* AI Header */}
             <div className="p-3 border-b border-[#1c1c2b] flex items-center justify-between bg-[#0e0e16]">
               <div className="flex items-center gap-2">
@@ -2684,15 +3517,20 @@ export const EditorWorkbench: React.FC = () => {
                 </div>
               </div>
 
-              <X
+              <button
+                type="button"
                 onClick={() => setIsAiDrawerOpen(false)}
-                className="w-4 h-4 cursor-pointer hover:text-white text-[#73738e]"
-              />
+                title="Close AI Assistant"
+                aria-label="Close AI Assistant"
+                className="editor-ai-close"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
             {/* AI Chat Stream */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 select-text">
-              <div className="px-2.5 py-1 rounded-lg bg-[#141420] border border-[#232336] text-[11px] font-mono text-[#8b8ba8] flex items-center gap-1.5">
+              <div className="editor-ai-context px-2.5 py-1 rounded-lg bg-[#141420] border border-[#232336] text-[11px] font-mono text-[#8b8ba8] flex items-center gap-1.5">
                 <FileCode className="w-3 h-3 text-[#0DF5C4]" />
                 <span>
                   Context: {activeFile ? activeFile.name : "Workspace"}
@@ -2700,7 +3538,7 @@ export const EditorWorkbench: React.FC = () => {
               </div>
 
               {aiHistory.length === 0 ? (
-                <div className="p-4 text-center text-xs text-[#71718c] space-y-2">
+                <div className="editor-ai-empty-state p-4 text-center text-xs text-[#71718c] space-y-2">
                   <p>
                     Ask anything about your code or request functions,
                     optimizations, and bug fixes.
@@ -2721,7 +3559,25 @@ export const EditorWorkbench: React.FC = () => {
                         <pre className="p-3 text-[11px] text-[#d6d6e8] leading-relaxed overflow-x-auto">
                           <code>{item.code}</code>
                         </pre>
-                        <div className="p-2 border-t border-[#1a1a28] flex justify-end">
+                        <div className="p-2 border-t border-[#1a1a28] flex justify-between">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard
+                                .writeText(item.code || "")
+                                .then(() => addToast({ type: "success", title: "Code copied" }))
+                                .catch((error: unknown) =>
+                                  addToast({
+                                    type: "error",
+                                    title: "Could not copy code",
+                                    description: error instanceof Error ? error.message : "Clipboard access denied.",
+                                  }),
+                                );
+                            }}
+                            className="px-3 py-1 rounded-lg text-xs text-[#9a9cac] hover:bg-white/[0.06]"
+                          >
+                            Copy code
+                          </button>
                           <button
                             onClick={() => applyDiffToActiveFile(item.code!)}
                             className="px-3 py-1 rounded-lg text-xs font-semibold text-[#09090e]"
@@ -2749,26 +3605,248 @@ export const EditorWorkbench: React.FC = () => {
             {/* Bottom Prompt Input */}
             <div className="p-3 border-t border-[#1c1c2b] bg-[#0e0e16]">
               <form onSubmit={handleSendAi} className="relative">
-                <input
+                {aiHistory.length === 0 && (
+                  <div className="editor-ai-suggestions" aria-label="Suggested prompts">
+                    {[
+                      "Explain this file",
+                      "Find potential bugs",
+                      "Suggest a refactor",
+                    ].map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => setAiQuery(prompt)}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <textarea
                   ref={aiQueryInputRef}
-                  type="text"
                   placeholder="Ask AI to write or fix code..."
                   value={aiQuery}
                   onChange={(e) => setAiQuery(e.target.value)}
-                  className="w-full pl-3 pr-10 py-2.5 bg-[#141422] border border-[#242438] rounded-xl text-xs text-white placeholder-[#595975] focus:outline-none focus:border-[#6C63FF]"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  aria-label="Ask AI to write or fix code"
+                  className="editor-ai-input w-full pl-3 pr-10 py-2.5 bg-[#141422] border border-[#242438] rounded-xl text-xs text-white placeholder-[#595975] focus:outline-none focus:border-[#6C63FF]"
                 />
                 <button
                   type="submit"
-                  className="absolute right-2 top-2 p-1.5 rounded-lg text-[#09090e]"
+                  aria-label="Send prompt to AI"
+                  title="Send prompt"
+                  className="editor-ai-send absolute right-2 top-2 p-1.5 rounded-lg text-[#09090e]"
                   style={{ backgroundColor: theme.primary }}
                 >
                   <Send className="w-3 h-3 text-[#09090e]" />
                 </button>
               </form>
             </div>
+            </div>
           </div>
         )}
       </div>
+      {tabMenu && (
+        <div
+          className="editor-tab-menu"
+          style={{ left: Math.min(tabMenu.x, window.innerWidth - 190), top: Math.min(tabMenu.y, window.innerHeight - 210) }}
+          role="menu"
+          aria-label="Editor tab actions"
+          onMouseLeave={() => setTabMenu(null)}
+        >
+          {[
+            {
+              label: pinnedTabs.includes(tabMenu.fileId) ? "Unpin tab" : "Pin tab",
+              action: () =>
+                setPinnedTabs((previous) =>
+                  previous.includes(tabMenu.fileId)
+                    ? previous.filter((id) => id !== tabMenu.fileId)
+                    : [...previous, tabMenu.fileId],
+                ),
+            },
+            {
+              label: "Close",
+              action: () => closeFileFromEditor(tabMenu.fileId),
+            },
+            {
+              label: "Close others",
+              action: () => closeOtherFilesFromEditor(tabMenu.fileId),
+            },
+            { label: "Close all", action: closeAllFilesFromEditor },
+            {
+              label: "Copy path",
+              action: () => {
+                const file = openFiles.find((item) => item.id === tabMenu.fileId);
+                if (!file) return;
+                void navigator.clipboard
+                  .writeText(file.path)
+                  .then(() => addToast({ type: "success", title: "Path copied" }))
+                  .catch((error: unknown) =>
+                    addToast({
+                      type: "error",
+                      title: "Could not copy path",
+                      description: error instanceof Error ? error.message : "Clipboard access denied.",
+                    }),
+                  );
+              },
+            },
+            {
+              label: "Rename",
+              action: () => {
+                const file = openFiles.find((item) => item.id === tabMenu.fileId);
+                if (file) {
+                  setRenamingFileId(file.id);
+                  setRenameValue(file.name);
+                  setSelectedFolder(file.path.split("/").slice(0, -1).join("/"));
+                  setIsFileTreeOpen(true);
+                }
+              },
+            },
+            {
+              label: "Duplicate",
+              action: () => {
+                const file = openFiles.find((item) => item.id === tabMenu.fileId);
+                if (!file) return;
+                const extension = file.name.includes(".")
+                  ? `.${file.name.split(".").pop()}`
+                  : "";
+                const baseName = extension ? file.name.slice(0, -extension.length) : file.name;
+                const parent = file.path.split("/").slice(0, -1).join("/");
+                void createNewFile(
+                  `${baseName}.copy${extension}`,
+                  [parent, `${baseName}.copy${extension}`].filter(Boolean).join("/"),
+                  fileContents[file.id] || "",
+                );
+              },
+            },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                item.action();
+                setTabMenu(null);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {isSettingsOpen && (
+        <Modal title="Editor settings" onClose={() => setIsSettingsOpen(false)}>
+          <div className="ide-settings-list">
+            <label>
+              <span>Editor font size <strong>{editorSettings.fontSize}px</strong></span>
+              <input
+                type="range"
+                min="10"
+                max="20"
+                value={editorSettings.fontSize}
+                onChange={(event) =>
+                  setEditorSettings((settings) => ({ ...settings, fontSize: Number(event.target.value) }))
+                }
+              />
+            </label>
+            <label>
+              <span>Line height <strong>{editorSettings.lineHeight}px</strong></span>
+              <input
+                type="range"
+                min="16"
+                max="32"
+                step="2"
+                value={editorSettings.lineHeight}
+                onChange={(event) =>
+                  setEditorSettings((settings) => ({ ...settings, lineHeight: Number(event.target.value) }))
+                }
+              />
+            </label>
+            <label>
+              <span>Code font</span>
+              <select
+                value={editorSettings.fontFamily}
+                onChange={(event) =>
+                  setEditorSettings((settings) => ({ ...settings, fontFamily: event.target.value }))
+                }
+              >
+                <option>JetBrains Mono</option>
+                <option>Consolas</option>
+                <option>monospace</option>
+              </select>
+            </label>
+            <label>
+              <span>Tab size</span>
+              <select
+                value={editorSettings.tabSize}
+                onChange={(event) =>
+                  setEditorSettings((settings) => ({ ...settings, tabSize: Number(event.target.value) }))
+                }
+              >
+                {[2, 4, 8].map((size) => <option key={size} value={size}>{size} spaces</option>)}
+              </select>
+            </label>
+            <div className="ide-setting-switch"><span>Word wrap</span><Switch checked={editorSettings.wordWrap} onChange={(wordWrap) => setEditorSettings((settings) => ({ ...settings, wordWrap }))} label="Word wrap" /></div>
+            <div className="ide-setting-switch"><span>Minimap preview</span><Switch checked={editorSettings.minimap} onChange={(minimap) => setEditorSettings((settings) => ({ ...settings, minimap }))} label="Minimap preview" /></div>
+            <div className="ide-setting-switch"><span>Compact density</span><Switch checked={editorSettings.density === "compact"} onChange={(compact) => setEditorSettings((settings) => ({ ...settings, density: compact ? "compact" : "comfortable" }))} label="Compact density" /></div>
+            <Button
+              type="button"
+              onClick={() => setIsShortcutsOpen(true)}
+              className="justify-self-start"
+            >
+              View keyboard shortcuts <Kbd>?</Kbd>
+            </Button>
+          </div>
+        </Modal>
+      )}
+      {isShortcutsOpen && (
+        <Modal title="Keyboard shortcuts" onClose={() => setIsShortcutsOpen(false)}>
+          <div className="ide-shortcuts-list">
+            {[
+              ["Command palette", "Ctrl/Cmd + K"],
+              ["Quick Open", "Ctrl/Cmd + P"],
+              ["Search in files", "Ctrl/Cmd + Shift + F"],
+              ["Save file", "Ctrl/Cmd + S"],
+              ["Open AI Assistant", "Ctrl/Cmd + I"],
+              ["Toggle terminal", "Ctrl + `"],
+              ["Focus mode", "Ctrl/Cmd + Shift + Z"],
+              ["Editor settings", "Ctrl/Cmd + ,"],
+              ["This shortcut guide", "Ctrl/Cmd + / or ?"],
+            ].map(([label, shortcut]) => (
+              <div key={label}><span>{label}</span><Kbd>{shortcut}</Kbd></div>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {isNotificationCenterOpen && (
+        <Modal title="Notifications" onClose={() => setIsNotificationCenterOpen(false)}>
+          <div className="ide-notification-list">
+            {toasts.length === 0 ? (
+              <p>No new notifications. Workspace status is clear.</p>
+            ) : (
+              toasts.map((toast) => (
+                <article key={toast.id}>
+                  <div>
+                    <strong>{toast.title}</strong>
+                    {toast.description && <p>{toast.description}</p>}
+                  </div>
+                  <IconButton
+                    label={`Dismiss ${toast.title}`}
+                    onClick={() => removeToast(toast.id)}
+                  >
+                    <X aria-hidden="true" />
+                  </IconButton>
+                </article>
+              ))
+            )}
+          </div>
+        </Modal>
+      )}
       {isClosePromptOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"

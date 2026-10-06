@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { useApp, PageType } from "../context/AppContext";
+import { useApp } from "../context/AppContext";
 import {
   Search,
+  FileCode,
   Box,
   GitFork,
   Rocket,
@@ -15,7 +16,19 @@ import {
   Radio,
   ArrowRight,
   Settings2,
+  Columns,
+  CircleHelp,
+  type LucideIcon,
 } from "lucide-react";
+
+interface PaletteCommand {
+  id: string;
+  label: string;
+  category: string;
+  shortcut?: string;
+  icon: LucideIcon;
+  action: () => void;
+}
 
 export const CommandPalette: React.FC = () => {
   const {
@@ -25,13 +38,22 @@ export const CommandPalette: React.FC = () => {
     triggerNewRelease,
     spinUpDevbox,
     theme,
+    treeFiles,
+    openFileInEditor,
+    isTerminalOpen,
+    setIsTerminalOpen,
+    setIsFileTreeOpen,
   } = useApp();
 
   const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!isCommandPaletteOpen) setQuery("");
+    if (!isCommandPaletteOpen) {
+      setQuery("");
+      setSelectedIndex(0);
+    }
   }, [isCommandPaletteOpen]);
 
   useEffect(() => {
@@ -51,7 +73,78 @@ export const CommandPalette: React.FC = () => {
 
   if (!isCommandPaletteOpen) return null;
 
-  const commands = [
+  const dispatchEditorAction = (action: string) => {
+    window.dispatchEvent(
+      new CustomEvent("devpulse:editor-action", { detail: action }),
+    );
+  };
+
+  const commands: PaletteCommand[] = [
+    {
+      id: "editor-quick-open",
+      label: "Quick Open",
+      category: "Editor",
+      shortcut: "Ctrl/Cmd + P",
+      icon: Search,
+      action: () => {
+        setPage("editor");
+        window.setTimeout(() => dispatchEditorAction("quick-open"), 0);
+      },
+    },
+    {
+      id: "editor-toggle-terminal",
+      label: isTerminalOpen ? "Hide Integrated Terminal" : "Show Integrated Terminal",
+      category: "Editor",
+      shortcut: "Ctrl + `",
+      icon: Terminal,
+      action: () => {
+        setPage("editor");
+        setIsTerminalOpen(!isTerminalOpen);
+      },
+    },
+    {
+      id: "editor-toggle-explorer",
+      label: "Toggle Explorer",
+      category: "Editor",
+      icon: Box,
+      action: () => {
+        setPage("editor");
+        setIsFileTreeOpen((open) => !open);
+      },
+    },
+    {
+      id: "editor-settings",
+      label: "Open Editor Settings",
+      category: "Editor",
+      shortcut: "Ctrl/Cmd + ,",
+      icon: Settings2,
+      action: () => {
+        setPage("editor");
+        window.setTimeout(() => dispatchEditorAction("settings"), 0);
+      },
+    },
+    {
+      id: "editor-focus",
+      label: "Toggle Focus Mode",
+      category: "Editor",
+      shortcut: "Ctrl/Cmd + Shift + Z",
+      icon: Columns,
+      action: () => {
+        setPage("editor");
+        window.setTimeout(() => dispatchEditorAction("zen"), 0);
+      },
+    },
+    {
+      id: "editor-shortcuts",
+      label: "Keyboard Shortcuts",
+      category: "Help",
+      shortcut: "?",
+      icon: CircleHelp,
+      action: () => {
+        setPage("editor");
+        window.setTimeout(() => dispatchEditorAction("shortcuts"), 0);
+      },
+    },
     {
       id: "goto-editor",
       label: "Open Code Editor & Workbench",
@@ -151,10 +244,31 @@ export const CommandPalette: React.FC = () => {
     },
   ];
 
-  const filtered = commands.filter(
-    (c) =>
-      c.label.toLowerCase().includes(query.toLowerCase()) ||
-      c.category.toLowerCase().includes(query.toLowerCase()),
+  const fileCommands: PaletteCommand[] = treeFiles.map((file) => ({
+    id: `file-${file.id}`,
+    label: file.path,
+    category: "Files",
+    icon: FileCode,
+    action: () => {
+      setPage("editor");
+      openFileInEditor(file);
+    },
+  }));
+  const availableCommands = [...commands, ...fileCommands];
+  const fuzzyMatch = (value: string, candidate: string) => {
+    const normalizedValue = value.toLowerCase().trim();
+    if (!normalizedValue) return true;
+    let cursor = 0;
+    for (const character of normalizedValue) {
+      cursor = candidate.toLowerCase().indexOf(character, cursor);
+      if (cursor < 0) return false;
+      cursor += 1;
+    }
+    return true;
+  };
+  const filtered = availableCommands.filter(
+    (command) =>
+      fuzzyMatch(query, command.label) || fuzzyMatch(query, command.category),
   );
 
   return (
@@ -186,7 +300,23 @@ export const CommandPalette: React.FC = () => {
             ref={searchInputRef}
             placeholder="Search pages, workspaces, and actions…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedIndex(0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" && filtered.length > 0) {
+                event.preventDefault();
+                setSelectedIndex((index) => (index + 1) % filtered.length);
+              } else if (event.key === "ArrowUp" && filtered.length > 0) {
+                event.preventDefault();
+                setSelectedIndex((index) => (index - 1 + filtered.length) % filtered.length);
+              } else if (event.key === "Enter" && filtered[selectedIndex]) {
+                event.preventDefault();
+                filtered[selectedIndex]!.action();
+                setIsCommandPaletteOpen(false);
+              }
+            }}
             className="w-full bg-transparent text-sm text-white placeholder-[#77798d] focus:outline-none"
             aria-label="Search commands"
           />
@@ -215,7 +345,7 @@ export const CommandPalette: React.FC = () => {
               <span className="font-medium text-[#c6c6d2]">{query}</span>
             </div>
           ) : (
-            filtered.map((cmd) => {
+            filtered.map((cmd, index) => {
               const Icon = cmd.icon;
               return (
                 <button
@@ -224,7 +354,9 @@ export const CommandPalette: React.FC = () => {
                     cmd.action();
                     setIsCommandPaletteOpen(false);
                   }}
-                  className="command-palette-item group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs transition"
+                  aria-current={selectedIndex === index ? "true" : undefined}
+                  className={`command-palette-item group flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs transition ${selectedIndex === index ? "is-selected" : ""}`}
+                  onMouseEnter={() => setSelectedIndex(index)}
                 >
                   <div className="flex items-center gap-3">
                     <div className="command-palette-icon flex h-9 w-9 items-center justify-center rounded-xl">
@@ -234,8 +366,11 @@ export const CommandPalette: React.FC = () => {
                       <div className="truncate font-medium text-white">
                         {cmd.label}
                       </div>
-                      <div className="mt-1 text-[10px] text-[#77798d]">
-                        {cmd.category}
+                      <div className="mt-1 flex items-center gap-2 text-[10px] text-[#77798d]">
+                        <span>{cmd.category}</span>
+                        {"shortcut" in cmd && cmd.shortcut && (
+                          <kbd>{cmd.shortcut}</kbd>
+                        )}
                       </div>
                     </div>
                   </div>

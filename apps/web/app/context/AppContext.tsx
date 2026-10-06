@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { saveEditorPreview } from "../services/editorMocks";
 
 export type PageType =
   | "login"
@@ -118,6 +119,7 @@ export interface EditorFile {
   name: string;
   path: string;
   language: string;
+  languageOverride?: boolean;
   iconType:
     | "ts"
     | "js"
@@ -131,6 +133,46 @@ export interface EditorFile {
     | "folder";
   isDirty?: boolean;
 }
+
+const getEditorLanguageForPath = (path: string): string | null => {
+  const filename = path.split(/[\\/]/).pop() || "";
+  const extension = filename.includes(".")
+    ? filename.split(".").pop()?.toLowerCase()
+    : "";
+  const languages: Record<string, string> = {
+    c: "cpp",
+    cc: "cpp",
+    cpp: "cpp",
+    h: "cpp",
+    hh: "cpp",
+    hpp: "cpp",
+    html: "html",
+    css: "css",
+    js: "javascript",
+    mjs: "javascript",
+    cjs: "javascript",
+    jsx: "jsx",
+    ts: "typescript",
+    mts: "typescript",
+    cts: "typescript",
+    tsx: "tsx",
+    json: "json",
+    md: "markdown",
+    markdown: "markdown",
+    py: "python",
+    java: "java",
+    go: "go",
+    php: "php",
+    sql: "sql",
+    yaml: "yaml",
+    yml: "yaml",
+    sh: "shell",
+    bash: "shell",
+    zsh: "shell",
+    ps1: "shell",
+  };
+  return extension ? languages[extension] || null : null;
+};
 
 interface AppContextType {
   page: PageType;
@@ -204,12 +246,21 @@ interface AppContextType {
   openFiles: EditorFile[];
   activeFileId: string;
   setActiveFileId: (id: string) => void;
+  updateEditorFileLanguage: (
+    fileId: string,
+    language: string,
+    languageOverride?: boolean,
+  ) => void;
   fileContents: Record<string, string>;
   savedFileContents: Record<string, string>;
   updateFileContent: (fileId: string, content: string) => void;
   saveFileContent: (fileId: string) => Promise<void>;
   openFileInEditor: (file: EditorFile) => void;
   closeFileFromEditor: (fileId: string) => void;
+  reorderOpenFiles: (fromFileId: string, toFileId: string) => void;
+  closeOtherFilesFromEditor: (fileId: string) => void;
+  closeAllFilesFromEditor: () => void;
+  renameEditorFile: (fileId: string, nextName: string) => void;
   createNewFile: (
     name: string,
     path?: string,
@@ -225,6 +276,8 @@ interface AppContextType {
   setIsFileTreeOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isAiDrawerOpen: boolean;
   setIsAiDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isTerminalOpen: boolean;
+  setIsTerminalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   applyDiffToActiveFile: (snippet: string) => Promise<void>;
   remoteCode: string;
   updateRemoteCode: (code: string) => void;
@@ -925,6 +978,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   );
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(true);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isPanelLayoutHydrated, setIsPanelLayoutHydrated] = useState(false);
   const [fileContents, setFileContents] = useState<Record<string, string>>(
     editorSession.fileContents,
   );
@@ -997,14 +1052,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsEditorProjectOpen(storedEditorSession.isEditorProjectOpen);
     setEditorProjectId(storedEditorSession.editorProjectId);
     setLoadedProjectName(storedEditorSession.loadedProjectName);
-    setTreeFiles(storedEditorSession.treeFiles);
+    const restoreLanguage = (file: EditorFile): EditorFile => {
+      if (file.languageOverride) return file;
+      return {
+        ...file,
+        language: getEditorLanguageForPath(file.path) || file.language || "plaintext",
+      };
+    };
+    setTreeFiles(storedEditorSession.treeFiles.map(restoreLanguage));
     setTreeFolders(storedEditorSession.treeFolders);
-    setOpenFiles(storedEditorSession.openFiles);
+    setOpenFiles(storedEditorSession.openFiles.map(restoreLanguage));
     setActiveFileId(storedEditorSession.activeFileId);
     setFileContents(storedEditorSession.fileContents);
     setSavedFileContents(storedEditorSession.savedFileContents);
     setIsClientStorageHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!isClientStorageHydrated) return;
+    try {
+      const stored = window.localStorage.getItem("devpulse-editor-panels");
+      if (stored) {
+        const layout = JSON.parse(stored) as {
+          explorerOpen?: boolean;
+          aiOpen?: boolean;
+          terminalOpen?: boolean;
+        };
+        if (typeof layout.explorerOpen === "boolean") setIsFileTreeOpen(layout.explorerOpen);
+        if (typeof layout.aiOpen === "boolean") setIsAiDrawerOpen(layout.aiOpen);
+        if (typeof layout.terminalOpen === "boolean") setIsTerminalOpen(layout.terminalOpen);
+      }
+    } catch (error) {
+      console.error("Unable to restore editor panel layout.", error);
+    }
+    setIsPanelLayoutHydrated(true);
+  }, [isClientStorageHydrated]);
+
+  useEffect(() => {
+    if (!isPanelLayoutHydrated) return;
+    try {
+      window.localStorage.setItem(
+        "devpulse-editor-panels",
+        JSON.stringify({
+          explorerOpen: isFileTreeOpen,
+          aiOpen: isAiDrawerOpen,
+          terminalOpen: isTerminalOpen,
+        }),
+      );
+    } catch (error) {
+      console.error("Unable to persist editor panel layout.", error);
+    }
+  }, [isAiDrawerOpen, isFileTreeOpen, isPanelLayoutHydrated, isTerminalOpen]);
 
   useEffect(() => {
     if (!isClientStorageHydrated) return;
@@ -1160,7 +1258,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   // Listen for keyboard shortcut Ctrl+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === "k" ||
+          (e.shiftKey && e.key.toLowerCase() === "p"))
+      ) {
         e.preventDefault();
         setIsCommandPaletteOpen((prev) => !prev);
       }
@@ -1750,24 +1852,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     id: file.id,
     name: file.path.split("/").pop() || file.path,
     path: file.path,
-    language: file.language || "plaintext",
+    language: getEditorLanguageForPath(file.path) || file.language || "plaintext",
     iconType: getIconType(file.path),
   });
 
   const createLocalEditorFile = (path: string) => {
-    const extension = path.split("/").pop()?.split(".").pop()?.toLowerCase();
-    const language =
-      extension === "py"
-        ? "python"
-        : extension === "json"
-          ? "json"
-          : extension === "js" || extension === "jsx"
-            ? "javascript"
-            : "typescript";
     return editorFileFromApi({
       id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       path,
-      language,
     });
   };
 
@@ -1775,50 +1867,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsEditorLoading(true);
     setEditorError("");
     try {
-      const projectResponse = await apiJson<{
-        projects: { id: string; name: string }[];
-      }>("/v1/projects");
-      let project = projectResponse.projects[0];
-      if (!project) {
-        project = await apiJson<{ id: string; name: string }>("/v1/projects", {
-          method: "POST",
-          body: JSON.stringify({ name: "Devpulse Workspace" }),
-        });
-      }
-      const fileResponse = await apiJson<{
-        project: { id: string; name: string };
-        files: { id: string; path: string; language?: string | null }[];
-      }>(`/v1/projects/${project.id}/files`);
-      const filesWithContent = await Promise.all(
-        fileResponse.files.map(async (file) => {
-          const detail = await apiJson<{ content: string }>(
-            `/v1/projects/${project.id}/files/${file.id}`,
-          );
-          return { file: editorFileFromApi(file), content: detail.content };
-        }),
-      );
-      const nextFiles = filesWithContent.map(({ file }) => file);
-      const nextContents = Object.fromEntries(
-        filesWithContent.map(({ file, content }) => [file.id, content]),
-      );
-      setEditorProjectId(project.id);
-      setLoadedProjectName(fileResponse.project.name);
-      setTreeFiles(nextFiles);
-      setTreeFolders(getParentFolderPaths(nextFiles.map((file) => file.path)));
-      setFileContents(nextContents);
-      setSavedFileContents(nextContents);
-      if (nextFiles.length > 0) {
-        setOpenFiles([nextFiles[0]!]);
-        setActiveFileId(nextFiles[0]!.id);
-      } else {
-        setOpenFiles([]);
-        setActiveFileId("");
-      }
-      setIsEditorProjectOpen(true);
-    } catch {
-      // Dynamic fallback: Load default devpulse-core workspace project files
-      setEditorProjectId("devpulse-core-default");
-      setLoadedProjectName("devpulse-core / staging");
+      setEditorProjectId("local-workspace");
+      setLoadedProjectName("Local workspace");
       setTreeFiles(DEFAULT_EDITOR_FILES);
       setTreeFolders(
         getParentFolderPaths(DEFAULT_EDITOR_FILES.map((file) => file.path)),
@@ -1828,6 +1878,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setOpenFiles([DEFAULT_EDITOR_FILES[0]!, DEFAULT_EDITOR_FILES[1]!]);
       setActiveFileId(DEFAULT_EDITOR_FILES[0]!.id);
       setIsEditorProjectOpen(true);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to open editor preview.";
+      setEditorError(message);
+      throw error;
     } finally {
       setIsEditorLoading(false);
     }
@@ -1844,18 +1899,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     );
   };
 
+  const updateEditorFileLanguage = (
+    fileId: string,
+    language: string,
+    languageOverride = true,
+  ) => {
+    setOpenFiles((previous) =>
+      previous.map((file) =>
+        file.id === fileId
+          ? { ...file, language, languageOverride }
+          : file,
+      ),
+    );
+    setTreeFiles((previous) =>
+      previous.map((file) =>
+        file.id === fileId
+          ? { ...file, language, languageOverride }
+          : file,
+      ),
+    );
+  };
+
   const saveFileContent = async (fileId: string) => {
     const content = fileContents[fileId] ?? "";
-    const isLocalFile =
-      editorProjectId === "local-file" ||
-      editorProjectId === "local-folder" ||
-      editorProjectId === "local-workspace";
-    const saved = isLocalFile
-      ? { id: fileId }
-      : await apiJson<{ id: string }>(`/v1/files/${fileId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ content }),
-        });
+    const targetFile = treeFiles.find((file) => file.id === fileId);
+    await saveEditorPreview({
+      path: targetFile?.path || fileId,
+      content,
+    });
+    const saved = { id: fileId };
     setSavedFileContents((previous) => ({ ...previous, [fileId]: content }));
     setOpenFiles((prev) =>
       prev.map((file) =>
@@ -1889,11 +1961,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const openFileInEditor = (file: EditorFile) => {
+    const openedFile = file.languageOverride
+      ? file
+      : {
+          ...file,
+          language: getEditorLanguageForPath(file.path) || file.language || "plaintext",
+        };
     setIsEditorProjectOpen(true);
-    if (!openFiles.some((f) => f.id === file.id)) {
-      setOpenFiles((prev) => [...prev, file]);
-    }
-    setActiveFileId(file.id);
+    setOpenFiles((previous) => {
+      const existing = previous.some((item) => item.id === openedFile.id);
+      return existing
+        ? previous.map((item) => item.id === openedFile.id ? openedFile : item)
+        : [...previous, openedFile];
+    });
+    setTreeFiles((previous) =>
+      previous.map((item) => item.id === openedFile.id ? openedFile : item),
+    );
+    setActiveFileId(openedFile.id);
   };
 
   const closeFileFromEditor = (fileId: string) => {
@@ -1902,6 +1986,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     if (activeFileId === fileId && remaining.length > 0) {
       setActiveFileId(remaining[remaining.length - 1]!.id);
     }
+  };
+
+  const closeOtherFilesFromEditor = (fileId: string) => {
+    const retained = openFiles.find((file) => file.id === fileId);
+    setOpenFiles(retained ? [retained] : []);
+    if (retained) setActiveFileId(retained.id);
+  };
+
+  const closeAllFilesFromEditor = () => {
+    setOpenFiles([]);
+    setActiveFileId("");
+  };
+
+  const reorderOpenFiles = (fromFileId: string, toFileId: string) => {
+    setOpenFiles((previous) => {
+      const fromIndex = previous.findIndex((file) => file.id === fromFileId);
+      const toIndex = previous.findIndex((file) => file.id === toFileId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return previous;
+      const next = [...previous];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved!);
+      return next;
+    });
+  };
+
+  const renameEditorFile = (fileId: string, nextName: string) => {
+    const name = nextName.trim();
+    if (!name || name.includes("/") || name.includes("\\")) return;
+    const update = (file: EditorFile): EditorFile => {
+      if (file.id !== fileId) return file;
+      const pathParts = file.path.split("/");
+      pathParts[pathParts.length - 1] = name;
+      return {
+        ...file,
+        name,
+        path: pathParts.join("/"),
+        language: file.languageOverride
+          ? file.language
+          : getEditorLanguageForPath(pathParts.join("/")) || file.language,
+        iconType: getIconType(name),
+      };
+    };
+    setTreeFiles((previous) => previous.map(update));
+    setOpenFiles((previous) => previous.map(update));
   };
 
   const createNewFile = async (
@@ -2104,12 +2232,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         openFiles,
         activeFileId,
         setActiveFileId,
+        updateEditorFileLanguage,
         fileContents,
         savedFileContents,
         updateFileContent,
         saveFileContent,
         openFileInEditor,
         closeFileFromEditor,
+        reorderOpenFiles,
+        closeOtherFilesFromEditor,
+        closeAllFilesFromEditor,
+        renameEditorFile,
         createNewFile,
         deleteFile,
         loadUserLocalFiles,
@@ -2118,6 +2251,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setIsFileTreeOpen,
         isAiDrawerOpen,
         setIsAiDrawerOpen,
+        isTerminalOpen,
+        setIsTerminalOpen,
         applyDiffToActiveFile,
         remoteCode,
         updateRemoteCode,

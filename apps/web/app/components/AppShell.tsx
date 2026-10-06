@@ -49,10 +49,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     logout,
     setIsCommandPaletteOpen,
     setIsFileTreeOpen,
+    isTerminalOpen,
+    setIsTerminalOpen,
   } = useApp();
 
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarPreferenceHydrated, setIsSidebarPreferenceHydrated] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [accountMenuPosition, setAccountMenuPosition] = useState<{
     top: number;
@@ -67,6 +70,46 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const workbenchSidebarContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("devpulse-workbench-sidebar-open");
+      if (stored !== null) setIsSidebarOpen(stored === "true");
+    } catch (error) {
+      console.error("Unable to restore workbench sidebar preference.", error);
+    }
+    setIsSidebarPreferenceHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isSidebarPreferenceHydrated) return;
+    try {
+      window.localStorage.setItem(
+        "devpulse-workbench-sidebar-open",
+        String(isSidebarOpen),
+      );
+    } catch (error) {
+      console.error("Unable to save workbench sidebar preference.", error);
+    }
+  }, [isSidebarOpen, isSidebarPreferenceHydrated]);
+
+  useEffect(() => {
+    const handleTerminalShortcut = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.code === "Backquote") {
+        event.preventDefault();
+        if (page !== "editor") {
+          setPage("editor");
+          setIsTerminalOpen(true);
+        } else {
+          setIsTerminalOpen((open) => !open);
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleTerminalShortcut);
+    return () =>
+      document.removeEventListener("keydown", handleTerminalShortcut);
+  }, [page, setIsTerminalOpen, setPage]);
 
   const toggleAccountMenu = (trigger: HTMLButtonElement) => {
     if (isAccountMenuOpen) {
@@ -263,6 +306,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       label: "Code Editor",
       icon: Code2,
       active: page === "editor",
+      action: () => {
+        setPage("editor");
+        setIsTerminalOpen(false);
+      },
     },
     {
       id: "explorer",
@@ -283,7 +330,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       id: "terminal",
       label: "Terminal & Runs",
       icon: Terminal,
-      action: () => setPage("editor"),
+      action: () => {
+        setPage("editor");
+        setIsTerminalOpen(true);
+      },
     },
     {
       id: "deployments",
@@ -590,7 +640,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               {user.role}
               {user.handle ? ` · @${user.handle}` : ""}
             </div>
-            <div className="mx-2 my-1 border-t border-white/[0.08]" />
+            <div className="mx-2 my-1 border-t border-white/[0.08]" />{" "}
             <button
               type="button"
               role="menuitem"
@@ -651,7 +701,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                     {workbenchNavItems.map((item) => {
                       const Icon = item.icon;
                       const isSelected =
-                        (item.id === "editor" && page === "editor") ||
+                        (item.id === "editor" &&
+                          page === "editor" &&
+                          !isTerminalOpen) ||
+                        (item.id === "terminal" &&
+                          page === "editor" &&
+                          isTerminalOpen) ||
                         (item.id === "api-sandbox" && page === "api-sandbox");
                       return (
                         <button
@@ -852,9 +907,17 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
         {/* Main Content Pane */}
         <main
-          className={`${isAiStudio ? "overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-[#08080d]`}
+          className={`${page === "editor" ? "flex flex-col overflow-hidden" : isAiStudio ? "overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-[#08080d]`}
         >
-          {children}
+          <div
+            className={
+              page === "editor"
+                ? "min-h-0 flex-1 overflow-hidden"
+                : "min-h-full"
+            }
+          >
+            {children}
+          </div>
         </main>
       </div>
       {/* Global Notifications */}
