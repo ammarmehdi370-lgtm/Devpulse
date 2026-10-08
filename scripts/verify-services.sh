@@ -161,6 +161,12 @@ if [[ "$INFRASTRUCTURE_ONLY" != true ]]; then
   else
     warn "Web app is not running (port 3000) — run: pnpm --filter @devpulse/web dev"
   fi
+
+  if curl --fail --silent --show-error --max-time 4 http://localhost:8081 >/dev/null 2>&1; then
+    pass "Mobile/Expo (port 8081)"
+  else
+    warn "Mobile/Expo is not running (optional) — start separately: pnpm dev:mobile"
+  fi
 fi
 
 section "Configuration"

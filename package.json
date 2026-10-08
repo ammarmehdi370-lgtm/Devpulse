@@ -7,8 +7,14 @@
     "node": ">=20.10.0"
   },
   "scripts": {
-    "dev": "npm --prefix apps/web run dev",
-    "dev:turbo": "turbo dev",
+    "dev": "turbo run dev --filter=@devpulse/web --filter=@devpulse/api --filter=@devpulse/socket --filter=@devpulse/ai",
+    "dev:mobile": "pnpm --filter @devpulse/mobile dev",
+    "dev:all": "turbo run dev",
+    "dev:web": "pnpm --filter @devpulse/web dev",
+    "dev:api": "pnpm --filter @devpulse/api dev",
+    "dev:socket": "pnpm --filter @devpulse/socket dev",
+    "dev:ai": "pnpm --filter @devpulse/ai dev",
+    "dev:turbo": "turbo run dev --filter=@devpulse/web --filter=@devpulse/api --filter=@devpulse/socket --filter=@devpulse/ai",
     "build": "npm --prefix apps/web run build",
     "test": "turbo test",
     "test:all": "pnpm test && pnpm test:e2e",

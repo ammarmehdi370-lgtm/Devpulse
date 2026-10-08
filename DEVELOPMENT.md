@@ -242,12 +242,16 @@ docker compose down -v
 
 ## Run all applications locally
 
-Start infrastructure, run its health checks, then start every workspace that
-has a development script:
+Start infrastructure, run its health checks, and start the web, API,
+Socket.IO, and AI services:
 
 ```bash
 make dev
 ```
+
+To start just those application services without infrastructure setup, use
+`pnpm dev`. Mobile/Expo is intentionally separate; use `pnpm dev:mobile` as
+described below. `pnpm dev:all` starts every workspace including mobile.
 
 To run the full service health check independently after starting services:
 
@@ -442,35 +446,113 @@ pnpm --filter @devpulse/ai build
 pnpm --filter @devpulse/ai start
 ```
 
-## Run the mobile app
+## Mobile Development (Expo)
 
-Start Expo:
+Mobile is excluded from the default `pnpm dev` command and starts separately.
+Start the web, API, Socket.IO, and AI services with `pnpm dev`, then start Expo
+in another terminal with `pnpm dev:mobile`. `pnpm dev:all` starts every
+workspace, including mobile.
 
-```bash
-pnpm --filter @devpulse/mobile dev
-```
+### Prerequisites
 
-Run on Android:
+- Expo CLI is provided by the Expo SDK through `npx expo`; a global Expo CLI
+  installation is not required.
+- For iOS: Xcode 14+ and an iOS simulator on macOS, or the Expo Go app on a
+  physical iPhone.
+- For Android: Android Studio with an Android Virtual Device, or the Expo Go
+  app on a physical Android device.
+- For web: a modern browser.
 
-```bash
-pnpm --filter @devpulse/mobile android
-```
+Install Expo Go from the App Store (iOS) or Google Play (Android) for the
+quickest physical-device setup.
 
-Run on iOS:
+### Quick start with Expo Go
 
-```bash
-pnpm --filter @devpulse/mobile ios
-```
+1. Start infrastructure and the web/API/Socket.IO/AI application services with
+   `make dev`. If infrastructure is already running, `pnpm dev` starts just the
+   application services. Wait for the API on port 4000 and Socket.IO on port
+   4001.
+2. Find your computer's LAN IP:
 
-Run the Expo web target:
+   ```bash
+   bash scripts/get-local-ip.sh
+   ```
+
+   On Windows PowerShell, run `ipconfig` and use the IPv4 address of your
+   active Wi-Fi or Ethernet adapter.
+3. Create `apps/mobile/.env` and replace `<IP>` with the computer's LAN IP:
+
+   ```dotenv
+   EXPO_PUBLIC_API_URL=http://<IP>:4000
+   EXPO_PUBLIC_SOCKET_URL=http://<IP>:4001
+   EXPO_PUBLIC_AI_URL=http://<IP>:4002
+   ```
+
+4. Start Expo:
+
+   ```bash
+   pnpm dev:mobile
+   ```
+
+5. On the phone, open `http://<IP>:4000/health` in a browser and confirm the
+   API responds. If it does not load, check the phone and computer are on the
+   same network and allow ports 4000-4002 through the computer's firewall.
+6. Scan the QR code in the terminal with the iOS Camera app or the Expo Go
+   app on Android. Keep the phone and development computer on the same network.
+
+Do not use `localhost` or `127.0.0.1` for a physical phone: those addresses
+refer to the phone itself. The app displays a warning on native platforms when
+its API URL is set to localhost. Android Emulator can reach the development
+computer at `10.0.2.2`; iOS Simulator can usually use `localhost`.
+
+### Android emulator
+
+1. Install Android Studio and create an Android Virtual Device (AVD).
+2. Start the emulator.
+3. Set `EXPO_PUBLIC_API_URL=http://10.0.2.2:4000`,
+   `EXPO_PUBLIC_SOCKET_URL=http://10.0.2.2:4001`, and
+   `EXPO_PUBLIC_AI_URL=http://10.0.2.2:4002` in `apps/mobile/.env`.
+4. Run:
+
+   ```bash
+   pnpm --filter @devpulse/mobile android
+   ```
+
+### iOS simulator (macOS only)
+
+1. Install Xcode 14+ and start an iOS simulator.
+2. Run:
+
+   ```bash
+   pnpm --filter @devpulse/mobile ios
+   ```
+
+### Web browser
+
+Run:
 
 ```bash
 pnpm --filter @devpulse/mobile web
 ```
 
+Expo starts the web target and prints its local URL in the terminal.
+
+### Common issues
+
+- **“Network request failed” on a phone:** confirm the phone and computer share
+  a network, set the three `EXPO_PUBLIC_*_URL` values to the computer's LAN IP,
+  and make sure the OS firewall allows ports 4000-4002.
+- **Metro bundler does not start:** run
+  `pnpm --filter @devpulse/mobile dev -- --clear`.
+- **Module not found:** run `pnpm install`, then `pnpm dev:mobile`.
+- **Expo Go version mismatch:** update Expo Go on the phone. This project uses
+  Expo SDK 52; a native development build may be needed if the installed Expo Go
+  no longer supports that SDK.
+
 ## Run the complete Docker development stack
 
-This starts PostgreSQL, Redis, MinIO, web, API, Socket.IO, AI, and Expo containers with development commands and mounted source files:
+This explicitly starts PostgreSQL, Redis, MinIO, web, API, Socket.IO, AI, and
+the Expo mobile container with development commands and mounted source files:
 
 ```bash
 docker compose up
