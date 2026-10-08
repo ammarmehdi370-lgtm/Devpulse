@@ -83,6 +83,14 @@ for count in $(seq 1 15); do
   sleep 2
 done
 
+echo "Creating MinIO bucket..."
+if docker compose run --rm minio-init; then
+  echo "MinIO bucket is ready"
+else
+  echo "WARNING: Could not create or verify the MinIO bucket." >&2
+  echo "File uploads may fail until the bucket is available." >&2
+fi
+
 echo "Running database migrations..."
 pnpm --filter @devpulse/database exec prisma migrate deploy
 

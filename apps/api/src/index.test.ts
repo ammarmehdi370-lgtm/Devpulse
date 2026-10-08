@@ -7,7 +7,17 @@ describe("API foundation", () => {
     const response = await request(app).get("/health");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: "ok", service: "api" });
+    expect(response.body).toMatchObject({
+      status: expect.stringMatching(/^(ok|unhealthy)$/),
+      checks: {
+        database: expect.any(Boolean),
+        redis: expect.any(Boolean),
+        minio: expect.any(Boolean),
+        email: expect.any(Boolean),
+        ai: expect.any(Boolean),
+      },
+    });
+    expect(Number.isNaN(Date.parse(response.body.timestamp))).toBe(false);
   });
 
   it("reports configured authentication providers", async () => {

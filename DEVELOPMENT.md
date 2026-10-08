@@ -270,6 +270,56 @@ The local services use these URLs:
 | MinIO API     | http://localhost:9000        |
 | MinIO console | http://localhost:9001        |
 
+## MinIO Object Storage
+
+MinIO provides S3-compatible object storage for uploaded project artifacts.
+The bucket is created automatically by Docker Compose when the API starts, and
+by `scripts/start-services.sh` during infrastructure setup. The default bucket
+is `devpulse-files`; set `MINIO_BUCKET` to use another name.
+
+### Access the MinIO Console
+
+- URL: http://localhost:9001
+- Username: `devpulse` by default, or the configured
+  `MINIO_ACCESS_KEY` / `S3_MINIO_ROOT_USER`
+- Password: `devpulse123` by default, or the configured
+  `MINIO_SECRET_KEY` / `S3_MINIO_ROOT_PASSWORD`
+
+### Verify the bucket
+
+With the MinIO Client (`mc`) installed, set an alias and list the bucket:
+
+```bash
+mc alias set devpulse-local http://localhost:9000 devpulse devpulse123
+mc ls devpulse-local/devpulse-files
+```
+
+Replace the credentials and bucket name when using custom environment values.
+You can also verify it in the console by opening **Buckets** and confirming
+`devpulse-files` is listed.
+
+### Create the bucket manually
+
+1. Open http://localhost:9001.
+2. Sign in with the credentials above (or the configured MinIO credentials).
+3. Select **Buckets** in the sidebar, then choose **Create Bucket**.
+4. Enter `devpulse-files` (or the value of `MINIO_BUCKET`).
+5. Choose **Create Bucket** to finish.
+
+### Test an artifact upload
+
+The API stores project artifacts at
+`POST /v1/projects/:projectId/artifacts` as JSON with base64-encoded content
+(not as a multipart `POST /v1/files`). Use the ID of an existing project:
+
+```bash
+curl -X POST http://localhost:4000/v1/projects/<project-id>/artifacts \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test.txt","contentBase64":"SGVsbG8gRGV2cHVsc2UhCg==","contentType":"text/plain"}'
+```
+
+A successful upload returns HTTP 201 with the bucket, object key, and size.
+
 ## Run the frontend only
 
 ```bash

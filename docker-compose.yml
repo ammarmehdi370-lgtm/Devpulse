@@ -36,19 +36,36 @@ services:
       retries: 10
 
   minio:
-    image: bitnamilegacy/minio:latest
+    image: minio/minio:latest
     restart: unless-stopped
+    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_MINIO_ROOT_USER:-devpulse}
-      MINIO_ROOT_PASSWORD: ${S3_MINIO_ROOT_PASSWORD:-devpulse-local-password}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-${S3_MINIO_ROOT_USER:-devpulse}}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-${S3_MINIO_ROOT_PASSWORD:-devpulse123}}
     ports: ["9000:9000", "9001:9001"]
-    volumes: [devpulse-minio:/bitnami/minio/data]
+    volumes: [devpulse-minio:/data]
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 15s
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: >-
+      mc alias set local http://minio:9000 "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY" &&
+      mc mb "local/$$MINIO_BUCKET" --ignore-existing &&
+      echo 'MinIO bucket ready'
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-${S3_MINIO_ROOT_USER:-devpulse}}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-${S3_MINIO_ROOT_PASSWORD:-devpulse123}}
+      MINIO_BUCKET: ${MINIO_BUCKET:-devpulse-files}
+    restart: "no"
 
   web:
     image: node:20-bookworm
@@ -89,10 +106,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-devpulse}:${POSTGRES_PASSWORD:-devpulse}@postgres:5432/${POSTGRES_DB:-devpulse}?schema=public
       DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-devpulse}:${POSTGRES_PASSWORD:-devpulse}@postgres:5432/${POSTGRES_DB:-devpulse}?schema=public
       REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-devpulse-files}
       AWS_S3_ENDPOINT: http://minio:9000
-      AWS_S3_BUCKET: devpulse-local
-      AWS_ACCESS_KEY_ID: ${S3_MINIO_ROOT_USER:-devpulse}
-      AWS_SECRET_ACCESS_KEY: ${S3_MINIO_ROOT_PASSWORD:-devpulse-local-password}
+      AWS_S3_BUCKET: ${MINIO_BUCKET:-devpulse-files}
+      AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-${S3_MINIO_ROOT_USER:-devpulse}}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-${S3_MINIO_ROOT_PASSWORD:-devpulse123}}
       JWT_SECRET: ${JWT_SECRET:-devpulse-development-secret}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
@@ -116,6 +135,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s

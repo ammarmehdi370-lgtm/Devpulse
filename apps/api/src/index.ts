@@ -18,7 +18,9 @@ import type { AiApplyRequest } from "./types/requests.js";
 const app: express.Express = express();
 const port = Number(process.env.PORT ?? 4000);
 const objectStoreEndpoint = new URL(
-  process.env.AWS_S3_ENDPOINT ?? "http://localhost:9000",
+  process.env.MINIO_ENDPOINT ??
+    process.env.AWS_S3_ENDPOINT ??
+    "http://localhost:9000",
 );
 const minio = new Minio.Client({
   endPoint: objectStoreEndpoint.hostname,
@@ -28,15 +30,20 @@ const minio = new Minio.Client({
   ),
   useSSL: objectStoreEndpoint.protocol === "https:",
   accessKey:
-    process.env.AWS_ACCESS_KEY_ID ??
-    process.env.S3_MINIO_ROOT_USER ??
+    process.env.MINIO_ACCESS_KEY ||
+    process.env.AWS_ACCESS_KEY_ID ||
+    process.env.S3_MINIO_ROOT_USER ||
     "devpulse",
   secretKey:
-    process.env.AWS_SECRET_ACCESS_KEY ??
-    process.env.S3_MINIO_ROOT_PASSWORD ??
-    "devpulse-local-password",
+    process.env.MINIO_SECRET_KEY ||
+    process.env.AWS_SECRET_ACCESS_KEY ||
+    process.env.S3_MINIO_ROOT_PASSWORD ||
+    "devpulse123",
 });
-const objectBucket = process.env.AWS_S3_BUCKET ?? "devpulse-local";
+const objectBucket =
+  process.env.MINIO_BUCKET ??
+  process.env.AWS_S3_BUCKET ??
+  "devpulse-files";
 const jwtSecret = process.env.JWT_SECRET ?? "devpulse-development-secret";
 const filePathSchema = z
   .string()
@@ -63,9 +70,38 @@ app.use(pinoHttp());
 app.use("/api/auth/github", sessionMiddleware);
 app.use("/api/auth/google", sessionMiddleware);
 app.use("/api/auth", authRouter);
-app.get("/health", (_request, response) =>
-  response.json({ status: "ok", service: "api" }),
-);
+app.get("/health", async (_request, response) => {
+  const [databaseHealthy, redisHealthy, minioHealthy] = await Promise.all([
+    db.$queryRaw`SELECT 1`.then(
+      () => true,
+      () => false,
+    ),
+    redis.isOpen
+      ? redis.ping().then(
+          () => true,
+          () => false,
+        )
+      : Promise.resolve(false),
+    minio.bucketExists(objectBucket).then(
+      (exists) => exists,
+      () => false,
+    ),
+  ]);
+  const status =
+    databaseHealthy && redisHealthy && minioHealthy ? "ok" : "unhealthy";
+
+  return response.json({
+    status,
+    checks: {
+      database: databaseHealthy,
+      redis: redisHealthy,
+      minio: minioHealthy,
+      email: Boolean(process.env.RESEND_API_KEY),
+      ai: Boolean(process.env.ANTHROPIC_API_KEY),
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
 app.get("/ready", (_request, response) => response.json({ status: "ready" }));
 app.get("/health/ready", async (_request, response, next) => {
   if (process.env.NODE_ENV !== "test")
@@ -1622,12 +1658,33 @@ async function verifyDatabase(): Promise<void> {
   }
 }
 
+async function ensureMinIOBucket(): Promise<void> {
+  try {
+    const exists = await minio.bucketExists(objectBucket);
+
+    if (!exists) {
+      await minio.makeBucket(objectBucket, process.env.AWS_REGION ?? "us-east-1");
+      console.log(`[MinIO] Created bucket: ${objectBucket}`);
+    } else {
+      console.log(`[MinIO] Bucket exists: ${objectBucket}`);
+    }
+  } catch (error: unknown) {
+    console.warn(
+      `[MinIO] Could not verify bucket '${objectBucket}':`,
+      error instanceof Error ? error.message : String(error),
+    );
+    console.warn("[MinIO] File uploads may fail until the bucket exists.");
+    console.warn("[MinIO] Create manually at: http://localhost:9001");
+  }
+}
+
 export { app };
 
 if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") {
   async function startServer(): Promise<void> {
     await verifyDatabase();
     await initKeys();
+    void ensureMinIOBucket();
     await new Promise<void>((resolve, reject) => {
       const server = app.listen(port, () => {
         console.log(`Devpulse API listening on :${port}`);
