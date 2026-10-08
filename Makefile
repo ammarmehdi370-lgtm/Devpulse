@@ -1,10 +1,12 @@
-.PHONY: infra dev verify stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
+.PHONY: infra dev verify verify-win stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
 infra:
 	bash scripts/start-services.sh
-dev: infra
-	pnpm --parallel --filter @devpulse/api --filter @devpulse/socket --filter @devpulse/ai --filter @devpulse/web dev
+dev:
+	bash scripts/dev-start.sh
 verify:
 	bash scripts/verify-services.sh
+verify-win:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-services.ps1
 stop:
 	docker compose down
 	@echo "Containers stopped; named volumes were preserved."

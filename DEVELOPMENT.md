@@ -242,17 +242,34 @@ docker compose down -v
 
 ## Run all applications locally
 
-Start every workspace that has a development script:
-
-```bash
-pnpm dev
-```
-
-Equivalent Make command:
+Start infrastructure, run its health checks, then start every workspace that
+has a development script:
 
 ```bash
 make dev
 ```
+
+To run the full service health check independently after starting services:
+
+```bash
+make verify
+bash scripts/verify-services.sh
+```
+
+On Windows, run the PowerShell checker with:
+
+```powershell
+make verify-win
+```
+
+The verification script exits with status 1 when a required check fails.
+Warnings for optional services or credentials do not prevent development.
+It checks Docker, PostgreSQL, Redis, MinIO and its bucket, then (for the full
+check) the API, Socket.IO, AI service, and web app. It also checks required
+environment values and JWT key files. Passing checks appear in green; required
+missing/unhealthy dependencies and configuration appear in red with a suggested
+command or action. Optional services or features that are stopped or not
+configured appear in yellow.
 
 The local services use these URLs:
 
