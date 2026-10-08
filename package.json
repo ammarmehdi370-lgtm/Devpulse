@@ -31,7 +31,9 @@
     "migrate": "pnpm --filter @devpulse/database db:migrate",
     "seed": "pnpm --filter @devpulse/database db:seed",
     "studio": "pnpm --filter @devpulse/database db:studio",
-    "clean": "turbo clean"
+    "clean": "turbo run clean",
+    "clean:cache": "node scripts/clean-workspace.mjs cache",
+    "clean:all": "node scripts/clean-workspace.mjs all && pnpm install"
   },
   "devDependencies": {
     "@devpulse/config": "workspace:*",

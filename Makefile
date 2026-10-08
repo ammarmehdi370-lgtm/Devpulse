@@ -1,4 +1,4 @@
-.PHONY: infra dev verify verify-win stop clean reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
+.PHONY: infra dev verify verify-win stop clean clean-cache clean-all reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
 infra:
 	bash scripts/start-services.sh
 dev:
@@ -13,6 +13,12 @@ stop:
 clean:
 	docker compose down -v
 	@echo "Containers and named volumes removed."
+clean-cache:
+	pnpm clean:cache
+	@echo "Turbo cache cleared"
+clean-all:
+	pnpm clean:all
+	@echo "Full dependency clean complete"
 reset:
 	docker compose down -v
 	$(MAKE) infra

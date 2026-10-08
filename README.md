@@ -41,4 +41,18 @@ make migrate
 make studio
 ```
 
+## Troubleshooting
+
+If something goes wrong, see the
+[Devpulse Troubleshooting Guide](TROUBLESHOOTING.md).
+
+Quick fixes:
+
+```bash
+make verify       # Check service health
+make reset        # Reset infrastructure (deletes local service data)
+make clean-cache  # Clear Turbo build cache
+make clean-all    # Reinstall workspace dependencies
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branch and commit conventions. Never commit a real `.env` file or production credentials.
