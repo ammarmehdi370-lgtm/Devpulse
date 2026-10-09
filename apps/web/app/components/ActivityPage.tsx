@@ -109,12 +109,12 @@ function eventIcon(category: string) {
 }
 
 function eventColor(category: string) {
-  if (category === "Release") return "text-[#ffad5c] bg-[#ffad5c]/10 border-[#ffad5c]/20";
-  if (category === "Workspace") return "text-[#41d9ee] bg-[#41d9ee]/10 border-[#41d9ee]/20";
-  if (category === "Project") return "text-[#ae7cff] bg-[#ae7cff]/10 border-[#ae7cff]/20";
-  if (category === "Code") return "text-[#43ddbb] bg-[#43ddbb]/10 border-[#43ddbb]/20";
-  if (category === "Focus") return "text-[#d389ff] bg-[#d389ff]/10 border-[#d389ff]/20";
-  return "text-[#9ba0b6] bg-white/5 border-white/10";
+  if (category === "Release") return "text-[var(--ide-color-warning-readable)] bg-ide-warning/10 border-ide-warning/20";
+  if (category === "Workspace") return "text-[var(--ide-color-info-readable)] bg-ide-info/10 border-ide-info/20";
+  if (category === "Project") return "text-[var(--ide-color-secondary-readable)] bg-ide-secondary/10 border-ide-secondary/20";
+  if (category === "Code") return "text-[var(--ide-color-success-readable)] bg-ide-success/10 border-ide-success/20";
+  if (category === "Focus") return "text-[var(--ide-color-accent-readable)] bg-ide-accent/10 border-ide-accent/20";
+  return "text-ide-text-soft bg-ide-surface-raised border-ide-border";
 }
 
 function formatDate(date: Date) {
@@ -387,73 +387,73 @@ export function ActivityPage() {
   };
 
   return (
-    <div className="min-h-full bg-[#08080d] px-3 py-4 text-[#f4f3fa] sm:px-5 sm:py-6 xl:px-8">
+    <div className="min-h-full bg-ide-app-content-bg px-3 py-4 text-ide-text sm:px-5 sm:py-6 xl:px-8">
       <div className="mx-auto max-w-[1440px] space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 text-[10px] font-mono uppercase tracking-[0.18em] text-[#72728b]">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[10px] font-mono uppercase tracking-[0.18em] text-ide-muted">
           <div className="flex items-center gap-2">
-            <span className="text-[#9999b1]">Devpulse Platform</span>
-            <span className="text-[#3d3d52]">/</span>
-            <span className="text-[#bd91ff]">Your Activity</span>
+            <span className="text-ide-text-soft">Devpulse Platform</span>
+            <span className="text-ide-text-faint">/</span>
+            <span className="text-[var(--ide-color-secondary-readable)]">Your Activity</span>
           </div>
           <div className="flex items-center gap-2 normal-case tracking-normal">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#40e6c5]" />
-            <span className="text-[#8e91a6]">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ide-success" />
+            <span className="text-ide-text-soft">
               {isDataLoading ? "Syncing platform data" : "Live activity"}
             </span>
-            <span className="text-[#55556c]">
+            <span className="text-ide-text-dim">
               Updated {new Date(now).toLocaleTimeString()}
             </span>
           </div>
         </div>
 
-        <section className="relative overflow-hidden rounded-2xl border border-[#33264d] bg-[radial-gradient(ellipse_at_10%_0%,rgba(123,60,204,0.22),transparent_42%),linear-gradient(115deg,#171320,#11111a_64%,#111821)] p-4 shadow-[0_16px_50px_rgba(0,0,0,0.25)] sm:p-5">
-          <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-[#8046d9]/10 blur-3xl" />
+        <section className="relative overflow-hidden rounded-2xl border border-ide-border-strong bg-[radial-gradient(ellipse_at_10%_0%,color-mix(in_srgb,var(--ide-color-info)_22%,transparent),transparent_42%),linear-gradient(115deg,var(--ide-color-panel),var(--ide-color-panel)_64%,var(--ide-color-panel))] p-4 shadow-[0_16px_50px_var(--ide-color-shadow-card)] sm:p-5">
+          <div className="absolute -right-20 -top-24 h-64 w-64 rounded-full bg-ide-secondary/10 blur-3xl" />
           <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex min-w-0 items-center gap-4">
-              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-[#a568ff]/40 bg-[#211633] shadow-[0_0_28px_rgba(151,87,255,0.2)]">
-                <Activity className="h-6 w-6 text-[#c18aff]" />
-                <span className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-[#171320] bg-[#43e7bf]" />
+              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-ide-secondary/40 bg-ide-surface-toolbar shadow-[0_0_28px_color-mix(in_srgb,var(--ide-color-info)_20%,transparent)]">
+                <Activity className="h-6 w-6 text-ide-secondary" />
+                <span className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-ide-border-control bg-ide-success" />
               </div>
               <div className="min-w-0">
                 <div className="mb-1 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-[#9f62eb]/30 bg-[#8c50d7]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#c68dff]">
+                  <span className="rounded-full border border-ide-secondary/30 bg-ide-secondary/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--ide-color-secondary-readable)]">
                     Personal dashboard
                   </span>
-                  <span className="text-[10px] text-[#77748b]">
+                  <span className="text-[10px] text-ide-muted">
                     {formatDate(new Date(now))}
                   </span>
                 </div>
-                <h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">
+                <h1 className="text-xl font-bold tracking-tight text-ide-text-strong sm:text-2xl">
                   Your Activity
                 </h1>
-                <p className="mt-1 text-xs text-[#a4a0b1]">
+                <p className="mt-1 text-xs text-ide-text-soft">
                   Your work, sessions, and platform events — all in one place.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <div className="flex min-w-[176px] flex-1 items-center gap-3 rounded-xl border border-[#302a3c] bg-[#0c0b12]/80 px-3 py-2 xl:flex-none">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#a350e6]/15 text-[#ca88ff]">
+              <div className="flex min-w-[176px] flex-1 items-center gap-3 rounded-xl border border-ide-border-strong bg-ide-workbench-bg/80 px-3 py-2 xl:flex-none">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ide-secondary/15 text-[var(--ide-color-secondary-readable)]">
                   <Clock3 className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[9px] font-mono uppercase tracking-[0.15em] text-[#858096]">
+                  <div className="text-[9px] font-mono uppercase tracking-[0.15em] text-ide-muted">
                     Focus timer
                   </div>
-                  <div className="font-mono text-lg font-bold tabular-nums tracking-wide text-white">
+                  <div className="font-mono text-lg font-bold tabular-nums tracking-wide text-ide-text-strong">
                     {formatDuration(timerSeconds)}
                   </div>
                 </div>
                 <span
-                  className={`h-2 w-2 rounded-full ${timerState.startedAt ? "animate-pulse bg-[#48e2bd]" : "bg-[#696779]"}`}
+                  className={`h-2 w-2 rounded-full ${timerState.startedAt ? "animate-pulse bg-ide-success" : "bg-ide-surface-raised"}`}
                   title={timerState.startedAt ? "Timer running" : "Timer paused"}
                 />
               </div>
               <button
                 type="button"
                 onClick={timerState.startedAt ? pauseTimer : startTimer}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-[#6e46a6]/60 bg-[#241634] px-3 text-xs font-semibold text-[#d7b2ff] transition hover:border-[#b879ff] hover:bg-[#34204d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#bd83ff]"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-ide-secondary/60 bg-ide-surface-toolbar px-3 text-xs font-semibold text-[var(--ide-color-secondary-readable)] transition hover:border-ide-secondary hover:bg-ide-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-secondary"
               >
                 {timerState.startedAt ? (
                   <Pause className="h-3.5 w-3.5" />
@@ -466,7 +466,7 @@ export function ActivityPage() {
                 type="button"
                 onClick={finishTimer}
                 disabled={!timerSeconds}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#8a4ce0] px-3 text-xs font-semibold text-white shadow-[0_5px_18px_rgba(138,76,224,0.22)] transition hover:bg-[#9d62ef] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d0a6ff]"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-ide-secondary px-3 text-xs font-semibold text-[var(--ide-color-secondary-fg)] shadow-[0_5px_18px_color-mix(in_srgb,var(--ide-color-info)_22%,transparent)] transition hover:bg-ide-secondary disabled:cursor-not-allowed disabled:bg-ide-surface-control disabled:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-secondary"
               >
                 <Check className="h-3.5 w-3.5" />
                 Finish
@@ -507,44 +507,44 @@ export function ActivityPage() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
-          <section className="rounded-2xl border border-[#252334] bg-[#11111a] p-4 sm:p-5">
+          <section className="rounded-2xl border border-ide-border-strong bg-ide-panel p-4 sm:p-5">
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-[#bd83ff]" />
-                  <h2 className="text-sm font-semibold text-white">
+                  <Activity className="h-4 w-4 text-ide-secondary" />
+                  <h2 className="text-sm font-semibold text-ide-text-strong">
                     Activity intensity
                   </h2>
                 </div>
-                <p className="mt-1 text-[11px] text-[#77778e]">
+                <p className="mt-1 text-[11px] text-ide-muted">
                   Recorded platform actions · {filteredRows.length} events
                 </p>
               </div>
               <label className="relative">
-                <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9992ae]" />
+                <CalendarDays className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ide-text-soft" />
                 <select
                   aria-label="Activity chart date range"
                   value={range}
                   onChange={(event) =>
                     setActivityRange(event.target.value as ActivityRange)
                   }
-                  className="h-8 appearance-none rounded-lg border border-[#302a3c] bg-[#191722] pl-8 pr-8 text-[10px] text-[#c8c3d4] outline-none focus:border-[#a66af0]"
+                  className="h-8 appearance-none rounded-lg border border-ide-border-strong bg-ide-panel pl-8 pr-8 text-[10px] text-ide-text-secondary outline-none focus:border-ide-secondary"
                 >
                   <option value="today">Today</option>
                   <option value="7d">Last 7 days</option>
                   <option value="30d">Last 30 days</option>
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#888398]" />
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ide-muted" />
               </label>
             </div>
-            <div className="flex h-44 items-end gap-1.5 border-b border-[#242331] px-1 pb-2 sm:gap-3">
+            <div className="flex h-44 items-end gap-1.5 border-b border-ide-border-strong px-1 pb-2 sm:gap-3">
               {chartDays.map((day) => (
                 <div
                   key={dateKey(day.date)}
                   className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2"
                   title={`${day.label}: ${day.total} events`}
                 >
-                  <div className="flex h-[calc(100%-20px)] w-full max-w-9 items-end overflow-hidden rounded-t-[4px] bg-[#191823]">
+                  <div className="flex h-[calc(100%-20px)] w-full max-w-9 items-end overflow-hidden rounded-t-[4px] bg-ide-surface-toolbar">
                     <div className="flex w-full flex-col-reverse overflow-hidden rounded-t-[4px]">
                       {day.stacks.map(({ category, count }) => (
                         <div
@@ -557,7 +557,7 @@ export function ActivityPage() {
                       ))}
                     </div>
                   </div>
-                  <span className="truncate text-[9px] text-[#7b798d]">
+                  <span className="truncate text-[9px] text-ide-muted">
                     {day.label}
                   </span>
                 </div>
@@ -567,7 +567,7 @@ export function ActivityPage() {
               {categoryCounts.map(({ category }) => (
                 <span
                   key={category}
-                  className="inline-flex items-center gap-1.5 text-[9px] text-[#9290a2]"
+                  className="inline-flex items-center gap-1.5 text-[9px] text-ide-text-soft"
                 >
                   <span className={`h-1.5 w-1.5 rounded-sm ${chartColor(category)}`} />
                   {category}
@@ -576,20 +576,20 @@ export function ActivityPage() {
             </div>
           </section>
 
-          <section className="rounded-2xl border border-[#252334] bg-[#11111a] p-4 sm:p-5">
+          <section className="rounded-2xl border border-ide-border-strong bg-ide-panel p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <Zap className="h-4 w-4 text-[#46ddc2]" />
-                  <h2 className="text-sm font-semibold text-white">
+                  <Zap className="h-4 w-4 text-ide-success" />
+                  <h2 className="text-sm font-semibold text-ide-text-strong">
                     Activity breakdown
                   </h2>
                 </div>
-                <p className="mt-1 text-[11px] text-[#77778e]">
+                <p className="mt-1 text-[11px] text-ide-muted">
                   By category · selected date range
                 </p>
               </div>
-              <span className="rounded-lg border border-[#293837] bg-[#12201f] px-2 py-1 font-mono text-[10px] text-[#62dfc7]">
+              <span className="rounded-lg border border-ide-border-strong bg-ide-panel px-2 py-1 font-mono text-[var(--ide-color-success-readable)]">
                 {filteredRows.length}
               </span>
             </div>
@@ -602,15 +602,15 @@ export function ActivityPage() {
                 return (
                   <div key={category}>
                     <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px]">
-                      <span className="flex min-w-0 items-center gap-2 text-[#c6c3d0]">
-                        <Icon className="h-3 w-3 shrink-0 text-[#9387ad]" />
+                      <span className="flex min-w-0 items-center gap-2 text-ide-text-secondary">
+                        <Icon className="h-3 w-3 shrink-0 text-ide-text-soft" />
                         <span className="truncate">{category}</span>
                       </span>
-                      <span className="shrink-0 font-mono text-[#9793a4]">
-                        {count} <span className="text-[#5e5c6c]">·</span> {percentage}%
+                      <span className="shrink-0 font-mono text-ide-text-soft">
+                        {count} <span className="text-ide-text-dim">·</span> {percentage}%
                       </span>
                     </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-[#22212c]">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-ide-surface-toolbar">
                       <div
                         className={`h-full rounded-full transition-[width] duration-500 ${chartColor(category)}`}
                         style={{ width: `${percentage}%` }}
@@ -620,26 +620,26 @@ export function ActivityPage() {
                 );
               })}
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-2 border-t border-[#242331] pt-4">
-              <div className="rounded-xl bg-[#171620] p-3">
-                <div className="text-[9px] uppercase tracking-wider text-[#77758a]">
+            <div className="mt-5 grid grid-cols-2 gap-2 border-t border-ide-border-strong pt-4">
+              <div className="rounded-xl bg-ide-panel p-3">
+                <div className="text-[9px] uppercase tracking-wider text-ide-muted">
                   Busiest day
                 </div>
-                <div className="mt-1 truncate text-xs font-semibold text-white">
+                <div className="mt-1 truncate text-xs font-semibold text-ide-text-strong">
                   {busiestDay.total ? busiestDay.label : "No activity yet"}
                 </div>
-                <div className="mt-0.5 text-[10px] text-[#8a879a]">
+                <div className="mt-0.5 text-[10px] text-ide-muted">
                   {busiestDay.total} recorded events
                 </div>
               </div>
-              <div className="rounded-xl bg-[#171620] p-3">
-                <div className="text-[9px] uppercase tracking-wider text-[#77758a]">
+              <div className="rounded-xl bg-ide-panel p-3">
+                <div className="text-[9px] uppercase tracking-wider text-ide-muted">
                   Active projects
                 </div>
-                <div className="mt-1 truncate text-xs font-semibold text-white">
+                <div className="mt-1 truncate text-xs font-semibold text-ide-text-strong">
                   {projects.length}
                 </div>
-                <div className="mt-0.5 text-[10px] text-[#8a879a]">
+                <div className="mt-0.5 text-[10px] text-ide-muted">
                   In your workspace
                 </div>
               </div>
@@ -647,25 +647,25 @@ export function ActivityPage() {
           </section>
         </div>
 
-        <section className="overflow-hidden rounded-2xl border border-[#252334] bg-[#11111a]">
-          <div className="flex flex-col gap-3 border-b border-[#242331] p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <section className="overflow-hidden rounded-2xl border border-ide-border-strong bg-ide-panel">
+          <div className="flex flex-col gap-3 border-b border-ide-border-strong p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div>
               <div className="flex items-center gap-2">
-                <Activity className="h-4 w-4 text-[#c087ff]" />
-                <h2 className="text-sm font-semibold text-white">
+                <Activity className="h-4 w-4 text-ide-secondary" />
+                <h2 className="text-sm font-semibold text-ide-text-strong">
                   Activity stream
                 </h2>
-                <span className="rounded-md border border-[#382d4b] bg-[#221a2e] px-1.5 py-0.5 font-mono text-[9px] text-[#c698ff]">
+                <span className="rounded-md border border-ide-border-strong bg-ide-surface-toolbar px-1.5 py-0.5 font-mono text-[9px] text-ide-secondary">
                   {filteredRows.length}
                 </span>
               </div>
-              <p className="mt-1 text-[10px] text-[#77778e]">
+              <p className="mt-1 text-[10px] text-ide-muted">
                 A live timeline of your work across Devpulse.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="relative min-w-[145px] flex-1 sm:flex-none">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[#79768a]" />
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-ide-muted" />
                 <input
                   value={query}
                   onChange={(event) => {
@@ -674,7 +674,7 @@ export function ActivityPage() {
                   }}
                   placeholder="Search activity"
                   aria-label="Search activity"
-                  className="h-8 w-full rounded-lg border border-[#302a3c] bg-[#171620] pl-8 pr-2 text-[10px] text-white outline-none placeholder:text-[#646274] focus:border-[#a66af0] sm:w-40"
+                  className="h-8 w-full rounded-lg border border-ide-border-strong bg-ide-panel pl-8 pr-2 text-[10px] text-ide-text-strong outline-none placeholder:text-ide-text-dim focus:border-ide-secondary sm:w-40"
                 />
               </label>
               <label className="relative">
@@ -684,7 +684,7 @@ export function ActivityPage() {
                   onChange={(event) =>
                     setActivityFilter(event.target.value as ActivityFilter)
                   }
-                  className="h-8 appearance-none rounded-lg border border-[#302a3c] bg-[#171620] pl-2.5 pr-7 text-[10px] text-[#c8c3d4] outline-none focus:border-[#a66af0]"
+                  className="h-8 appearance-none rounded-lg border border-ide-border-strong bg-ide-panel pl-2.5 pr-7 text-[10px] text-ide-text-secondary outline-none focus:border-ide-secondary"
                 >
                   {FILTERS.map((option) => (
                     <option key={option} value={option}>
@@ -692,7 +692,7 @@ export function ActivityPage() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#888398]" />
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ide-muted" />
               </label>
               <label className="relative max-w-[145px]">
                 <select
@@ -702,7 +702,7 @@ export function ActivityPage() {
                     setProjectFilter(event.target.value);
                     setPageNumber(1);
                   }}
-                  className="h-8 max-w-full appearance-none rounded-lg border border-[#302a3c] bg-[#171620] pl-2.5 pr-7 text-[10px] text-[#c8c3d4] outline-none focus:border-[#a66af0]"
+                  className="h-8 max-w-full appearance-none rounded-lg border border-ide-border-strong bg-ide-panel pl-2.5 pr-7 text-[10px] text-ide-text-secondary outline-none focus:border-ide-secondary"
                 >
                   <option value="all">All projects</option>
                   {projects.map((project) => (
@@ -711,12 +711,12 @@ export function ActivityPage() {
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#888398]" />
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ide-muted" />
               </label>
               <button
                 type="button"
                 onClick={exportActivity}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#302a3c] bg-[#171620] px-2.5 text-[10px] text-[#c7c2d3] transition hover:border-[#604581] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#bd83ff]"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-ide-border-strong bg-ide-panel px-2.5 text-[10px] text-ide-text-secondary transition hover:border-ide-secondary hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-secondary"
               >
                 <ArrowDownToLine className="h-3 w-3" />
                 Export
@@ -725,7 +725,7 @@ export function ActivityPage() {
           </div>
 
           {currentPageRows.length ? (
-            <div className="divide-y divide-[#242331]">
+            <div className="divide-y divide-[var(--ide-color-border-strong)]">
               {currentPageRows.map((row) => {
                 const Icon = eventIcon(row.category);
                 return (
@@ -733,7 +733,7 @@ export function ActivityPage() {
                     key={row.id}
                     type="button"
                     onClick={() => setSelectedEvent(row)}
-                    className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[#171620] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[#b879ff] sm:px-5"
+                    className="group flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-ide-panel focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ide-secondary sm:px-5"
                   >
                     <span
                       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${eventColor(row.category)}`}
@@ -742,42 +742,42 @@ export function ActivityPage() {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="text-[11px] font-semibold capitalize text-[#eceaf2]">
+                        <span className="text-[11px] font-semibold capitalize text-ide-text">
                           {row.title}
                         </span>
-                        <span className="rounded border border-[#332b40] bg-[#201a29] px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-[#ba8be9]">
+                        <span className="rounded border border-ide-border-strong bg-ide-surface-toolbar px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-[var(--ide-color-secondary-readable)]">
                           {row.category}
                         </span>
                       </span>
-                      <span className="mt-1 block truncate text-[10px] text-[#9692a4]">
+                      <span className="mt-1 block truncate text-[10px] text-ide-text-soft">
                         {row.detail}
                       </span>
                     </span>
-                    <span className="hidden max-w-[150px] shrink-0 truncate rounded-md border border-[#302c3a] bg-[#191821] px-2 py-1 text-[9px] text-[#aaa5b7] sm:block">
+                    <span className="hidden max-w-[150px] shrink-0 truncate rounded-md border border-ide-border-strong bg-ide-panel px-2 py-1 text-[9px] text-ide-text-soft sm:block">
                       {row.project}
                     </span>
                     <span className="shrink-0 text-right">
-                      <span className="block font-mono text-[9px] text-[#8b879a]">
+                      <span className="block font-mono text-[9px] text-ide-muted">
                         {relativeTime(row.timestamp, now)}
                       </span>
-                      <span className="mt-1 block text-[9px] text-[#625f70]">
+                      <span className="mt-1 block text-[9px] text-ide-text-dim">
                         {row.actor}
                       </span>
                     </span>
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#555166] transition group-hover:translate-x-0.5 group-hover:text-[#ba8be9]" />
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-ide-text-dim transition group-hover:translate-x-0.5 group-hover:text-ide-secondary" />
                   </button>
                 );
               })}
             </div>
           ) : (
             <div className="flex flex-col items-center px-5 py-12 text-center">
-              <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-[#382d4b] bg-[#201a29] text-[#bb87f2]">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl border border-ide-border-strong bg-ide-surface-toolbar text-ide-secondary">
                 <Activity className="h-5 w-5" />
               </span>
-              <h3 className="mt-3 text-xs font-semibold text-white">
+              <h3 className="mt-3 text-xs font-semibold text-ide-text-strong">
                 No matching activity
               </h3>
-              <p className="mt-1 max-w-sm text-[10px] leading-5 text-[#858194]">
+              <p className="mt-1 max-w-sm text-[10px] leading-5 text-ide-muted">
                 Try another date range or filter. Platform actions and focus sessions will appear here as they happen.
               </p>
               <button
@@ -788,17 +788,17 @@ export function ActivityPage() {
                   setQuery("");
                   setActivityRange("30d");
                 }}
-                className="mt-3 rounded-lg border border-[#443458] px-3 py-1.5 text-[10px] font-medium text-[#d2b5f3] hover:bg-[#261c33]"
+                className="mt-3 rounded-lg border border-ide-border px-3 py-1.5 text-[10px] font-medium text-[var(--ide-color-secondary-readable)] hover:bg-ide-surface"
               >
                 Clear filters
               </button>
             </div>
           )}
 
-          <div className="flex flex-col gap-3 border-t border-[#242331] px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <span className="text-[9px] text-[#777487]">
+          <div className="flex flex-col gap-3 border-t border-ide-border-strong px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <span className="text-[9px] text-ide-muted">
               Showing{" "}
-              <span className="font-mono text-[#c3bdcf]">
+              <span className="font-mono text-ide-text-tertiary">
                 {filteredRows.length
                   ? showAll
                     ? filteredRows.length
@@ -808,7 +808,7 @@ export function ActivityPage() {
                   ? `–${Math.min(pageNumber * PAGE_SIZE, filteredRows.length)}`
                   : ""}
               </span>{" "}
-              of <span className="font-mono text-[#c3bdcf]">{filteredRows.length}</span>{" "}
+              of <span className="font-mono text-ide-text-tertiary">{filteredRows.length}</span>{" "}
               events
             </span>
             <div className="flex items-center gap-2">
@@ -816,7 +816,7 @@ export function ActivityPage() {
                 <button
                   type="button"
                   onClick={() => setShowAll((value) => !value)}
-                  className="mr-1 text-[9px] text-[#b88ce9] hover:text-white"
+                  className="mr-1 text-[9px] text-[var(--ide-color-secondary-readable)] hover:text-ide-text-strong"
                 >
                   {showAll ? "Show pages" : "View all"}
                 </button>
@@ -826,11 +826,11 @@ export function ActivityPage() {
                 aria-label="Previous activity page"
                 disabled={showAll || pageNumber === 1}
                 onClick={() => setPageNumber((value) => Math.max(1, value - 1))}
-                className="rounded-md border border-[#302c3a] px-2 py-1 text-[9px] text-[#a7a2b5] hover:bg-[#211d29] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-md border border-ide-border-strong px-2 py-1 text-[9px] text-ide-text-soft hover:bg-ide-surface-toolbar disabled:cursor-not-allowed disabled:opacity-80"
               >
                 Previous
               </button>
-              <span className="font-mono text-[9px] text-[#8e899d]">
+              <span className="font-mono text-[9px] text-ide-text-soft">
                 {showAll ? "All" : `${pageNumber} / ${pageCount}`}
               </span>
               <button
@@ -840,7 +840,7 @@ export function ActivityPage() {
                 onClick={() =>
                   setPageNumber((value) => Math.min(pageCount, value + 1))
                 }
-                className="rounded-md border border-[#302c3a] px-2 py-1 text-[9px] text-[#a7a2b5] hover:bg-[#211d29] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-md border border-ide-border-strong px-2 py-1 text-[9px] text-ide-text-soft hover:bg-ide-surface-toolbar disabled:cursor-not-allowed disabled:opacity-80"
               >
                 Next
               </button>
@@ -848,7 +848,7 @@ export function ActivityPage() {
           </div>
         </section>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-2 text-[9px] text-[#626073]">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-2 text-[9px] text-ide-text-dim">
           <span>
             Activity data is stored in this browser and updates as you use Devpulse.
           </span>
@@ -862,7 +862,7 @@ export function ActivityPage() {
                 description: "Showing the latest platform activity.",
               });
             }}
-            className="inline-flex items-center gap-1.5 transition hover:text-[#c2a0ea]"
+            className="inline-flex items-center gap-1.5 transition hover:text-[var(--ide-color-secondary-readable)]"
           >
             <RefreshCw className="h-3 w-3" />
             Refresh
@@ -881,7 +881,7 @@ export function ActivityPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="activity-detail-title"
-            className="w-full max-w-md rounded-2xl border border-[#3b3150] bg-[#12111a] p-5 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-ide-border-strong bg-ide-panel p-5 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
@@ -893,12 +893,12 @@ export function ActivityPage() {
                   })}
                 </span>
                 <div className="min-w-0">
-                  <span className="text-[9px] uppercase tracking-wider text-[#b78ae8]">
+                  <span className="text-[9px] uppercase tracking-wider text-[var(--ide-color-secondary-readable)]">
                     {selectedEvent.category}
                   </span>
                   <h2
                     id="activity-detail-title"
-                    className="mt-1 text-sm font-semibold capitalize text-white"
+                    className="mt-1 text-sm font-semibold capitalize text-ide-text-strong"
                   >
                     {selectedEvent.title}
                   </h2>
@@ -908,28 +908,28 @@ export function ActivityPage() {
                 type="button"
                 aria-label="Close activity details"
                 onClick={() => setSelectedEvent(null)}
-                className="rounded-lg p-1 text-[#898599] hover:bg-white/5 hover:text-white"
+                className="rounded-lg p-1 text-ide-muted hover:bg-ide-hover hover:text-ide-text-strong"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-4 break-words text-xs leading-6 text-[#b0acbb]">
+            <p className="mt-4 break-words text-xs leading-6 text-ide-text-tertiary">
               {selectedEvent.detail}
             </p>
-            <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-[#292633] pt-4 text-[10px]">
+            <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-ide-border-strong pt-4 text-[10px]">
               <div>
-                <dt className="text-[#777487]">Project / target</dt>
-                <dd className="mt-1 break-all text-[#e0dce8]">
+                <dt className="text-ide-muted">Project / target</dt>
+                <dd className="mt-1 break-all text-ide-text">
                   {selectedEvent.project}
                 </dd>
               </div>
               <div>
-                <dt className="text-[#777487]">Actor</dt>
-                <dd className="mt-1 text-[#e0dce8]">{selectedEvent.actor}</dd>
+                <dt className="text-ide-muted">Actor</dt>
+                <dd className="mt-1 text-ide-text">{selectedEvent.actor}</dd>
               </div>
               <div className="col-span-2">
-                <dt className="text-[#777487]">Recorded</dt>
-                <dd className="mt-1 text-[#e0dce8]">
+                <dt className="text-ide-muted">Recorded</dt>
+                <dd className="mt-1 text-ide-text">
                   {new Date(selectedEvent.timestamp).toLocaleString()}
                 </dd>
               </div>
@@ -947,7 +947,7 @@ export function ActivityPage() {
                   setSelectedEvent(null);
                   setPage(destination);
                 }}
-                className="inline-flex items-center gap-2 rounded-lg bg-[#8a4ce0] px-3 py-2 text-[10px] font-semibold text-white hover:bg-[#9d62ef]"
+                className="inline-flex items-center gap-2 rounded-lg bg-ide-secondary px-3 py-2 text-[10px] font-semibold text-[var(--ide-color-secondary-fg)] hover:bg-ide-secondary"
               >
                 Open {selectedEvent.category === "Release" ? "releases" : selectedEvent.category === "Workspace" ? "workspaces" : "projects"}
                 <ArrowRight className="h-3 w-3" />
@@ -961,12 +961,12 @@ export function ActivityPage() {
 }
 
 function chartColor(category: string) {
-  if (category === "Code") return "bg-[#ae59ea]";
-  if (category === "Project") return "bg-[#7637d4]";
-  if (category === "Workspace") return "bg-[#20c9d9]";
-  if (category === "Release") return "bg-[#ff9f43]";
-  if (category === "Focus") return "bg-[#dc70df]";
-  return "bg-[#4b78e7]";
+  if (category === "Code") return "bg-ide-secondary";
+  if (category === "Project") return "bg-ide-secondary";
+  if (category === "Workspace") return "bg-ide-info";
+  if (category === "Release") return "bg-ide-warning";
+  if (category === "Focus") return "bg-ide-secondary";
+  return "bg-ide-info";
 }
 
 function MetricCard({
@@ -983,19 +983,19 @@ function MetricCard({
   color: "purple" | "cyan" | "teal" | "amber";
 }) {
   const styles = {
-    purple: "border-[#553474] bg-[#1b1424] text-[#c184ff]",
-    cyan: "border-[#245065] bg-[#111d27] text-[#5bd3ef]",
-    teal: "border-[#245349] bg-[#10211f] text-[#55dfbd]",
-    amber: "border-[#624a30] bg-[#211a14] text-[#ffb86e]",
+    purple: "border-ide-secondary bg-ide-panel text-[var(--ide-color-secondary-readable)]",
+    cyan: "border-ide-info bg-ide-surface-toolbar text-[var(--ide-color-info-readable)]",
+    teal: "border-ide-border-strong bg-ide-panel text-[var(--ide-color-success-readable)]",
+    amber: "border-ide-border bg-ide-panel text-[var(--ide-color-warning-readable)]",
   }[color];
   return (
-    <section className="rounded-xl border border-[#252334] bg-[#11111a] p-3.5 sm:p-4">
+    <section className="rounded-xl border border-ide-border-strong bg-ide-panel p-3.5 sm:p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[9px] font-medium uppercase tracking-[0.14em] text-[#838095]">
+          <div className="text-[9px] font-medium uppercase tracking-[0.14em] text-ide-muted">
             {label}
           </div>
-          <div className="mt-2 font-mono text-xl font-bold tabular-nums tracking-tight text-white sm:text-2xl">
+          <div className="mt-2 font-mono text-xl font-bold tabular-nums tracking-tight text-ide-text-strong sm:text-2xl">
             {value}
           </div>
         </div>
@@ -1003,7 +1003,7 @@ function MetricCard({
           <Icon className="h-4 w-4" />
         </span>
       </div>
-      <div className="mt-2 truncate text-[9px] text-[#777487]">{detail}</div>
+      <div className="mt-2 truncate text-[9px] text-ide-muted">{detail}</div>
     </section>
   );
 }

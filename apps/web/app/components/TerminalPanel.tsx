@@ -6,12 +6,13 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { Maximize2, Minimize2, Plus, RefreshCw, X } from "lucide-react";
 import { reconnectTerminalPreview } from "../services/editorMocks";
+import type { ThemeTerminalTokens } from "../context/themeModel";
 
 interface TerminalPanelProps {
-  colorMode: "dark" | "light";
   isOpen: boolean;
   onClose: () => void;
-  primaryColor: string;
+  onFocusChange: (focused: boolean) => void;
+  terminalTheme: ThemeTerminalTokens;
   projectName: string;
 }
 
@@ -20,50 +21,31 @@ interface TerminalTab {
   title: string;
 }
 
-const createTerminalTheme = (
-  colorMode: "dark" | "light",
-  primaryColor: string,
-) => ({
-  background: colorMode === "dark" ? "#0b0c11" : "#ffffff",
-  foreground: colorMode === "dark" ? "#d7d9e2" : "#242938",
-  cursor: primaryColor,
-  cursorAccent: colorMode === "dark" ? "#0b0c11" : "#ffffff",
-  selectionBackground:
-    colorMode === "dark"
-      ? "rgba(108, 99, 255, 0.35)"
-      : "rgba(108, 99, 255, 0.22)",
-  black: colorMode === "dark" ? "#171923" : "#242938",
-  red: "#f07178",
-  green: "#a1cf73",
-  yellow: "#ffcb6b",
-  blue: "#82aaff",
-  magenta: "#c792ea",
-  cyan: "#89ddff",
-  white: colorMode === "dark" ? "#d7d9e2" : "#242938",
-  brightBlack: "#676e95",
-  brightRed: "#f07178",
-  brightGreen: "#a1cf73",
-  brightYellow: "#ffcb6b",
-  brightBlue: "#82aaff",
-  brightMagenta: "#c792ea",
-  brightCyan: "#89ddff",
-  brightWhite: colorMode === "dark" ? "#ffffff" : "#111827",
+const createTerminalTheme = (theme: ThemeTerminalTokens) => ({
+  background: theme.bg,
+  foreground: theme.fg,
+  cursor: theme.cursor,
+  cursorAccent: theme.bg,
+  selectionBackground: theme.selection,
+  ...theme.ansi,
 });
 
 const TerminalTabView: React.FC<{
   active: boolean;
-  colorMode: "dark" | "light";
   onClipboardError: (message: string | null) => void;
-  primaryColor: string;
-}> = ({ active, colorMode, onClipboardError, primaryColor }) => {
+  onFocusChange: (focused: boolean) => void;
+  terminalTheme: ThemeTerminalTokens;
+}> = ({ active, onClipboardError, onFocusChange, terminalTheme }) => {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const inputRef = useRef("");
+  const focusChangeRef = useRef(onFocusChange);
   const clipboardErrorRef = useRef(onClipboardError);
-  const terminalThemeRef = useRef({ colorMode, primaryColor });
+  const terminalThemeRef = useRef(terminalTheme);
+  focusChangeRef.current = onFocusChange;
   clipboardErrorRef.current = onClipboardError;
-  terminalThemeRef.current = { colorMode, primaryColor };
+  terminalThemeRef.current = terminalTheme;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -75,10 +57,7 @@ const TerminalTabView: React.FC<{
       fontFamily: "'JetBrains Mono', Consolas, monospace",
       fontSize: 12,
       scrollback: 2000,
-      theme: createTerminalTheme(
-        terminalThemeRef.current.colorMode,
-        terminalThemeRef.current.primaryColor,
-      ),
+      theme: createTerminalTheme(terminalThemeRef.current),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -93,7 +72,7 @@ const TerminalTabView: React.FC<{
 
     const writePrompt = () => {
       terminal.write(
-        `\x1b[38;2;${Number.parseInt(terminalThemeRef.current.primaryColor.slice(1, 3), 16)};${Number.parseInt(terminalThemeRef.current.primaryColor.slice(3, 5), 16)};${Number.parseInt(terminalThemeRef.current.primaryColor.slice(5, 7), 16)}m$ \x1b[0m`,
+        `\x1b[38;2;${Number.parseInt(terminalThemeRef.current.cursor.slice(1, 3), 16)};${Number.parseInt(terminalThemeRef.current.cursor.slice(3, 5), 16)};${Number.parseInt(terminalThemeRef.current.cursor.slice(5, 7), 16)}m$ \x1b[0m`,
       );
     };
     writePrompt();
@@ -210,10 +189,7 @@ const TerminalTabView: React.FC<{
 
   useEffect(() => {
     if (terminalRef.current) {
-      terminalRef.current.options.theme = createTerminalTheme(
-        colorMode,
-        primaryColor,
-      );
+      terminalRef.current.options.theme = createTerminalTheme(terminalTheme);
     }
     if (!active) return;
 
@@ -225,7 +201,7 @@ const TerminalTabView: React.FC<{
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [active, colorMode, primaryColor]);
+  }, [active, terminalTheme]);
 
   return (
     <div
@@ -233,15 +209,17 @@ const TerminalTabView: React.FC<{
       className="terminal-xterm-host"
       aria-label="Terminal input and output"
       hidden={!active}
+      onFocusCapture={() => focusChangeRef.current(true)}
+      onBlurCapture={() => focusChangeRef.current(false)}
     />
   );
 };
 
 export const TerminalPanel: React.FC<TerminalPanelProps> = ({
-  colorMode,
   isOpen,
   onClose,
-  primaryColor,
+  onFocusChange,
+  terminalTheme,
   projectName,
 }) => {
   const nextTabId = useRef(2);
@@ -551,9 +529,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
           <TerminalTabView
             key={tab.id}
             active={isOpen && tab.id === activeTabId}
-            colorMode={colorMode}
             onClipboardError={setClipboardError}
-            primaryColor={primaryColor}
+            onFocusChange={onFocusChange}
+            terminalTheme={terminalTheme}
           />
         ))}
       </div>

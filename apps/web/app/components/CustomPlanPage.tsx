@@ -23,7 +23,7 @@ const planFeatures = [
     monthlyPrice: 10,
     annualPrice: 8,
     icon: Server,
-    color: "text-[#0DF5C4]",
+    color: "text-ide-accent",
   },
   {
     id: "editor",
@@ -32,7 +32,7 @@ const planFeatures = [
     monthlyPrice: 5,
     annualPrice: 4,
     icon: Code2,
-    color: "text-[#9b94ff]",
+    color: "text-ide-secondary",
   },
   {
     id: "ai-assistant",
@@ -41,7 +41,7 @@ const planFeatures = [
     monthlyPrice: 15,
     annualPrice: 12,
     icon: Sparkles,
-    color: "text-[#0DF5C4]",
+    color: "text-ide-accent",
   },
   {
     id: "pulse-pilot",
@@ -50,7 +50,7 @@ const planFeatures = [
     monthlyPrice: 10,
     annualPrice: 8,
     icon: Monitor,
-    color: "text-[#ffae80]",
+    color: "text-ide-warm-accent",
   },
   {
     id: "team-chat",
@@ -59,7 +59,7 @@ const planFeatures = [
     monthlyPrice: 5,
     annualPrice: 4,
     icon: MessageSquare,
-    color: "text-[#9b94ff]",
+    color: "text-ide-secondary",
   },
   {
     id: "priority-support",
@@ -68,7 +68,7 @@ const planFeatures = [
     monthlyPrice: 5,
     annualPrice: 4,
     icon: Headset,
-    color: "text-[#ffae80]",
+    color: "text-ide-warm-accent",
   },
 ] as const;
 
@@ -127,36 +127,36 @@ export const CustomPlanPage: React.FC = () => {
         <button
           type="button"
           onClick={() => setPage("pricing")}
-          className="inline-flex items-center gap-2 rounded-md text-xs font-medium text-[#a4a4ba] transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]"
+          className="inline-flex items-center gap-2 rounded-md text-xs font-medium text-ide-text-secondary transition hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to plans
         </button>
 
-        <div className="flex flex-col justify-between gap-5 border-b border-[#262638] pb-6 lg:flex-row lg:items-end">
+        <div className="flex flex-col justify-between gap-5 border-b border-ide-border-strong pb-6 lg:flex-row lg:items-end">
           <div className="max-w-2xl">
-            <div className="mb-3 flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-[#0DF5C4]">
+            <div className="mb-3 flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-[var(--ide-color-accent-readable)]">
               <SlidersHorizontal className="h-3.5 w-3.5" />
               <span>Build your own plan</span>
             </div>
-            <h1 className="text-2xl font-bold text-white sm:text-3xl">
+            <h1 className="text-2xl font-bold text-ide-text-strong sm:text-3xl">
               Choose only what you need
             </h1>
-            <p className="mt-2 text-sm leading-6 text-[#a0a0b5]">
+            <p className="mt-2 text-sm leading-6 text-ide-text-body">
               Combine Devpulse tools around the way you work. Your estimate
               updates as you select features.
             </p>
           </div>
 
           <div
-            className="inline-flex w-fit items-center gap-1 rounded-lg border border-[#29293a] bg-[#11111a] p-1"
+            className="inline-flex w-fit items-center gap-1 rounded-lg border border-ide-border-control bg-ide-surface-toolbar p-1"
             aria-label="Billing cycle"
           >
             <button
               type="button"
               aria-pressed={billingCycle === "monthly"}
               onClick={() => setBillingCycle("monthly")}
-              className={`rounded-md px-3 py-2 text-xs font-medium transition ${billingCycle === "monthly" ? "bg-[#242432] text-white shadow-sm" : "text-[#9292a9] hover:text-white"}`}
+              className={`rounded-md px-3 py-2 text-xs font-medium transition ${billingCycle === "monthly" ? "bg-ide-surface-hover-strong text-ide-text-strong shadow-[0_1px_2px_color-mix(in_srgb,var(--ide-color-shadow-strong)_8%,transparent)]" : "text-ide-text-soft hover:text-ide-text-strong"}`}
             >
               Monthly
             </button>
@@ -164,10 +164,10 @@ export const CustomPlanPage: React.FC = () => {
               type="button"
               aria-pressed={billingCycle === "annual"}
               onClick={() => setBillingCycle("annual")}
-              className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition ${billingCycle === "annual" ? "bg-[#242432] text-white shadow-sm" : "text-[#9292a9] hover:text-white"}`}
+              className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition ${billingCycle === "annual" ? "bg-ide-surface-hover-strong text-ide-text-strong shadow-[0_1px_2px_color-mix(in_srgb,var(--ide-color-shadow-strong)_8%,transparent)]" : "text-ide-text-soft hover:text-ide-text-strong"}`}
             >
               Annual
-              <span className="rounded-full bg-[#0DF5C4]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#0DF5C4]">
+              <span className="rounded-full bg-ide-accent/10 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--ide-color-accent-readable)]">
                 SAVE 20%
               </span>
             </button>
@@ -181,15 +181,15 @@ export const CustomPlanPage: React.FC = () => {
             <div>
               <h2
                 id="feature-heading"
-                className="text-sm font-semibold text-white"
+                className="text-sm font-semibold text-ide-text-strong"
               >
                 Select your features
               </h2>
-              <p className="mt-1 text-xs text-[#85859e]">
+              <p className="mt-1 text-xs text-ide-text-tertiary">
                 Choose one or more. You can change this mix anytime.
               </p>
             </div>
-            <span className="shrink-0 rounded-full border border-[#29293a] bg-[#11111a] px-2.5 py-1 font-mono text-[10px] text-[#a0a0b5]">
+            <span className="shrink-0 rounded-full border border-ide-border-control bg-ide-surface-toolbar px-2.5 py-1 font-mono text-[10px] text-ide-text-body">
               {selectedFeatures.length} selected
             </span>
           </div>
@@ -210,29 +210,29 @@ export const CustomPlanPage: React.FC = () => {
                   role="checkbox"
                   aria-checked={isSelected}
                   onClick={() => toggleFeature(feature.id)}
-                  className={`group flex min-h-32 w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4] ${isSelected ? "border-[#0DF5C4]/50 bg-[#10201e]" : "border-[#29293a] bg-[#11111a] hover:border-[#444456] hover:bg-[#15151f]"}`}
+                  className={`group flex min-h-32 w-full items-start gap-3 rounded-lg border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring ${isSelected ? "border-ide-accent/50 bg-ide-accent-soft" : "border-ide-border-control bg-ide-surface-toolbar hover:border-ide-border-strong hover:bg-ide-surface-raised"}`}
                 >
                   <span
-                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#29293a] bg-[#171722] ${feature.color}`}
+                    className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-ide-border-control bg-ide-surface-raised ${feature.color}`}
                   >
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-start justify-between gap-2">
-                      <span className="text-sm font-semibold text-white">
+                      <span className="text-sm font-semibold text-ide-text-strong">
                         {feature.name}
                       </span>
-                      <span className="shrink-0 font-mono text-xs text-[#d0d0df]">
+                      <span className="shrink-0 font-mono text-xs text-ide-text">
                         ${price}
-                        <span className="text-[10px] text-[#85859e]">/mo</span>
+                        <span className="text-[10px] text-ide-text-tertiary">/mo</span>
                       </span>
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-[#8f8fa6]">
+                    <span className="mt-1 block text-xs leading-5 text-ide-text-soft">
                       {feature.description}
                     </span>
                   </span>
                   <span
-                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isSelected ? "border-[#0DF5C4] text-[#07110f]" : "border-[#505064] text-transparent"}`}
+                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${isSelected ? "border-ide-accent text-ide-accent-fg" : "border-ide-border-strong text-transparent"}`}
                     style={
                       isSelected
                         ? { backgroundColor: theme.primary }
@@ -249,18 +249,18 @@ export const CustomPlanPage: React.FC = () => {
         </section>
 
         <aside className="lg:sticky lg:top-5">
-          <div className="overflow-hidden rounded-lg border border-[#303040] bg-[#11111a]">
-            <div className="border-b border-[#29293a] px-5 py-4">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-[#85859e]">
+          <div className="overflow-hidden rounded-lg border border-ide-modal-border bg-ide-surface-toolbar">
+            <div className="border-b border-ide-border-control px-5 py-4">
+              <div className="text-[10px] font-mono uppercase tracking-wider text-ide-text-tertiary">
                 Your estimate
               </div>
               <div className="mt-3 flex items-end gap-2">
-                <span className="text-4xl font-bold tracking-tight text-white">
+                <span className="text-4xl font-bold tracking-tight text-ide-text-strong">
                   ${monthlyEstimate}
                 </span>
-                <span className="pb-1 text-xs text-[#9292a9]">/ month</span>
+                <span className="pb-1 text-xs text-ide-text-soft">/ month</span>
               </div>
-              <p className="mt-1 text-[11px] text-[#85859e]">
+              <p className="mt-1 text-[11px] text-ide-text-tertiary">
                 {billingCycle === "annual"
                   ? `$${annualTotal} billed annually · 20% savings applied`
                   : "Billed monthly · no commitment"}
@@ -269,7 +269,7 @@ export const CustomPlanPage: React.FC = () => {
 
             <div className="space-y-4 p-5">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-xs font-semibold text-white">
+                <h2 className="text-xs font-semibold text-ide-text-strong">
                   Included features
                 </h2>
                 {selectedFeatures.length > 0 && (
@@ -279,7 +279,7 @@ export const CustomPlanPage: React.FC = () => {
                       setSelectedFeatures([]);
                       setCopyStatus("");
                     }}
-                    className="text-[10px] text-[#9292a9] underline-offset-2 hover:text-white hover:underline"
+                    className="text-[10px] text-ide-text-soft underline-offset-2 hover:text-ide-text-strong hover:underline"
                   >
                     Clear all
                   </button>
@@ -293,11 +293,11 @@ export const CustomPlanPage: React.FC = () => {
                       key={feature.id}
                       className="flex items-center justify-between gap-3 text-xs"
                     >
-                      <span className="flex min-w-0 items-center gap-2 text-[#c4c4d6]">
-                        <Check className="h-3.5 w-3.5 shrink-0 text-[#0DF5C4]" />
+                      <span className="flex min-w-0 items-center gap-2 text-ide-text-secondary">
+                        <Check className="h-3.5 w-3.5 shrink-0 text-ide-success" />
                         <span className="truncate">{feature.name}</span>
                       </span>
-                      <span className="shrink-0 font-mono text-[#a0a0b5]">
+                      <span className="shrink-0 font-mono text-ide-text-body">
                         $
                         {billingCycle === "annual"
                           ? feature.annualPrice
@@ -307,30 +307,35 @@ export const CustomPlanPage: React.FC = () => {
                   ))}
                 </ul>
               ) : (
-                <p className="rounded-md border border-dashed border-[#343444] px-3 py-4 text-center text-xs leading-5 text-[#85859e]">
+                <p className="rounded-md border border-dashed border-ide-modal-border px-3 py-4 text-center text-xs leading-5 text-ide-text-tertiary">
                   Select a feature to start building your plan.
                 </p>
               )}
 
-              <div className="border-t border-[#29293a] pt-4">
+              <div className="border-t border-ide-border-control pt-4">
                 <button
                   type="button"
                   onClick={copyPlanSummary}
                   disabled={selectedOptions.length === 0}
-                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold text-[#08110f] transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{ backgroundColor: theme.primary }}
+                  className="flex min-h-11 w-full items-center justify-center gap-2 rounded-md px-4 text-xs font-semibold text-ide-accent-fg transition hover:brightness-110 disabled:cursor-not-allowed disabled:text-ide-text-strong"
+                  style={{
+                    backgroundColor:
+                      selectedOptions.length > 0
+                        ? theme.primary
+                        : "var(--ide-color-accent-soft)",
+                  }}
                 >
                   <Copy className="h-3.5 w-3.5" />
                   Copy plan summary
                 </button>
-                <p className="mt-3 text-center text-[10px] leading-4 text-[#77778f]">
+                <p className="mt-3 text-center text-[10px] leading-4 text-ide-muted">
                   This is an estimate, not a purchase. Share the summary to
                   request a final quote.
                 </p>
                 {copyStatus && (
                   <p
                     role="status"
-                    className="mt-3 text-center text-[11px] leading-5 text-[#0DF5C4]"
+                    className="mt-3 text-center text-[11px] leading-5 text-[var(--ide-color-success-readable)]"
                   >
                     {copyStatus}
                   </p>

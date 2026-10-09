@@ -1,7 +1,16 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
 import { saveEditorPreview } from "../services/editorMocks";
+import {
+  BUILT_IN_THEME_IDS,
+  DEFAULT_THEME,
+  THEME_PRESETS,
+  getThemeFontStack,
+  resolveThemeModel,
+  type ThemeConfig,
+} from "./themeModel";
+export type { ThemeConfig } from "./themeModel";
 
 export type PageType =
   | "login"
@@ -21,17 +30,6 @@ export type PageType =
   | "settings"
   | "payment-methods";
 
-export interface ThemeConfig {
-  id: string;
-  name: string;
-  primary: string;
-  secondary: string;
-  tertiary: string;
-  neutral: string;
-  font: string;
-  mode: string;
-  roundness: string;
-}
 export interface UserProfile {
   name: string;
   email: string;
@@ -183,8 +181,13 @@ interface AppContextType {
   logout: () => void;
   theme: ThemeConfig;
   setTheme: (theme: ThemeConfig) => void;
+  importedThemes: ThemeConfig[];
+  addImportedTheme: (theme: ThemeConfig) => void;
+  deleteImportedTheme: (themeId: string) => void;
   colorMode: "dark" | "light";
-  setColorMode: (mode: "dark" | "light") => void;
+  matchSystemTheme: boolean;
+  commandPaletteQuery: string;
+  setCommandPaletteQuery: (query: string) => void;
   availableThemes: ThemeConfig[];
   repositories: Repository[];
   searchRepoQuery: string;
@@ -278,6 +281,8 @@ interface AppContextType {
   setIsAiDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isTerminalOpen: boolean;
   setIsTerminalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isTerminalFocused: boolean;
+  setIsTerminalFocused: React.Dispatch<React.SetStateAction<boolean>>;
   applyDiffToActiveFile: (snippet: string) => Promise<void>;
   remoteCode: string;
   updateRemoteCode: (code: string) => void;
@@ -298,75 +303,6 @@ interface AppContextType {
   prevTourStep: () => void;
   dismissTour: () => void;
 }
-
-const THEME_PRESETS: ThemeConfig[] = [
-  {
-    id: "default",
-    name: "Cyber Mint",
-    primary: "#0DF5C4",
-    secondary: "#6C63FF",
-    tertiary: "#FFAE33",
-    neutral: "#0D1518",
-    font: "Inter",
-    mode: "dark",
-    roundness: "rounded-lg",
-  },
-  {
-    id: "devpulse-purple",
-    name: "Devpulse Purple",
-    primary: "#6C63FF",
-    secondary: "#0DF5C4",
-    tertiary: "#FF9E64",
-    neutral: "#111118",
-    font: "Space Grotesk",
-    mode: "dark",
-    roundness: "rounded-xl",
-  },
-  {
-    id: "emerald-cyber",
-    name: "Emerald Cyber",
-    primary: "#00F59B",
-    secondary: "#00D2FF",
-    tertiary: "#FFAE33",
-    neutral: "#0A1118",
-    font: "JetBrains Mono",
-    mode: "dark",
-    roundness: "rounded-md",
-  },
-  {
-    id: "synthwave-sunset",
-    name: "Synthwave Sunset",
-    primary: "#F43F5E",
-    secondary: "#A855F7",
-    tertiary: "#FB923C",
-    neutral: "#140E1B",
-    font: "Inter",
-    mode: "dark",
-    roundness: "rounded-2xl",
-  },
-  {
-    id: "tokyo-neon",
-    name: "Tokyo Neon",
-    primary: "#8B5CF6",
-    secondary: "#06B6D4",
-    tertiary: "#F43F5E",
-    neutral: "#0E0E18",
-    font: "Space Grotesk",
-    mode: "dark",
-    roundness: "rounded-lg",
-  },
-  {
-    id: "electric-amber",
-    name: "Electric Amber",
-    primary: "#F59E0B",
-    secondary: "#10B981",
-    tertiary: "#EC4899",
-    neutral: "#14120E",
-    font: "Inter",
-    mode: "dark",
-    roundness: "rounded-lg",
-  },
-];
 
 const DEFAULT_EDITOR_FILES: EditorFile[] = [
   {
@@ -494,9 +430,71 @@ const PAGE_STORAGE_KEY = "devpulse_active_page";
 const USER_STORAGE_KEY = "devpulse_user_session";
 const LOGGED_OUT_STORAGE_KEY = "devpulse_logged_out";
 const THEME_STORAGE_KEY = "devpulse_theme";
+const IMPORTED_THEMES_STORAGE_KEY = "devpulse_imported_themes";
 const THEME_SELECTED_KEY = "devpulse_theme_selected";
 const COLOR_MODE_STORAGE_KEY = "devpulse_color_mode";
+const MATCH_SYSTEM_THEME_STORAGE_KEY = "devpulse_match_system_theme";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+const applyThemeToDocument = (
+  theme: ThemeConfig,
+  mode: "dark" | "light",
+) => {
+  const resolvedTheme = resolveThemeModel(theme, mode);
+  const root = document.documentElement;
+  root.setAttribute("data-theme-mode", mode);
+  root.setAttribute("data-theme-type", resolvedTheme.type);
+  root.classList.toggle("dark", mode === "dark");
+  root.style.colorScheme =
+    mode === "light" || resolvedTheme.type === "light" ? "light" : "dark";
+  document.body.setAttribute("data-theme", resolvedTheme.id);
+
+  Object.entries(resolvedTheme.ui).forEach(([token, value]) => {
+    root.style.setProperty(`--ide-color-${token}`, value);
+  });
+  Object.entries(resolvedTheme.syntax).forEach(([token, value]) => {
+    root.style.setProperty(`--ide-syntax-${token}`, value);
+  });
+  Object.entries(resolvedTheme.terminal.ansi).forEach(([token, value]) => {
+    root.style.setProperty(`--ide-terminal-ansi-${token}`, value);
+  });
+  root.style.setProperty("--ide-terminal-fg", resolvedTheme.terminal.fg);
+  root.style.setProperty("--ide-terminal-bg", resolvedTheme.terminal.bg);
+  root.style.setProperty("--ide-terminal-cursor", resolvedTheme.terminal.cursor);
+  root.style.setProperty(
+    "--ide-terminal-selection",
+    resolvedTheme.terminal.selection,
+  );
+
+  root.style.setProperty("--primary", resolvedTheme.ui.accent);
+  root.style.setProperty("--primary-hover", resolvedTheme.ui["accent-hover"]);
+  root.style.setProperty("--primary-glow", resolvedTheme.ui["accent-soft"]);
+  root.style.setProperty("--secondary", resolvedTheme.ui.secondary);
+  root.style.setProperty(
+    "--secondary-glow",
+    `color-mix(in srgb, ${resolvedTheme.ui.secondary} 20%, transparent)`,
+  );
+  root.style.setProperty("--tertiary", resolvedTheme.ui.tertiary);
+  root.style.setProperty(
+    "--tertiary-glow",
+    `color-mix(in srgb, ${resolvedTheme.ui.tertiary} 20%, transparent)`,
+  );
+  root.style.setProperty("--neutral-dark", resolvedTheme.ui.bg);
+  root.style.setProperty("--neutral-panel", resolvedTheme.ui.panel);
+  root.style.setProperty("--neutral-surface", resolvedTheme.ui.surface);
+  root.style.setProperty(
+    "--neutral-border",
+    resolvedTheme.ui["border-strong"],
+  );
+  root.style.setProperty("--app-bg", resolvedTheme.ui.bg);
+  root.style.setProperty(
+    "--font-family-base",
+    getThemeFontStack(resolvedTheme.font),
+  );
+  root.style.setProperty("--font-family-mono", '"JetBrains Mono", monospace');
+  root.style.setProperty("--ide-font-ui", getThemeFontStack(resolvedTheme.font));
+  root.style.setProperty("--radius", "8px");
+};
 
 const hasCompletedThemeSelection = () => {
   try {
@@ -531,21 +529,98 @@ const isThemeConfig = (value: unknown): value is ThemeConfig => {
   );
 };
 
+const isFullThemeConfig = (value: unknown): value is ThemeConfig =>
+  isThemeConfig(value) &&
+  "ui" in value &&
+  typeof value.ui === "object" &&
+  value.ui !== null &&
+  "syntax" in value &&
+  typeof value.syntax === "object" &&
+  value.syntax !== null &&
+  "terminal" in value &&
+  typeof value.terminal === "object" &&
+  value.terminal !== null;
+
+const getStoredImportedThemes = (): ThemeConfig[] => {
+  try {
+    const stored = window.localStorage.getItem(IMPORTED_THEMES_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isFullThemeConfig);
+  } catch (error) {
+    console.error("Unable to restore imported themes.", error);
+    return [];
+  }
+};
+
 const getStoredTheme = () => {
   try {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (!stored) return THEME_PRESETS[0]!;
+    if (!stored) return DEFAULT_THEME;
     const parsed: unknown = JSON.parse(stored);
-    if (
-      !isThemeConfig(parsed) ||
-      !THEME_PRESETS.some((preset) => preset.id === parsed.id)
-    ) {
-      return THEME_PRESETS[0]!;
+    if (!isThemeConfig(parsed)) return DEFAULT_THEME;
+    const preset = THEME_PRESETS.find((item) => item.id === parsed.id);
+    if (!preset) {
+      if (
+        BUILT_IN_THEME_IDS.some((id) => id === parsed.id) &&
+        isFullThemeConfig(parsed)
+      ) {
+        return resolveThemeModel(
+          parsed,
+          parsed.type === "light" ? "light" : "dark",
+        );
+      }
+      const importedTheme = getStoredImportedThemes().find(
+        (item) => item.id === parsed.id,
+      );
+      if (!importedTheme || !isFullThemeConfig(parsed)) return DEFAULT_THEME;
+      const customModel = {
+        ...importedTheme,
+        group: importedTheme.group ?? "Custom",
+      };
+      return resolveThemeModel(
+        customModel,
+        customModel.type === "light" ? "light" : "dark",
+      );
     }
-    return parsed;
+    const storedModel = parsed as Partial<ThemeConfig>;
+    const normalized = {
+      ...preset,
+      ...parsed,
+      group: preset.group,
+      type:
+        storedModel.type === "light" || storedModel.type === "hc"
+          ? storedModel.type
+          : preset.type,
+      ui: {
+        ...preset.ui,
+        ...(typeof storedModel.ui === "object" && storedModel.ui !== null
+          ? storedModel.ui
+          : {}),
+      },
+      syntax: {
+        ...preset.syntax,
+        ...(typeof storedModel.syntax === "object" &&
+        storedModel.syntax !== null
+          ? storedModel.syntax
+          : {}),
+      },
+      terminal: {
+        ...preset.terminal,
+        ...(typeof storedModel.terminal === "object" &&
+        storedModel.terminal !== null
+          ? storedModel.terminal
+          : {}),
+      },
+    } as ThemeConfig;
+    return resolveThemeModel(
+      normalized,
+      normalized.type === "light" ? "light" : "dark",
+    );
   } catch (error) {
     console.error("Unable to restore the saved theme.", error);
-    return THEME_PRESETS[0]!;
+    return DEFAULT_THEME;
   }
 };
 
@@ -560,12 +635,42 @@ const getStoredColorMode = (): "dark" | "light" => {
   }
 };
 
+const getStoredMatchSystemTheme = () => {
+  try {
+    return window.localStorage.getItem(MATCH_SYSTEM_THEME_STORAGE_KEY) === "true";
+  } catch (error) {
+    console.error("Unable to restore system theme preference.", error);
+    return false;
+  }
+};
+
 const readStoredPage = (): PageType => {
   if (typeof window === "undefined") return "api-sandbox";
   try {
     const stored = window.localStorage.getItem(PAGE_STORAGE_KEY);
-    if (stored) return stored as PageType;
-  } catch {}
+    const validPages: readonly PageType[] = [
+      "login",
+      "theme",
+      "repositories",
+      "workspaces",
+      "activity",
+      "deployments",
+      "chat",
+      "editor",
+      "remote-control",
+      "ai-studio",
+      "pricing",
+      "custom-plan",
+      "cloud-core",
+      "api-sandbox",
+      "settings",
+      "payment-methods",
+    ];
+    const savedPage = validPages.find((page) => page === stored);
+    if (savedPage) return savedPage;
+  } catch (error) {
+    console.error("Unable to restore the selected page.", error);
+  }
   return "api-sandbox";
 };
 
@@ -920,7 +1025,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [page, setPageState] = useState<PageType>("api-sandbox");
   const [theme, setThemeState] = useState<ThemeConfig>(THEME_PRESETS[0]!);
-  const [colorMode, setColorModeState] = useState<"dark" | "light">("dark");
+  const [importedThemes, setImportedThemes] = useState<ThemeConfig[]>([]);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [user, setUser] = useState<UserProfile>(getDefaultUser);
   const [isClientStorageHydrated, setIsClientStorageHydrated] = useState(false);
 
@@ -979,6 +1085,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [isAiDrawerOpen, setIsAiDrawerOpen] = useState(true);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isTerminalFocused, setIsTerminalFocused] = useState(false);
   const [isPanelLayoutHydrated, setIsPanelLayoutHydrated] = useState(false);
   const [fileContents, setFileContents] = useState<Record<string, string>>(
     editorSession.fileContents,
@@ -1020,24 +1127,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     setPageState(readStoredPage());
     setUser(readStoredUser());
+    setImportedThemes(getStoredImportedThemes());
+    getStoredColorMode();
+    getStoredMatchSystemTheme();
     const storedTheme = getStoredTheme();
-    const storedColorMode = getStoredColorMode();
-    setThemeState(storedTheme);
-    setColorModeState(storedColorMode);
-    document.body.setAttribute("data-theme", storedTheme.id);
-    document.documentElement.setAttribute("data-theme-mode", storedColorMode);
-    document.documentElement.style.setProperty(
-      "--primary",
-      storedTheme.primary,
-    );
-    document.documentElement.style.setProperty(
-      "--secondary",
-      storedTheme.secondary,
-    );
-    document.documentElement.style.setProperty(
-      "--tertiary",
-      storedTheme.tertiary,
-    );
+    const themeMode = storedTheme.type === "light" ? "light" : "dark";
+    const resolvedTheme = resolveThemeModel(storedTheme, themeMode);
+    setThemeState(resolvedTheme);
+    applyThemeToDocument(resolvedTheme, themeMode);
     setWorkspaces(readStoredWorkspaces());
     setActivityEvents(readStoredActivityEvents());
     try {
@@ -1195,37 +1292,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Sync theme to DOM
   const setTheme = (newTheme: ThemeConfig) => {
-    setThemeState(newTheme);
+    const mode = newTheme.type === "light" ? "light" : "dark";
+    const resolvedTheme = resolveThemeModel(newTheme, mode);
+    setThemeState(resolvedTheme);
     try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(newTheme));
+      window.localStorage.setItem(
+        THEME_STORAGE_KEY,
+        JSON.stringify(resolvedTheme),
+      );
       window.localStorage.setItem(THEME_SELECTED_KEY, "true");
     } catch (error) {
       console.error("Unable to save the selected theme.", error);
     }
     if (typeof document !== "undefined") {
-      document.body.setAttribute("data-theme", newTheme.id);
-      document.documentElement.style.setProperty("--primary", newTheme.primary);
-      document.documentElement.style.setProperty(
-        "--secondary",
-        newTheme.secondary,
-      );
-      document.documentElement.style.setProperty(
-        "--tertiary",
-        newTheme.tertiary,
-      );
+      applyThemeToDocument(resolvedTheme, mode);
     }
   };
 
-  const setColorMode = (mode: "dark" | "light") => {
-    setColorModeState(mode);
+  const addImportedTheme = (newTheme: ThemeConfig) => {
+    const next = [
+      ...importedThemes.filter((item) => item.id !== newTheme.id),
+      newTheme,
+    ];
     try {
-      window.localStorage.setItem(COLOR_MODE_STORAGE_KEY, mode);
+      window.localStorage.setItem(
+        IMPORTED_THEMES_STORAGE_KEY,
+        JSON.stringify(next),
+      );
     } catch (error) {
-      console.error("Unable to save the selected color mode.", error);
+      console.error("Unable to save imported themes.", error);
+      throw new Error("Unable to save imported themes to browser storage.");
     }
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme-mode", mode);
+    setImportedThemes(next);
+  };
+
+  const deleteImportedTheme = (themeId: string) => {
+    const next = importedThemes.filter((item) => item.id !== themeId);
+    try {
+      window.localStorage.setItem(
+        IMPORTED_THEMES_STORAGE_KEY,
+        JSON.stringify(next),
+      );
+    } catch (error) {
+      console.error("Unable to delete imported theme.", error);
+      throw new Error("Unable to save the imported theme changes.");
     }
+    setImportedThemes(next);
+    if (theme.id === themeId) setTheme(THEME_PRESETS[0]!);
   };
 
   useEffect(() => {
@@ -2181,8 +2294,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         logout,
         theme,
         setTheme,
-        colorMode,
-        setColorMode,
+        importedThemes,
+        addImportedTheme,
+        deleteImportedTheme,
+        colorMode: theme.type === "light" ? "light" : "dark",
+        matchSystemTheme: false,
+        commandPaletteQuery,
+        setCommandPaletteQuery,
         availableThemes: THEME_PRESETS,
         repositories,
         searchRepoQuery,
@@ -2253,6 +2371,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setIsAiDrawerOpen,
         isTerminalOpen,
         setIsTerminalOpen,
+        isTerminalFocused,
+        setIsTerminalFocused,
         applyDiffToActiveFile,
         remoteCode,
         updateRemoteCode,

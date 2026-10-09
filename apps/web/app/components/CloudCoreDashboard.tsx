@@ -7,6 +7,7 @@ import {
   type WorkspaceDevbox,
 } from "../context/AppContext";
 import { Activity, ChevronDown, Plus, Search, Users, X } from "lucide-react";
+import { ensureContrast } from "../context/themeModel";
 import { FriendlyHint } from "./FriendlyHelpers";
 
 type TimeRange = "last-week" | "current" | "last-month" | "last-3-months";
@@ -171,7 +172,7 @@ function Panel({
 }) {
   return (
     <section
-      className={`rounded-2xl border border-[#262638] bg-[#141420] ${className}`}
+      className={`rounded-2xl border border-ide-border-strong bg-ide-panel ${className}`}
     >
       {children}
     </section>
@@ -186,6 +187,7 @@ export function CloudCoreDashboard() {
     deployments,
     isDataLoading,
     addToast,
+    theme,
   } = useApp();
   const [boardTab, setBoardTab] = useState<BoardTab>("allocation");
   const [dashboardRange, setDashboardRange] =
@@ -506,7 +508,7 @@ export function CloudCoreDashboard() {
           id: "overload",
           title: `${dashboard.projects[0].name} is taking the most time`,
           detail: `${dashboard.projects[0].share}% of team hours in ${rangeLabel(dashboardRange).toLowerCase()}. Spread work if this project is slipping.`,
-          color: "#ff9d78",
+          color: "var(--ide-color-danger)",
         }
       : null,
     {
@@ -515,7 +517,7 @@ export function CloudCoreDashboard() {
       detail: slackProject
         ? `${slackProject.name} has the lightest load. You can add people here without overloading the sprint.`
         : "Add a project to start tracking leftover capacity.",
-      color: "#0df5c4",
+      color: "var(--ide-color-success)",
     },
     workspaces.find((workspace) => workspace.status === "Running")
       ? {
@@ -523,14 +525,14 @@ export function CloudCoreDashboard() {
           title: `${workspaces.find((workspace) => workspace.status === "Running")?.name} is live`,
           detail:
             "Hours follow running workspaces and starred projects, so this mix updates when you start, stop, or add work.",
-          color: "#8b7cff",
+          color: "var(--ide-color-secondary)",
         }
       : {
           id: "empty",
           title: "No running workspace yet",
           detail:
             "Spin up a workspace to give this board live hours instead of only repository estimates.",
-          color: "#ffc269",
+          color: "var(--ide-color-warning)",
         },
   ]
     .filter(Boolean)
@@ -563,7 +565,7 @@ export function CloudCoreDashboard() {
         id: `alloc-${Date.now()}`,
         title: `${name} was allocated`,
         detail: `Now contributing across ${projectIds.length} project${projectIds.length === 1 ? "" : "s"}.`,
-        color: "#8b7cff",
+        color: "var(--ide-color-secondary)",
       },
       ...current,
     ]);
@@ -578,7 +580,7 @@ export function CloudCoreDashboard() {
   };
 
   return (
-    <main className="min-w-0 flex-1 overflow-y-auto bg-[#09090f] px-4 py-4 text-[#ededf5] sm:px-6 lg:px-8">
+    <main className="min-w-0 flex-1 overflow-y-auto bg-ide-app-content-bg px-4 py-4 text-ide-text sm:px-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-4">
         <FriendlyHint
           title="This board is live"
@@ -587,9 +589,9 @@ export function CloudCoreDashboard() {
 
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-[28px] font-semibold tracking-tight text-white">
+            <h1 className="text-[28px] font-semibold tracking-tight text-ide-text-strong">
               Team Project Allocation
-              <span className="ml-2 font-normal text-[#7b7788]">
+              <span className="ml-2 font-normal text-ide-muted">
                 {"//"} Workload &amp; Bandwidth Health
               </span>
             </h1>
@@ -603,28 +605,28 @@ export function CloudCoreDashboard() {
                   onClick={() => setBoardTab(tab.id as BoardTab)}
                   className={`relative px-3 py-2 text-[13px] ${
                     boardTab === tab.id
-                      ? "text-white"
-                      : "text-[#8a8696] hover:text-[#d8d4e0]"
+                      ? "text-ide-text-strong"
+                      : "text-ide-muted hover:text-ide-text-secondary"
                   }`}
                 >
                   {tab.label}
                   {boardTab === tab.id && (
-                    <span className="absolute inset-x-3 -bottom-0.5 h-0.5 rounded-full bg-[#0df5c4]" />
+                    <span className="absolute inset-x-3 -bottom-0.5 h-0.5 rounded-full bg-ide-success" />
                   )}
                 </button>
               ))}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-lg border border-[#2a2834] bg-[#12121a] p-1">
+            <div className="flex rounded-lg border border-ide-border-strong bg-ide-panel p-1">
               {RANGE_OPTIONS.map((option) => (
                 <button
                   key={option.id}
                   onClick={() => setDashboardRange(option.id)}
                   className={`rounded-md px-3 py-1.5 text-[12px] ${
                     dashboardRange === option.id
-                      ? "bg-[#1d1c28] text-white shadow-sm"
-                      : "text-[#8a8696] hover:text-white"
+                      ? "bg-ide-surface-toolbar text-ide-text-strong shadow-sm"
+                      : "text-ide-muted hover:text-ide-text-strong"
                   }`}
                 >
                   {option.label}
@@ -634,18 +636,18 @@ export function CloudCoreDashboard() {
             <div className="relative">
               <button
                 onClick={() => setRepoMenuOpen((open) => !open)}
-                className="flex items-center gap-2 rounded-lg border border-[#2a2834] bg-[#12121a] px-3 py-2 text-[12px] text-[#d8d4e0]"
+                className="flex items-center gap-2 rounded-lg border border-ide-border-strong bg-ide-panel px-3 py-2 text-[12px] text-ide-text-secondary"
               >
                 Repository:{" "}
                 {repoFilter === "all"
                   ? "All"
                   : projects.find((project) => project.id === repoFilter)?.name}
-                <ChevronDown className="h-3.5 w-3.5 text-[#7b7788]" />
+                <ChevronDown className="h-3.5 w-3.5 text-ide-muted" />
               </button>
               {repoMenuOpen && (
-                <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-[#2a2834] bg-[#161622] py-1 shadow-2xl">
+                <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-ide-border-strong bg-ide-panel py-1 shadow-2xl">
                   <button
-                    className="block w-full px-3 py-2 text-left text-[12px] hover:bg-white/5"
+                    className="block w-full px-3 py-2 text-left text-[12px] hover:bg-ide-hover"
                     onClick={() => {
                       setRepoFilter("all");
                       setRepoMenuOpen(false);
@@ -656,7 +658,7 @@ export function CloudCoreDashboard() {
                   {projects.map((project) => (
                     <button
                       key={project.id}
-                      className="block w-full px-3 py-2 text-left text-[12px] hover:bg-white/5"
+                      className="block w-full px-3 py-2 text-left text-[12px] hover:bg-ide-hover"
                       onClick={() => {
                         setRepoFilter(project.id);
                         setRepoMenuOpen(false);
@@ -670,7 +672,7 @@ export function CloudCoreDashboard() {
             </div>
             <button
               onClick={() => setAllocateOpen(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-[#7c6cf5] px-3.5 py-2 text-[12px] font-semibold text-white hover:bg-[#8b7cff]"
+              className="flex items-center gap-1.5 rounded-lg bg-ide-secondary px-3.5 py-2 text-[12px] font-semibold text-[var(--ide-color-secondary-fg)] hover:bg-ide-secondary"
             >
               <Plus className="h-3.5 w-3.5" />
               Allocate Contributor
@@ -680,21 +682,21 @@ export function CloudCoreDashboard() {
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Panel className="p-4">
-            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-[#9a96a6]">
+            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-ide-text-soft">
               TOTAL EFFORT ALLOCATED
-              <Activity className="h-4 w-4 text-[#8b7cff]" />
+              <Activity className="h-4 w-4 text-ide-secondary" />
             </div>
             <div className="mt-3 flex items-end gap-2">
-              <strong className="text-[32px] font-semibold leading-none text-white">
+              <strong className="text-[32px] font-semibold leading-none text-ide-text-strong">
                 {isDataLoading ? "—" : dashboard.totalHours.toLocaleString()}
               </strong>
-              <span className="pb-1 text-[12px] text-[#8a8696]">hrs</span>
+              <span className="pb-1 text-[12px] text-ide-muted">hrs</span>
             </div>
-            <p className="mt-2 text-[12px] text-[#9a96a6]">
+            <p className="mt-2 text-[12px] text-ide-text-soft">
               vs {comparison.totalHours.toLocaleString()}{" "}
               {previousLabel.toLowerCase()}
               <span
-                className={`ml-2 ${hourDelta >= 0 ? "text-[#0df5c4]" : "text-[#ff8991]"}`}
+                className={`ml-2 ${hourDelta >= 0 ? "text-ide-success" : "text-ide-danger"}`}
               >
                 {hourDelta >= 0 ? "+" : ""}
                 {hourDelta}%
@@ -703,23 +705,26 @@ export function CloudCoreDashboard() {
           </Panel>
 
           <Panel className="p-4">
-            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-[#9a96a6]">
+            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-ide-text-soft">
               ACTIVE CONTRIBUTORS
-              <Users className="h-4 w-4 text-[#0df5c4]" />
+              <Users className="h-4 w-4 text-ide-success" />
             </div>
             <div className="mt-3 flex items-end gap-2">
-              <strong className="text-[32px] font-semibold leading-none text-white">
+              <strong className="text-[32px] font-semibold leading-none text-ide-text-strong">
                 {team.length}
               </strong>
-              <span className="pb-1 text-[12px] text-[#8a8696]">Core Devs</span>
+              <span className="pb-1 text-[12px] text-ide-muted">Core Devs</span>
             </div>
             <div className="mt-3 flex -space-x-2">
               {team.slice(0, 6).map((member) => (
                 <span
                   key={member.id}
                   title={member.name}
-                  className="grid h-7 w-7 place-items-center rounded-full border-2 border-[#141420] text-[10px] font-bold text-[#0b0b12]"
-                  style={{ backgroundColor: member.color }}
+                  className="grid h-7 w-7 place-items-center rounded-full border-2 border-ide-border-control text-[10px] font-bold text-ide-accent-fg"
+                  style={{
+                    backgroundColor: member.color,
+                    color: ensureContrast(theme.ui["accent-fg"], member.color),
+                  }}
                 >
                   {initials(member.name)}
                 </span>
@@ -728,8 +733,8 @@ export function CloudCoreDashboard() {
           </Panel>
 
           <Panel className="p-4">
-            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-[#9a96a6]">
-              TEAM SATURATION %<span className="text-[#ffc269]">●</span>
+            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-ide-text-soft">
+              TEAM SATURATION %<span className="text-ide-warning">●</span>
             </div>
             <div className="mt-2 flex items-center gap-3">
               <svg viewBox="0 0 72 72" className="h-16 w-16 -rotate-90">
@@ -738,7 +743,7 @@ export function CloudCoreDashboard() {
                   cy="36"
                   r="28"
                   fill="none"
-                  stroke="#262638"
+                  stroke="var(--ide-color-border-strong)"
                   strokeWidth="7"
                 />
                 <circle
@@ -746,35 +751,35 @@ export function CloudCoreDashboard() {
                   cy="36"
                   r="28"
                   fill="none"
-                  stroke="#ffc269"
+                  stroke="var(--ide-color-warning)"
                   strokeWidth="7"
                   strokeLinecap="round"
                   strokeDasharray={`${(dashboard.saturation / 100) * 176} 176`}
                 />
               </svg>
               <div>
-                <strong className="text-[32px] font-semibold leading-none text-white">
+                <strong className="text-[32px] font-semibold leading-none text-ide-text-strong">
                   {dashboard.saturation}%
                 </strong>
-                <p className="mt-1 text-[12px] text-[#9a96a6]">Capacity Used</p>
+                <p className="mt-1 text-[12px] text-ide-text-soft">Capacity Used</p>
               </div>
             </div>
           </Panel>
 
           <Panel className="p-4">
-            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-[#9a96a6]">
+            <div className="flex items-center justify-between text-[10px] font-medium tracking-[0.12em] text-ide-text-soft">
               UNALLOCATED SLACK
-              <span className="text-[#8b7cff]">●</span>
+              <span className="text-ide-secondary">●</span>
             </div>
-            <div className="mt-3 truncate text-[22px] font-semibold text-white">
+            <div className="mt-3 truncate text-[22px] font-semibold text-ide-text-strong">
               {slackProject?.name ?? "No project yet"}
             </div>
-            <p className="mt-2 text-[12px] text-[#9a96a6]">
+            <p className="mt-2 text-[12px] text-ide-text-soft">
               {dashboard.slack}% Remaining Slack
             </p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#262638]">
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-ide-surface">
               <div
-                className="h-full rounded-full bg-[#8b7cff]"
+                className="h-full rounded-full bg-ide-secondary"
                 style={{ width: `${dashboard.slack}%` }}
               />
             </div>
@@ -789,17 +794,17 @@ export function CloudCoreDashboard() {
                   <h2 className="text-[16px] font-semibold">
                     Project Effort Share
                   </h2>
-                  <p className="mt-1 text-[12px] text-[#8a8696]">
+                  <p className="mt-1 text-[12px] text-ide-muted">
                     How team hours split across projects
                   </p>
                 </div>
                 <label className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[#7b7788]" />
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ide-muted" />
                   <input
                     value={effortQuery}
                     onChange={(event) => setEffortQuery(event.target.value)}
                     placeholder="Search"
-                    className="w-32 rounded-lg border border-[#2a2834] bg-[#101018] py-2 pl-8 pr-3 text-[12px] outline-none focus:border-[#8b7cff]"
+                    className="w-32 rounded-lg border border-ide-border-strong bg-ide-workbench-bg py-2 pl-8 pr-3 text-[12px] outline-none focus:border-ide-secondary"
                   />
                 </label>
               </div>
@@ -809,14 +814,14 @@ export function CloudCoreDashboard() {
                   style={{
                     background: donutStops.stops.length
                       ? `conic-gradient(${donutStops.stops.join(",")})`
-                      : "#262638",
+                      : "var(--ide-color-border-strong)",
                   }}
                 >
-                  <div className="grid h-28 w-28 place-items-center rounded-full bg-[#141420] text-center">
+                  <div className="grid h-28 w-28 place-items-center rounded-full bg-ide-panel text-center">
                     <div className="text-[28px] font-semibold">
                       {dashboard.totalHours ? "100%" : "0%"}
                     </div>
-                    <div className="text-[10px] tracking-wide text-[#8a8696]">
+                    <div className="text-[10px] tracking-wide text-ide-muted">
                       ALLOCATED
                     </div>
                   </div>
@@ -832,7 +837,7 @@ export function CloudCoreDashboard() {
                           className="h-2.5 w-2.5 rounded-full"
                           style={{ backgroundColor: project.color }}
                         />
-                        <span className="min-w-0 flex-1 truncate text-[#d8d4e0]">
+                        <span className="min-w-0 flex-1 truncate text-ide-text-secondary">
                           {project.name}
                         </span>
                         <span
@@ -844,20 +849,20 @@ export function CloudCoreDashboard() {
                       </div>
                     ))
                   ) : (
-                    <p className="text-[13px] text-[#8a8696]">
+                    <p className="text-[13px] text-ide-muted">
                       No projects match this search.
                     </p>
                   )}
                 </div>
               </div>
-              <div className="mt-5 flex items-center justify-between border-t border-[#262638] pt-3 text-[12px] text-[#8a8696]">
+              <div className="mt-5 flex items-center justify-between border-t border-ide-border-strong pt-3 text-[12px] text-ide-muted">
                 <span>
                   {rangeLabel(dashboardRange)}{" "}
-                  <b className="text-white">100%</b>
+                  <b className="text-ide-text-strong">100%</b>
                 </span>
                 <span>
                   {previousLabel}{" "}
-                  <b className="text-white">{comparison.saturation}%</b>
+                  <b className="text-ide-text-strong">{comparison.saturation}%</b>
                 </span>
               </div>
             </Panel>
@@ -868,15 +873,15 @@ export function CloudCoreDashboard() {
                   <h2 className="text-[16px] font-semibold">
                     Workstream Velocity &amp; Activity Mix
                   </h2>
-                  <p className="mt-1 text-[12px] text-[#8a8696]">
+                  <p className="mt-1 text-[12px] text-ide-muted">
                     Activity Category Distribution
                   </p>
                 </div>
                 <div className="text-right">
-                  <div className="text-[18px] font-semibold text-white">
+                  <div className="text-[18px] font-semibold text-ide-text-strong">
                     {dashboard.totalHours.toLocaleString()}
                   </div>
-                  <div className="text-[11px] text-[#8a8696]">
+                  <div className="text-[11px] text-ide-muted">
                     Hours Capacity
                   </div>
                 </div>
@@ -886,7 +891,7 @@ export function CloudCoreDashboard() {
                   dashboard.activity.map((item) => (
                     <div key={item.label}>
                       <div className="mb-1.5 flex items-center justify-between gap-3 text-[13px]">
-                        <span className="min-w-0 truncate text-[#d8d4e0]">
+                        <span className="min-w-0 truncate text-ide-text-secondary">
                           {item.label}
                         </span>
                         <span
@@ -896,7 +901,7 @@ export function CloudCoreDashboard() {
                           {item.share}%
                         </span>
                       </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-[#262638]">
+                      <div className="h-2 overflow-hidden rounded-full bg-ide-surface">
                         <div
                           className="h-full rounded-full"
                           style={{
@@ -908,7 +913,7 @@ export function CloudCoreDashboard() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-[13px] text-[#8a8696]">
+                  <p className="text-[13px] text-ide-muted">
                     Add a repository or workspace to see activity mix.
                   </p>
                 )}
@@ -920,13 +925,13 @@ export function CloudCoreDashboard() {
             <h2 className="text-[16px] font-semibold">
               Workload &amp; Bandwidth
             </h2>
-            <p className="mt-1 text-[12px] text-[#8a8696]">
+            <p className="mt-1 text-[12px] text-ide-muted">
               Saturation is hours logged versus each person&apos;s available
               hours in {rangeLabel(dashboardRange).toLowerCase()}.
             </p>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-[13px]">
-                <thead className="text-[11px] uppercase tracking-wider text-[#8a8696]">
+                <thead className="text-[11px] uppercase tracking-wider text-ide-muted">
                   <tr>
                     <th className="pb-3 font-medium">Project</th>
                     <th className="pb-3 font-medium">Hours</th>
@@ -936,7 +941,7 @@ export function CloudCoreDashboard() {
                 </thead>
                 <tbody>
                   {dashboard.projects.map((project) => (
-                    <tr key={project.id} className="border-t border-[#262638]">
+                    <tr key={project.id} className="border-t border-ide-border-strong">
                       <td className="py-3">
                         <span
                           className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
@@ -968,31 +973,31 @@ export function CloudCoreDashboard() {
               <h2 className="text-[16px] font-semibold">
                 Project Contributors &amp; Individual Working Percentage
               </h2>
-              <p className="mt-1 text-[12px] text-[#8a8696]">
+              <p className="mt-1 text-[12px] text-ide-muted">
                 Colored bars show where each person spent time. Working % is
                 hours vs available hours for the selected period.
               </p>
             </div>
             <label className="relative text-[12px]">
-              <span className="mb-1 block text-[11px] uppercase tracking-wider text-[#8a8696]">
+              <span className="mb-1 block text-[11px] uppercase tracking-wider text-ide-muted">
                 Working % period
               </span>
               <button
                 onClick={() => setWorkingMenuOpen((open) => !open)}
-                className="flex min-w-44 items-center justify-between gap-2 rounded-lg border border-[#2a2834] bg-[#101018] px-3 py-2 text-[#d8d4e0]"
+                className="flex min-w-44 items-center justify-between gap-2 rounded-lg border border-ide-border-strong bg-ide-workbench-bg px-3 py-2 text-ide-text-secondary"
               >
                 {rangeLabel(workingRange)}
-                <ChevronDown className="h-3.5 w-3.5 text-[#7b7788]" />
+                <ChevronDown className="h-3.5 w-3.5 text-ide-muted" />
               </button>
               {workingMenuOpen && (
-                <div className="absolute right-0 z-20 mt-1 w-full rounded-xl border border-[#2a2834] bg-[#161622] py-1 shadow-2xl">
+                <div className="absolute right-0 z-20 mt-1 w-full rounded-xl border border-ide-border-strong bg-ide-panel py-1 shadow-2xl">
                   {RANGE_OPTIONS.map((option) => (
                     <button
                       key={option.id}
-                      className={`block w-full px-3 py-2 text-left hover:bg-white/5 ${
+                      className={`block w-full px-3 py-2 text-left hover:bg-ide-hover ${
                         workingRange === option.id
-                          ? "text-[#0df5c4]"
-                          : "text-[#d8d4e0]"
+                          ? "text-ide-success"
+                          : "text-ide-text-secondary"
                       }`}
                       onClick={() => {
                         setWorkingRange(option.id);
@@ -1009,7 +1014,7 @@ export function CloudCoreDashboard() {
 
           <div className="overflow-x-auto px-5 pb-2">
             <table className="w-full min-w-[760px] text-left">
-              <thead className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#8a8696]">
+              <thead className="text-[11px] font-medium uppercase tracking-[0.12em] text-ide-muted">
                 <tr>
                   <th className="py-2">Contributor</th>
                   <th className="py-2">Project Share Mix</th>
@@ -1023,20 +1028,23 @@ export function CloudCoreDashboard() {
                     0,
                   );
                   return (
-                    <tr key={member.id} className="border-t border-[#262638]">
+                    <tr key={member.id} className="border-t border-ide-border-strong">
                       <td className="py-3.5 pr-4">
                         <div className="flex items-center gap-3">
                           <span
-                            className="grid h-9 w-9 place-items-center rounded-lg text-[11px] font-bold text-[#0b0b12]"
-                            style={{ backgroundColor: member.color }}
+                            className="grid h-9 w-9 place-items-center rounded-lg text-[11px] font-bold text-ide-accent-fg"
+                            style={{
+                              backgroundColor: member.color,
+                              color: ensureContrast(theme.ui["accent-fg"], member.color),
+                            }}
                           >
                             {initials(member.name)}
                           </span>
                           <span>
-                            <b className="block text-[14px] font-medium text-white">
+                            <b className="block text-[14px] font-medium text-ide-text-strong">
                               {member.name}
                             </b>
-                            <small className="text-[12px] text-[#8a8696]">
+                            <small className="text-[12px] text-ide-muted">
                               {member.projectCount} of{" "}
                               {workingBoard.projects.length} projects
                             </small>
@@ -1044,15 +1052,16 @@ export function CloudCoreDashboard() {
                         </div>
                       </td>
                       <td className="py-3.5">
-                        <div className="flex h-8 overflow-hidden rounded-lg bg-[#1b1a24]">
+                        <div className="flex h-8 overflow-hidden rounded-lg bg-ide-surface-toolbar">
                           {member.slices.map((slice) => (
                             <div
                               key={slice.projectId}
                               title={`${slice.name}: ${slice.hours} hrs`}
-                              className="flex min-w-0 items-center justify-center overflow-hidden px-2 text-[11px] font-medium text-[#0b0b12]"
+                              className="flex min-w-0 items-center justify-center overflow-hidden px-2 text-[11px] font-medium text-ide-accent-fg"
                               style={{
                                 width: `${sliceTotal ? (slice.hours / sliceTotal) * 100 : 0}%`,
                                 backgroundColor: slice.color,
+                                color: ensureContrast(theme.ui["accent-fg"], slice.color),
                               }}
                             >
                               <span className="truncate">{slice.name}</span>
@@ -1061,10 +1070,10 @@ export function CloudCoreDashboard() {
                         </div>
                       </td>
                       <td className="py-3.5 text-right">
-                        <div className="text-[18px] font-semibold text-white">
+                        <div className="text-[18px] font-semibold text-ide-text-strong">
                           {member.workingPercent}%
                         </div>
-                        <div className="ml-auto mt-1 h-1 w-16 rounded-full bg-[#262638]">
+                        <div className="ml-auto mt-1 h-1 w-16 rounded-full bg-ide-surface">
                           <div
                             className="h-full rounded-full"
                             style={{
@@ -1080,13 +1089,13 @@ export function CloudCoreDashboard() {
               </tbody>
             </table>
             {!workingBoard.contributors.length && (
-              <p className="py-8 text-center text-[13px] text-[#8a8696]">
+              <p className="py-8 text-center text-[13px] text-ide-muted">
                 Add a project or allocate a contributor to see working
                 percentage.
               </p>
             )}
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#262638] px-5 py-3 text-[12px] text-[#8a8696]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ide-border-strong px-5 py-3 text-[12px] text-ide-muted">
             <span>
               Showing {shownContributors.length} of{" "}
               {workingBoard.contributors.length} Contributors
@@ -1094,14 +1103,14 @@ export function CloudCoreDashboard() {
             <div className="flex gap-4">
               {workingBoard.contributors.length > 6 && (
                 <button
-                  className="text-[#d8d4e0] hover:text-white"
+                  className="text-ide-text-secondary hover:text-ide-text-strong"
                   onClick={() => setShowAllContributors((open) => !open)}
                 >
                   {showAllContributors ? "Show fewer" : "View All Contributors"}
                 </button>
               )}
               <button
-                className="text-[#8b7cff] hover:text-[#c4bcff]"
+                className="text-ide-secondary hover:text-ide-info"
                 onClick={() => setBoardTab("workload")}
               >
                 Manage Team Bandwidth
@@ -1112,7 +1121,7 @@ export function CloudCoreDashboard() {
 
         <Panel className="p-5">
           <h2 className="mb-4 flex items-center gap-2 text-[14px] font-semibold">
-            <Activity className="h-4 w-4 text-[#8b7cff]" />
+            <Activity className="h-4 w-4 text-ide-secondary" />
             Recent Allocation &amp; Capacity Events
           </h2>
           <div className="grid gap-4 md:grid-cols-3">
@@ -1128,7 +1137,7 @@ export function CloudCoreDashboard() {
                 >
                   {event.title}
                 </b>
-                <p className="mt-1 text-[12px] leading-relaxed text-[#9a96a6]">
+                <p className="mt-1 text-[12px] leading-relaxed text-ide-text-soft">
                   {event.detail}
                 </p>
               </article>
@@ -1136,8 +1145,8 @@ export function CloudCoreDashboard() {
           </div>
         </Panel>
 
-        <div className="flex flex-wrap items-center gap-4 pb-2 text-[12px] text-[#8a8696]">
-          <span className="rounded-md bg-[#161622] px-2 py-1 font-mono text-[#0df5c4]">
+        <div className="flex flex-wrap items-center gap-4 pb-2 text-[12px] text-ide-muted">
+          <span className="rounded-md bg-ide-panel px-2 py-1 font-mono text-ide-success">
             Sprint {sprintNumber}
           </span>
           <span>{dashboard.totalHours.toLocaleString()} hrs</span>
@@ -1151,7 +1160,7 @@ export function CloudCoreDashboard() {
           onClick={() => setAllocateOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-[#2a2834] bg-[#141420] p-5 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-ide-border-strong bg-ide-panel p-5 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
@@ -1159,23 +1168,23 @@ export function CloudCoreDashboard() {
                 Allocate a contributor
               </h3>
               <button onClick={() => setAllocateOpen(false)} aria-label="Close">
-                <X className="h-4 w-4 text-[#8a8696]" />
+                <X className="h-4 w-4 text-ide-muted" />
               </button>
             </div>
-            <p className="mb-4 text-[12px] text-[#8a8696]">
+            <p className="mb-4 text-[12px] text-ide-muted">
               They will receive a live hour mix from the projects you pick.
               Working % updates with the period dropdown.
             </p>
-            <label className="block text-[12px] text-[#d8d4e0]">
+            <label className="block text-[12px] text-ide-text-secondary">
               Name
               <input
                 value={newMemberName}
                 onChange={(event) => setNewMemberName(event.target.value)}
                 placeholder="Jamie Cole"
-                className="mt-1 w-full rounded-lg border border-[#2a2834] bg-[#101018] px-3 py-2 text-[13px] outline-none focus:border-[#8b7cff]"
+                className="mt-1 w-full rounded-lg border border-ide-border-strong bg-ide-workbench-bg px-3 py-2 text-[13px] outline-none focus:border-ide-secondary"
               />
             </label>
-            <div className="mt-4 text-[12px] text-[#d8d4e0]">Projects</div>
+            <div className="mt-4 text-[12px] text-ide-text-secondary">Projects</div>
             <div className="mt-2 max-h-40 space-y-2 overflow-auto">
               {visibleProjects.map((project) => (
                 <label
@@ -1203,7 +1212,7 @@ export function CloudCoreDashboard() {
             </div>
             <button
               onClick={allocateMember}
-              className="mt-5 w-full rounded-lg bg-[#7c6cf5] py-2.5 text-[13px] font-semibold text-white hover:bg-[#8b7cff]"
+              className="mt-5 w-full rounded-lg bg-ide-secondary py-2.5 text-[13px] font-semibold text-[var(--ide-color-secondary-fg)] hover:bg-ide-secondary"
             >
               Add to allocation board
             </button>

@@ -37,7 +37,8 @@ export const CommandPalette: React.FC = () => {
     setPage,
     triggerNewRelease,
     spinUpDevbox,
-    theme,
+    commandPaletteQuery,
+    setCommandPaletteQuery,
     treeFiles,
     openFileInEditor,
     isTerminalOpen,
@@ -53,8 +54,12 @@ export const CommandPalette: React.FC = () => {
     if (!isCommandPaletteOpen) {
       setQuery("");
       setSelectedIndex(0);
+      setCommandPaletteQuery("");
+      return;
     }
-  }, [isCommandPaletteOpen]);
+    setQuery(commandPaletteQuery);
+    setSelectedIndex(0);
+  }, [isCommandPaletteOpen, commandPaletteQuery, setCommandPaletteQuery]);
 
   useEffect(() => {
     if (!isCommandPaletteOpen) return;
@@ -70,8 +75,6 @@ export const CommandPalette: React.FC = () => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isCommandPaletteOpen, setIsCommandPaletteOpen]);
-
-  if (!isCommandPaletteOpen) return null;
 
   const dispatchEditorAction = (action: string) => {
     window.dispatchEvent(
@@ -202,13 +205,6 @@ export const CommandPalette: React.FC = () => {
       action: () => setPage("deployments"),
     },
     {
-      id: "goto-theme",
-      label: "Open Theme Palette",
-      category: "Navigation",
-      icon: Palette,
-      action: () => setPage("theme"),
-    },
-    {
       id: "goto-settings",
       label: "Open Site Settings",
       category: "Navigation",
@@ -270,6 +266,9 @@ export const CommandPalette: React.FC = () => {
     (command) =>
       fuzzyMatch(query, command.label) || fuzzyMatch(query, command.category),
   );
+  const selectedCommandId = filtered[selectedIndex]?.id;
+
+  if (!isCommandPaletteOpen) return null;
 
   return (
     <div
@@ -291,8 +290,8 @@ export const CommandPalette: React.FC = () => {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="command-palette-topline" aria-hidden="true" />
-        <div className="flex items-center gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/[0.10] text-[#a9a4ff] shadow-[0_4px_16px_rgba(108,99,255,0.12)]">
+        <div className="flex items-center gap-3 border-b border-ide-border-subtle px-4 py-4 sm:px-5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-secondary)_10%,transparent)] text-ide-secondary shadow-[0_4px_16px_color-mix(in_srgb,var(--ide-color-secondary)_12%,transparent)]">
             <Search className="h-4 w-4" />
           </span>
           <input
@@ -317,13 +316,13 @@ export const CommandPalette: React.FC = () => {
                 setIsCommandPaletteOpen(false);
               }
             }}
-            className="w-full bg-transparent text-sm text-white placeholder-[#77798d] focus:outline-none"
+            className="w-full bg-transparent text-sm text-ide-text-strong placeholder:text-ide-muted focus:outline-none"
             aria-label="Search commands"
           />
           <button
             type="button"
             onClick={() => setIsCommandPaletteOpen(false)}
-            className="rounded-lg border border-white/[0.08] bg-white/[0.035] px-2 py-1 text-[10px] font-medium text-[#a0a1b1] transition hover:border-white/[0.16] hover:text-white"
+            className="rounded-lg border border-ide-border bg-ide-input-bg px-2 py-1 text-[10px] font-medium text-ide-text-soft transition hover:border-ide-border-strong hover:text-ide-text-strong"
             aria-label="Close command palette"
           >
             Esc
@@ -331,18 +330,18 @@ export const CommandPalette: React.FC = () => {
         </div>
 
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#77798d]">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ide-muted">
             Quick actions
           </span>
-          <span className="text-[10px] text-[#66687a]">
+          <span className="text-[10px] text-ide-subtle">
             {filtered.length} {filtered.length === 1 ? "result" : "results"}
           </span>
         </div>
         <div className="max-h-[min(60vh,420px)] space-y-1 overflow-y-auto px-2 pb-3">
           {filtered.length === 0 ? (
-            <div className="mx-1 my-2 rounded-xl border border-dashed border-white/[0.09] px-4 py-8 text-center text-xs text-[#85869a]">
+            <div className="mx-1 my-2 rounded-xl border border-dashed border-ide-border px-4 py-8 text-center text-xs text-ide-muted">
               No results for{" "}
-              <span className="font-medium text-[#c6c6d2]">{query}</span>
+              <span className="font-medium text-ide-text-secondary">{query}</span>
             </div>
           ) : (
             filtered.map((cmd, index) => {
@@ -363,10 +362,10 @@ export const CommandPalette: React.FC = () => {
                       <Icon className="h-4 w-4" />
                     </div>
                     <div className="min-w-0">
-                      <div className="truncate font-medium text-white">
+                      <div className="truncate font-medium text-ide-text-strong">
                         {cmd.label}
                       </div>
-                      <div className="mt-1 flex items-center gap-2 text-[10px] text-[#77798d]">
+                      <div className="mt-1 flex items-center gap-2 text-[10px] text-ide-muted">
                         <span>{cmd.category}</span>
                         {"shortcut" in cmd && cmd.shortcut && (
                           <kbd>{cmd.shortcut}</kbd>
@@ -374,7 +373,7 @@ export const CommandPalette: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-[#686a7c] transition group-hover:translate-x-0.5 group-hover:text-[#0DF5C4]" />
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-ide-subtle transition group-hover:translate-x-0.5 group-hover:text-ide-accent" />
                 </button>
               );
             })

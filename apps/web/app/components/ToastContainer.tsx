@@ -10,17 +10,17 @@ export const ToastContainer: React.FC = () => {
   if (!toasts || toasts.length === 0) return null;
 
   const iconMap = {
-    success: <CheckCircle2 className="w-4 h-4 text-[#0DF5C4] shrink-0" />,
-    error: <AlertCircle className="w-4 h-4 text-[#f87171] shrink-0" />,
-    warning: <AlertTriangle className="w-4 h-4 text-[#ffae33] shrink-0" />,
-    info: <Info className="w-4 h-4 text-[#6C63FF] shrink-0" />
+    success: <CheckCircle2 className="w-4 h-4 text-ide-success shrink-0" />,
+    error: <AlertCircle className="w-4 h-4 text-ide-danger shrink-0" />,
+    warning: <AlertTriangle className="w-4 h-4 text-ide-warning shrink-0" />,
+    info: <Info className="w-4 h-4 text-ide-info shrink-0" />
   };
 
   const borderMap = {
-    success: 'border-[#0DF5C4]/30 shadow-[#0DF5C4]/10',
-    error: 'border-[#f87171]/40 shadow-[#f87171]/10',
-    warning: 'border-[#ffae33]/30 shadow-[#ffae33]/10',
-    info: 'border-[#6C63FF]/30 shadow-[#6C63FF]/10'
+    success: 'border-[color-mix(in_srgb,var(--ide-color-success)_30%,transparent)] shadow-[0_0_16px_color-mix(in_srgb,var(--ide-color-success)_10%,transparent)]',
+    error: 'border-[color-mix(in_srgb,var(--ide-color-danger)_40%,transparent)] shadow-[0_0_16px_color-mix(in_srgb,var(--ide-color-danger)_10%,transparent)]',
+    warning: 'border-[color-mix(in_srgb,var(--ide-color-warning)_30%,transparent)] shadow-[0_0_16px_color-mix(in_srgb,var(--ide-color-warning)_10%,transparent)]',
+    info: 'border-[color-mix(in_srgb,var(--ide-color-info)_30%,transparent)] shadow-[0_0_16px_color-mix(in_srgb,var(--ide-color-info)_10%,transparent)]'
   };
 
   return (
@@ -34,19 +34,19 @@ export const ToastContainer: React.FC = () => {
           key={toast.id}
           role="status"
           aria-live="polite"
-          className={`pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-[#111119]/95 backdrop-blur-xl border ${borderMap[toast.type]} shadow-xl text-xs transition-all duration-200 animate-in slide-in-from-bottom-2 fade-in`}
+          className={`pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-ide-surface-overlay backdrop-blur-xl border ${borderMap[toast.type]} shadow-xl text-xs transition-all duration-200 animate-in slide-in-from-bottom-2 fade-in`}
         >
           {iconMap[toast.type]}
           <div className="flex-1 space-y-0.5">
-            <div className="font-semibold text-white tracking-tight">{toast.title}</div>
+            <div className="font-semibold text-ide-text-strong tracking-tight">{toast.title}</div>
             {toast.description && (
-              <div className="text-[11px] text-[#9ca3af] leading-relaxed">{toast.description}</div>
+              <div className="text-[11px] text-ide-text-soft leading-relaxed">{toast.description}</div>
             )}
           </div>
           <button
             onClick={() => removeToast(toast.id)}
             aria-label="Dismiss notification"
-            className="p-1 rounded-lg text-[#71718c] hover:text-white hover:bg-white/10 transition-colors shrink-0"
+            className="p-1 rounded-lg text-ide-text-dim hover:text-ide-text-strong hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_10%,transparent)] transition-colors shrink-0"
           >
             <X className="w-3.5 h-3.5" />
           </button>

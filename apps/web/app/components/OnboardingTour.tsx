@@ -13,21 +13,21 @@ export const OnboardingTour: React.FC = () => {
     {
       title: 'Welcome to Devpulse Cloud 🚀',
       desc: 'Your all-in-one platform for instant cloud devboxes, collaborative code editing, and global edge deployments.',
-      icon: <Sparkles className="w-5 h-5 text-[#0DF5C4]" />,
+      icon: <Sparkles className="w-5 h-5 text-ide-accent" />,
       actionLabel: 'Next: Repositories',
       hint: 'Step 1: Discover how projects sync across your team'
     },
     {
       title: 'Import or Launch Repositories 📦',
       desc: 'Connect your GitHub or GitLab repositories, or create a new template workspace with one click. Everything is pre-configured with package caches.',
-      icon: <GitFork className="w-5 h-5 text-[#6C63FF]" />,
+      icon: <GitFork className="w-5 h-5 text-ide-secondary" />,
       actionLabel: 'Next: Devbox Workspaces',
       hint: 'Step 2: Start a dedicated cloud workspace anytime'
     },
     {
       title: 'Zero-Latency Workspaces & Deploys ⚡',
       desc: 'Spin up dedicated Firecracker microVMs in 1.2s, pair program with team members in real-time, and trigger global deployments.',
-      icon: <Rocket className="w-5 h-5 text-[#ffae33]" />,
+      icon: <Rocket className="w-5 h-5 text-ide-tertiary" />,
       actionLabel: 'Finish Tour & Get Started',
       hint: 'Step 3: You are ready to build at the speed of thought'
     }
@@ -39,23 +39,23 @@ export const OnboardingTour: React.FC = () => {
     <div
       role="region"
       aria-label="Welcome Tour"
-      className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-[#141422] to-[#12121c] border border-[#2b2b42] shadow-2xl relative overflow-hidden font-sans animate-in fade-in"
+      className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-ide-surface to-ide-panel border border-ide-border-strong shadow-2xl relative overflow-hidden font-sans animate-in fade-in"
     >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start gap-3.5">
-          <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-[color-mix(in_srgb,var(--ide-color-text-strong)_5%,transparent)] border border-ide-border flex items-center justify-center shrink-0">
             {current.icon}
           </div>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[#0DF5C4] font-semibold">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-ide-accent font-semibold">
                 QUICK TOUR · {tourStep + 1} OF {tourSteps.length}
               </span>
-              <span className="text-white/20">|</span>
-              <span className="text-[11px] text-[#8b8ba8] font-mono">{current.hint}</span>
+              <span className="text-[color:color-mix(in_srgb,var(--ide-color-text-strong)_20%,transparent)]">|</span>
+              <span className="text-[11px] text-ide-muted font-mono">{current.hint}</span>
             </div>
-            <h3 className="text-base font-bold text-white tracking-tight">{current.title}</h3>
-            <p className="text-xs text-[#a4a4c6] max-w-2xl leading-relaxed">{current.desc}</p>
+            <h3 className="text-base font-bold text-ide-text-strong tracking-tight">{current.title}</h3>
+            <p className="text-xs text-ide-text-secondary max-w-2xl leading-relaxed">{current.desc}</p>
           </div>
         </div>
 
@@ -64,7 +64,7 @@ export const OnboardingTour: React.FC = () => {
           {tourStep > 0 && (
             <button
               onClick={prevTourStep}
-              className="px-3 py-1.5 rounded-xl bg-[#1b1b28] hover:bg-[#242436] text-xs font-mono text-[#c4c4dc] flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-500"
+              className="px-3 py-1.5 rounded-xl bg-ide-surface-hover hover:bg-ide-surface-hover-strong text-xs font-mono text-ide-text-secondary flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ide-focus-ring"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Back</span>
@@ -73,8 +73,8 @@ export const OnboardingTour: React.FC = () => {
 
           <button
             onClick={nextTourStep}
-            className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-1.5 shadow-md transition-all hover:scale-[1.02] active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-            style={{ backgroundColor: theme.primary }}
+            className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-ide-accent-fg flex items-center gap-1.5 shadow-md transition-all hover:scale-[1.02] active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+            style={{ backgroundColor: theme.ui.accent }}
           >
             <span>{current.actionLabel}</span>
             {tourStep < tourSteps.length - 1 ? (
@@ -88,7 +88,7 @@ export const OnboardingTour: React.FC = () => {
             onClick={dismissTour}
             title="Dismiss Tour"
             aria-label="Close tour"
-            className="p-1.5 rounded-xl text-[#71718c] hover:text-white hover:bg-white/10 transition-colors ml-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-violet-500"
+            className="p-1.5 rounded-xl text-ide-text-dim hover:text-ide-text-strong hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_10%,transparent)] transition-colors ml-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ide-focus-ring"
           >
             <X className="w-4 h-4" />
           </button>
@@ -96,16 +96,16 @@ export const OnboardingTour: React.FC = () => {
       </div>
 
       {/* Progress Dots */}
-      <div className="flex items-center gap-1.5 pt-3 mt-3 border-t border-white/5">
+      <div className="flex items-center gap-1.5 pt-3 mt-3 border-t border-ide-border-subtle">
         {tourSteps.map((_, idx) => (
           <div
             key={idx}
             className={`h-1 rounded-full transition-all ${
-              idx === tourStep ? 'w-6 bg-[#0DF5C4]' : 'w-2 bg-[#28283a]'
+              idx === tourStep ? 'w-6 bg-ide-accent' : 'w-2 bg-ide-surface-hover-strong'
             }`}
           />
         ))}
-        <span className="text-[10px] font-mono text-[#6c6c88] ml-2">Click Dismiss anytime to close</span>
+        <span className="text-[10px] font-mono text-ide-statusbar-fg ml-2">Click Dismiss anytime to close</span>
       </div>
     </div>
   );

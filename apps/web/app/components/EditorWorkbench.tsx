@@ -7,12 +7,12 @@ import React, {
   useState,
   useRef,
 } from "react";
-import Editor, {
-  loader as monacoLoader,
-  type Monaco,
-  type OnMount,
-} from "@monaco-editor/react";
-import { useApp, EditorFile } from "../context/AppContext";
+import dynamic from "next/dynamic";
+import type { Monaco, OnMount } from "@monaco-editor/react";
+import { emmetCSS, emmetHTML, emmetJSX } from "emmet-monaco-es";
+import { useApp, EditorFile, type ThemeConfig } from "../context/AppContext";
+import { REACT_TYPE_DEFINITIONS } from "../editor/reactTypes";
+import { getSnippetsForLanguage } from "../editor/snippets";
 import {
   FolderTree,
   FileCode,
@@ -59,7 +59,9 @@ import {
 } from "./FriendlyHelpers";
 import { FindController, FindResult } from "./FindController";
 import { TerminalPanel } from "./TerminalPanel";
+import { getAIInlineCompletion } from "../services/aiCompletion";
 import { runEditorPreview, sendAssistantPreview } from "../services/editorMocks";
+import { getLanguageServerCompletions } from "../services/languageServer";
 import { Button, Dropdown, IconButton, Kbd, Modal, Switch } from "./ide/Primitives";
 
 type NativeEditorHandle =
@@ -76,13 +78,77 @@ interface FilePickerWindow extends Window {
 const NATIVE_HANDLE_DB = "devpulse-editor-handles";
 const NATIVE_HANDLE_STORE = "handles";
 const NATIVE_HANDLE_KEY = "active-workspace";
-monacoLoader.config({
-  paths: {
-    vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs",
-  },
-});
+const Editor = dynamic(
+  () =>
+    import("@monaco-editor/react").then((monacoReact) => {
+      monacoReact.loader.config({
+        paths: {
+          vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs",
+        },
+      });
+      return monacoReact.default;
+    }),
+  { ssr: false },
+);
 
-const MONACO_THEME = "devpulse-ide";
+const getMonacoThemeName = (theme: ThemeConfig) =>
+  `devpulse-${theme.id.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
+let isMonacoEditorConfigured = false;
+const withMonacoOpacity = (color: string, opacity: number) => {
+  const hex = color.match(/^#([\da-f]{6})([\da-f]{2})?$/i);
+  if (!hex) return color;
+  return `#${hex[1]}${Math.round(opacity * 255)
+    .toString(16)
+    .padStart(2, "0")}`;
+};
+const getMonacoThemeData = (theme: ThemeConfig) => {
+  if (theme.monaco) return theme.monaco;
+  const { syntax, ui } = theme;
+  const border = withMonacoOpacity(ui["text-strong"], 0.08);
+  return {
+    base:
+      theme.type === "light"
+        ? ("vs" as const)
+        : theme.type === "hc"
+          ? ("hc-black" as const)
+          : ("vs-dark" as const),
+    inherit: true,
+    rules: [
+      { token: "comment", foreground: syntax.comment.replace(/^#/, ""), fontStyle: "italic" },
+      { token: "keyword", foreground: syntax.keyword.replace(/^#/, "") },
+      { token: "string", foreground: syntax.string.replace(/^#/, "") },
+      { token: "number", foreground: syntax.number.replace(/^#/, "") },
+    ],
+    colors: {
+      "editor.background": ui["editor-bg"],
+      "editor.foreground": syntax.foreground,
+      "editorLineNumber.foreground": ui["gutter-fg"],
+      "editorLineNumber.activeForeground": ui.accent,
+      "editorCursor.foreground": syntax.cursor,
+      "editor.selectionBackground": syntax.selection,
+      "editor.inactiveSelectionBackground": withMonacoOpacity(syntax.selection, 0.2),
+      "editor.lineHighlightBackground": ui["editor-line-highlight"],
+      "editorIndentGuide.background1": withMonacoOpacity(ui["text-strong"], 0.04),
+      "editorIndentGuide.activeBackground1": withMonacoOpacity(ui.accent, 0.34),
+      "editorBracketPairGuide.background1": withMonacoOpacity(ui["text-strong"], 0.07),
+      "editorBracketPairGuide.activeBackground1": withMonacoOpacity(ui.accent, 0.47),
+      "editorGutter.background": ui["editor-bg"],
+      "editorWidget.background": ui["dropdown-bg"],
+      "editorWidget.border": border,
+      "editorHoverWidget.background": ui["dropdown-bg"],
+      "editorHoverWidget.border": border,
+      "editorHoverWidget.foreground": syntax.foreground,
+      "editorSuggestWidget.background": ui["dropdown-bg"],
+      "editorSuggestWidget.border": border,
+      "editorSuggestWidget.foreground": syntax.foreground,
+      "editorSuggestWidget.selectedBackground": withMonacoOpacity(ui.secondary, 0.2),
+      "editorSuggestWidget.selectedForeground": ui["text-strong"],
+      "editorSuggestWidget.highlightForeground": ui.accent,
+      "editor.findMatchBackground": withMonacoOpacity(ui.secondary, 0.4),
+      "editor.findMatchHighlightBackground": withMonacoOpacity(ui.secondary, 0.2),
+    },
+  };
+};
 const getMonacoLanguageId = (language: string) =>
   language === "jsx"
     ? "javascript"
@@ -318,7 +384,7 @@ const getDirectoryForPath = async (
 export const EditorWorkbench: React.FC = () => {
   const {
     theme,
-    colorMode,
+    availableThemes,
     isClientStorageHydrated,
     workspaces,
     setPage,
@@ -358,11 +424,13 @@ export const EditorWorkbench: React.FC = () => {
     setIsAiDrawerOpen,
     isTerminalOpen,
     setIsTerminalOpen,
+    setIsTerminalFocused,
     applyDiffToActiveFile,
     addToast,
     toasts,
     removeToast,
   } = useApp();
+  const monacoThemeName = getMonacoThemeName(theme);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -397,6 +465,7 @@ export const EditorWorkbench: React.FC = () => {
   const [isBreadcrumbMenuOpen, setIsBreadcrumbMenuOpen] = useState(false);
   const [editorCursor, setEditorCursor] = useState({ line: 1, column: 1 });
   const [editorSelectionCount, setEditorSelectionCount] = useState(0);
+  const [editorContentLeft, setEditorContentLeft] = useState(64);
   const [editorDocumentStats, setEditorDocumentStats] = useState({
     lines: 1,
     chars: 0,
@@ -477,6 +546,7 @@ export const EditorWorkbench: React.FC = () => {
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const monacoEditorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
+  const focusCreatedFileRef = useRef(false);
   const monacoFindDecorationsRef = useRef<string[]>([]);
   const saveFileRef = useRef<() => void>(() => undefined);
   const findControllerRef = useRef<FindController | null>(null);
@@ -676,6 +746,31 @@ export const EditorWorkbench: React.FC = () => {
 
   const activeFile =
     openFiles.find((f) => f.id === activeFileId) || openFiles[0];
+  const activeFileIdForFocus = activeFile?.id;
+  const focusCreatedFileEditor = useCallback(() => {
+    const editor = monacoEditorRef.current;
+    const model = editor?.getModel();
+    const expectedPath = activeFile?.path.replace(/\\/g, "/");
+    if (
+      !focusCreatedFileRef.current ||
+      !editor ||
+      !model ||
+      !expectedPath ||
+      !model.uri.path.endsWith(expectedPath)
+    ) {
+      return;
+    }
+    editor.focus();
+    editor.setPosition({ lineNumber: 1, column: 1 });
+    focusCreatedFileRef.current = false;
+  }, [activeFile?.path]);
+
+  useEffect(() => {
+    if (!activeFileIdForFocus || !focusCreatedFileRef.current) return;
+    const frame = window.requestAnimationFrame(focusCreatedFileEditor);
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeFileIdForFocus, focusCreatedFileEditor]);
+
   const filteredStatusLanguages = useMemo(() => {
     const query = statusLanguageSearch.trim().toLowerCase();
     return EDITOR_LANGUAGES.filter((language) =>
@@ -1200,6 +1295,7 @@ export const EditorWorkbench: React.FC = () => {
     const filePath = [selectedFolder, newFileNameInput.trim()]
       .filter(Boolean)
       .join("/");
+    focusCreatedFileRef.current = true;
     void (async () => {
       if (nativeHandle?.kind === "directory") {
         const parent = await getDirectoryForPath(
@@ -1221,11 +1317,12 @@ export const EditorWorkbench: React.FC = () => {
         setNewFileNameInput("");
         setIsCreatingFile(false);
       })
-      .catch((error: unknown) =>
+      .catch((error: unknown) => {
+        focusCreatedFileRef.current = false;
         setSaveError(
           error instanceof Error ? error.message : "Unable to create file",
-        ),
-      );
+        );
+      });
   };
 
   const handleCreateNewFolder = (e: React.FormEvent) => {
@@ -1278,7 +1375,7 @@ export const EditorWorkbench: React.FC = () => {
           return (
             <React.Fragment key={folderPath}>
               <div
-                className={`flex items-center rounded transition-colors ${selectedFolder === folderPath ? "bg-[#1a1a2b] text-white" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+                className={`flex items-center rounded transition-colors ${selectedFolder === folderPath ? "bg-ide-surface-hover-strong text-ide-text-strong" : "text-ide-muted hover:bg-ide-surface hover:text-ide-text-strong"}`}
                 style={{ paddingLeft: `${depth * 12}px` }}
               >
                 <button
@@ -1293,7 +1390,7 @@ export const EditorWorkbench: React.FC = () => {
                       return next;
                     })
                   }
-                  className="flex h-7 w-6 shrink-0 items-center justify-center rounded hover:bg-white/5"
+                  className="flex h-7 w-6 shrink-0 items-center justify-center rounded hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_5%,transparent)]"
                 >
                   <ChevronRight
                     className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
@@ -1305,7 +1402,7 @@ export const EditorWorkbench: React.FC = () => {
                   className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
                   title={folderPath}
                 >
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-[#FFAE64]" />
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-ide-warm-accent" />
                   <span className="truncate">{folderName}</span>
                 </button>
               </div>
@@ -1316,7 +1413,7 @@ export const EditorWorkbench: React.FC = () => {
         {childFiles.map((file) => (
           <div
             key={file.id}
-            className={`group flex items-center justify-between rounded py-1.5 pr-2 text-left transition-colors cursor-pointer ${activeFile?.id === file.id ? "editor-explorer-active" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+            className={`group flex items-center justify-between rounded py-1.5 pr-2 text-left transition-colors cursor-pointer ${activeFile?.id === file.id ? "editor-explorer-active" : "text-ide-muted hover:bg-ide-surface hover:text-ide-text-strong"}`}
             style={{ paddingLeft: `${depth * 12 + 24}px` }}
             onClick={() => openFileInEditor(file)}
           >
@@ -1324,12 +1421,12 @@ export const EditorWorkbench: React.FC = () => {
               <span
                 className={`shrink-0 text-[10px] px-1 rounded font-bold uppercase ${
                   file.iconType === "ts"
-                    ? "bg-[#3178c6]/20 text-[#3178c6]"
+                    ? "bg-ide-secondary/20 text-[var(--ide-color-secondary-readable)]"
                     : file.iconType === "py"
-                      ? "bg-[#3572A5]/20 text-[#3572A5]"
+                      ? "bg-ide-info/20 text-[var(--ide-color-info-readable)]"
                       : file.iconType === "json"
-                        ? "bg-[#FF9E64]/20 text-[#FF9E64]"
-                        : "bg-white/10 text-white"
+                        ? "bg-ide-warm-accent/20 text-ide-warm-accent"
+                        : "bg-ide-accent-soft text-ide-text-strong"
                 }`}
               >
                 {file.iconType}
@@ -1360,13 +1457,13 @@ export const EditorWorkbench: React.FC = () => {
                   }}
                 />
               ) : (
-                <span className="truncate">{file.name}</span>
+                <span className="truncate" title={file.name}>{file.name}</span>
               )}
               {file.isDirty && (
                 <span
                   title="Unsaved changes"
                   aria-label="Unsaved changes"
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0DF5C4]"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-ide-success"
                 />
               )}
             </div>
@@ -1402,7 +1499,7 @@ export const EditorWorkbench: React.FC = () => {
                   }
                 })();
               }}
-              className="shrink-0 rounded p-0.5 opacity-0 hover:text-[#f87171] group-hover:opacity-100"
+              className="shrink-0 rounded p-0.5 opacity-0 hover:text-ide-danger group-hover:opacity-100"
               title="Delete file"
             >
               <Trash2 className="h-3 w-3" />
@@ -1457,41 +1554,176 @@ export const EditorWorkbench: React.FC = () => {
     void handleSaveFile();
   };
 
+  useEffect(() => {
+    if (!monacoRef.current) return;
+    const themes = [
+      ...availableThemes.filter((availableTheme) => availableTheme.id !== theme.id),
+      theme,
+    ];
+    themes.forEach((appTheme) =>
+      monacoRef.current?.editor.defineTheme(
+        getMonacoThemeName(appTheme),
+        getMonacoThemeData(appTheme),
+      ),
+    );
+    monacoRef.current.editor.setTheme(monacoThemeName);
+  }, [availableThemes, monacoThemeName, theme]);
+
   const handleMonacoBeforeMount = (monaco: Monaco) => {
-    monaco.editor.defineTheme(MONACO_THEME, {
-      base: "vs-dark",
-      inherit: true,
-      rules: [
-        { token: "comment", foreground: "77778F", fontStyle: "italic" },
-        { token: "keyword", foreground: "A5A1FF" },
-        { token: "string", foreground: "A1CF73" },
-        { token: "number", foreground: "FFCB6B" },
-      ],
-      colors: {
-        "editor.background": "#09090f",
-        "editor.foreground": "#dcdceb",
-        "editorLineNumber.foreground": "#45455c",
-        "editorLineNumber.activeForeground": "#a5a1ff",
-        "editorCursor.foreground": "#0DF5C4",
-        "editor.selectionBackground": "#8b82ff55",
-        "editor.inactiveSelectionBackground": "#8b82ff33",
-        "editor.lineHighlightBackground": "#111118",
-        "editorIndentGuide.background1": "#ffffff0a",
-        "editorIndentGuide.activeBackground1": "#0DF5C455",
-        "editorBracketPairGuide.background1": "#ffffff12",
-        "editorBracketPairGuide.activeBackground1": "#0DF5C477",
-        "editorGutter.background": "#09090f",
-        "editorWidget.background": "#11131b",
-        "editorWidget.border": "#ffffff14",
-        "editor.findMatchBackground": "#6c63ff66",
-        "editor.findMatchHighlightBackground": "#6c63ff33",
+    const themes = [
+      ...availableThemes.filter((availableTheme) => availableTheme.id !== theme.id),
+      theme,
+    ];
+    themes.forEach((appTheme) =>
+      monaco.editor.defineTheme(
+        getMonacoThemeName(appTheme),
+        getMonacoThemeData(appTheme),
+      ),
+    );
+
+    if (isMonacoEditorConfigured) return;
+    isMonacoEditorConfigured = true;
+
+    const compilerOptions = {
+      allowJs: true,
+      allowNonTsExtensions: true,
+      esModuleInterop: true,
+      jsx: monaco.languages.typescript.JsxEmit.React,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      target: monaco.languages.typescript.ScriptTarget.ESNext,
+    };
+
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions(
+      {
+        ...monaco.languages.typescript.typescriptDefaults.getCompilerOptions(),
+        ...compilerOptions,
       },
+    );
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions(
+      {
+        ...monaco.languages.typescript.javascriptDefaults.getCompilerOptions(),
+        ...compilerOptions,
+      },
+    );
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      REACT_TYPE_DEFINITIONS,
+      "file:///node_modules/@types/react/index.d.ts",
+    );
+    monaco.languages.typescript.javascriptDefaults.addExtraLib(
+      REACT_TYPE_DEFINITIONS,
+      "file:///node_modules/@types/react/index.d.ts",
+    );
+
+    emmetHTML(monaco, ["html"]);
+    emmetCSS(monaco, ["css"]);
+    emmetJSX(monaco, ["javascript", "typescript"]);
+
+    const snippetLanguages = ["javascript", "typescript", "html"];
+    snippetLanguages.forEach((language) => {
+      monaco.languages.registerCompletionItemProvider(language, {
+        provideCompletionItems(
+          model: Monaco["editor"]["ITextModel"],
+          position: Monaco["Position"],
+        ) {
+          const range = model.getWordUntilPosition(position);
+          const replacementRange = new monaco.Range(
+            position.lineNumber,
+            range.startColumn,
+            position.lineNumber,
+            range.endColumn,
+          );
+          return {
+            suggestions: getSnippetsForLanguage(language).map((snippet) => ({
+              label: snippet.label,
+              detail: snippet.detail,
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              insertText: snippet.insertText,
+              insertTextRules:
+                monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              range: replacementRange,
+            })),
+          };
+        },
+      });
     });
+
+    const languageIds = ["python", "java", "go", "cpp"] as const;
+    languageIds.forEach((language) => {
+      monaco.languages.registerCompletionItemProvider(language, {
+        provideCompletionItems: async (
+          model: Monaco["editor"]["ITextModel"],
+          position: Monaco["Position"],
+        ) => {
+          const word = model.getWordUntilPosition(position);
+          const range = new monaco.Range(
+            position.lineNumber,
+            word.startColumn,
+            position.lineNumber,
+            word.endColumn,
+          );
+          const completions = await getLanguageServerCompletions({
+            language,
+            prefix: word.word,
+          });
+          return {
+            suggestions: completions.map((completion) => ({
+              label: completion.label,
+              detail: completion.detail,
+              kind: monaco.languages.CompletionItemKind.Function,
+              insertText: completion.insertText,
+              range,
+            })),
+          };
+        },
+      });
+    });
+
+    monaco.languages.registerInlineCompletionsProvider(
+      ["javascript", "typescript", "html", "css", "json", "markdown", ...languageIds],
+      {
+        async provideInlineCompletions(
+          model: Monaco["editor"]["ITextModel"],
+          position: Monaco["Position"],
+          _context: Monaco["languages"]["InlineCompletionContext"],
+          token: Monaco["CancellationToken"],
+        ) {
+          if (token.isCancellationRequested) return { items: [] };
+          const linePrefix = model.getValueInRange(
+            new monaco.Range(position.lineNumber, 1, position.lineNumber, position.column),
+          );
+          const completion = await getAIInlineCompletion({
+            language: model.getLanguageId(),
+            linePrefix,
+          });
+          if (!completion || token.isCancellationRequested) return { items: [] };
+          return {
+            items: [
+              {
+                insertText: completion.insertText,
+                range: new monaco.Range(
+                  position.lineNumber,
+                  position.column,
+                  position.lineNumber,
+                  position.column,
+                ),
+              },
+            ],
+          };
+        },
+        disposeInlineCompletions() {},
+      },
+    );
   };
 
   const handleMonacoMount: OnMount = (editor, monaco) => {
     monacoEditorRef.current = editor;
     monacoRef.current = monaco;
+    setEditorContentLeft(editor.getLayoutInfo().contentLeft);
+    editor.onDidLayoutChange(({ contentLeft }) =>
+      setEditorContentLeft(contentLeft),
+    );
+    editor.onDidFocusEditorWidget(() => setIsTerminalFocused(false));
+    focusCreatedFileEditor();
 
     const syncDocumentStats = () => {
       const model = editor.getModel();
@@ -1528,10 +1760,66 @@ export const EditorWorkbench: React.FC = () => {
       });
     });
     editor.onDidChangeCursorSelection(syncSelectionCount);
-    editor.onDidChangeModelContent(syncDocumentStats);
+    editor.onDidChangeModelContent(({ changes }) => {
+      syncDocumentStats();
+      const change = changes.find(
+        (item) =>
+          item.text === ">" &&
+          item.rangeLength === 0 &&
+          item.range.startLineNumber === item.range.endLineNumber,
+      );
+      if (!change) return;
+
+      const model = editor.getModel();
+      if (!model) return;
+      const language = model.getLanguageId();
+      const isJsxFile = /\.(jsx|tsx)$/i.test(model.uri.path);
+      if (
+        language !== "html" &&
+        !(
+          isJsxFile &&
+          (language === "javascript" || language === "typescript")
+        )
+      ) {
+        return;
+      }
+
+      const lineNumber = change.range.startLineNumber;
+      const column = change.range.startColumn + 1;
+      const linePrefix = model.getValueInRange(
+        new monaco.Range(lineNumber, 1, lineNumber, column),
+      );
+      const tag = linePrefix.match(/<([A-Za-z][\w:.-]*)(?:\s[^<>]*?)?>$/)?.[1];
+      if (!tag || /\/\s*>$/.test(linePrefix)) return;
+      const lineSuffix = model.getValueInRange(
+        new monaco.Range(
+          lineNumber,
+          column,
+          lineNumber,
+          model.getLineMaxColumn(lineNumber),
+        ),
+      );
+      if (new RegExp(`^</${tag}\\s*>`, "i").test(lineSuffix)) return;
+      if (
+        /^(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i.test(
+          tag,
+        )
+      ) {
+        return;
+      }
+
+      editor.executeEdits("devpulse-auto-close-tag", [
+        {
+          range: new monaco.Range(lineNumber, column, lineNumber, column),
+          text: `</${tag}>`,
+        },
+      ]);
+      editor.setPosition({ lineNumber, column });
+    });
     editor.onDidChangeModel(() => {
       syncDocumentStats();
       syncSelectionCount();
+      focusCreatedFileEditor();
       const nextPosition = editor.getPosition();
       if (nextPosition) {
         setEditorCursor({
@@ -1911,9 +2199,9 @@ export const EditorWorkbench: React.FC = () => {
   // Editor welcome screen shown before a project is opened.
   if (!isEditorProjectOpen) {
     return (
-      <div className="editor-welcome-root relative flex h-full min-h-0 w-full flex-col items-center overflow-y-auto overflow-x-hidden bg-[#08080d] bg-grid-pattern px-3 py-3.5 font-sans text-[#e5e7eb] sm:px-4 sm:py-4 lg:px-8 lg:py-8">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_12%,rgba(13,245,196,0.08),transparent_38%),radial-gradient(ellipse_at_82%_72%,rgba(108,99,255,0.1),transparent_44%)]" />
-        <div className="pointer-events-none absolute inset-x-[8%] top-[8%] h-40 rounded-full bg-[#6C63FF]/[0.07] blur-3xl" />
+      <div className="editor-welcome-root relative flex h-full min-h-0 w-full flex-col items-center overflow-y-auto overflow-x-hidden bg-ide-app-content-bg bg-grid-pattern px-3 py-3.5 font-sans text-ide-text sm:px-4 sm:py-4 lg:px-8 lg:py-8">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_18%_12%,color-mix(in_srgb,var(--ide-color-accent)_8%,transparent),transparent_38%),radial-gradient(ellipse_at_82%_72%,color-mix(in_srgb,var(--ide-color-secondary)_10%,transparent),transparent_44%)]" />
+        <div className="pointer-events-none absolute inset-x-[8%] top-[8%] h-40 rounded-full bg-[color-mix(in_srgb,var(--ide-color-secondary)_7%,transparent)] blur-3xl" />
         {/* Hidden Native File & Folder Inputs */}
         <input
           type="file"
@@ -1932,11 +2220,11 @@ export const EditorWorkbench: React.FC = () => {
           className="hidden"
         />
 
-        <div className="editor-welcome-card relative z-10 my-auto w-full max-w-5xl shrink-0 rounded-[22px] border border-white/[0.10] bg-gradient-to-br from-[#191922]/[0.99] via-[#111118]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_36px_100px_rgba(0,0,0,0.62),0_14px_42px_rgba(108,99,255,0.11),inset_0_1px_0_rgba(255,255,255,0.07)] ring-1 ring-black/30 backdrop-blur-xl sm:rounded-2xl lg:rounded-[28px]">
+        <div className="editor-welcome-card relative z-10 my-auto w-full max-w-5xl shrink-0 rounded-[22px] border border-ide-border bg-gradient-to-br from-ide-surface-raised via-ide-tab-inactive to-ide-panel shadow-[0_36px_100px_var(--ide-color-shadow-strong),0_14px_42px_color-mix(in_srgb,var(--ide-color-secondary)_11%,transparent),inset_0_1px_0_var(--ide-color-border-subtle)] ring-1 ring-ide-shadow-color backdrop-blur-xl sm:rounded-2xl lg:rounded-[28px]">
           <div className="editor-welcome-accent" aria-hidden="true" />
           <div className="editor-welcome-content space-y-4 p-3.5 lg:space-y-8 lg:p-10">
             {isEditorLoading && (
-              <div className="flex items-center gap-2 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/5 px-3 py-2 text-xs text-[#0DF5C4]">
+              <div className="flex items-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--ide-color-accent)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-accent)_5%,transparent)] px-3 py-2 text-xs text-ide-accent">
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                 Loading your project…
               </div>
@@ -1944,39 +2232,39 @@ export const EditorWorkbench: React.FC = () => {
             {editorError && (
               <div
                 role="alert"
-                className="rounded-lg border border-[#f87171]/30 bg-[#f87171]/10 px-3 py-2 text-xs text-[#fca5a5]"
+                className="rounded-lg border border-[color-mix(in_srgb,var(--ide-color-danger)_30%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-danger)_10%,transparent)] px-3 py-2 text-xs text-ide-danger"
               >
                 {editorError}
               </div>
             )}
-            <header className="editor-welcome-header flex flex-col gap-2 border-b border-white/[0.07] pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5 lg:pb-7">
+            <header className="editor-welcome-header flex flex-col gap-2 border-b border-ide-border-subtle pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5 lg:pb-7">
               <div className="flex min-w-0 items-center gap-4">
                 <div
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-[0_10px_26px_rgba(13,245,196,0.20),inset_0_1px_0_rgba(255,255,255,0.35)] lg:h-14 lg:w-14"
-                  style={{ backgroundColor: theme.primary }}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-[0_10px_26px_color-mix(in_srgb,var(--ide-color-accent)_20%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_35%,transparent)] lg:h-14 lg:w-14"
+                  style={{ backgroundColor: theme.ui.accent }}
                 >
-                  <Code2 className="h-7 w-7 text-[#09090e]" />
+                  <Code2 className="h-7 w-7 text-ide-accent-fg" />
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <h1 className="text-[21px] font-bold tracking-tight lg:text-[28px]">
-                      <span className="bg-gradient-to-r from-[#f8fafc] via-[#dbeafe] to-[#a5b4fc] bg-clip-text text-transparent">
+                      <span className="bg-gradient-to-r from-ide-text-strong via-ide-text to-ide-secondary bg-clip-text text-transparent">
                         Maestro
                       </span>{" "}
-                      <span className="text-white">Code Studio</span>
+                      <span className="text-ide-text-strong">Code Studio</span>
                     </h1>
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#5ef0ce]">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4]" />
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--ide-color-success)_25%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-success)_10%,transparent)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-ide-success">
+                      <span className="h-1.5 w-1.5 rounded-full bg-ide-success" />
                       Ready
                     </span>
                   </div>
-                  <p className="mt-1 max-w-xl text-xs leading-5 text-[#9292a9] lg:mt-1.5 lg:text-sm lg:leading-6">
+                  <p className="mt-1 max-w-xl text-xs leading-5 text-ide-muted lg:mt-1.5 lg:text-sm lg:leading-6">
                     Open a local project or start with a new file.
                   </p>
                 </div>
               </div>
-              <div className="flex w-fit items-center gap-2 rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] px-3 py-2 text-[11px] text-[#b0b0c2] shadow-[0_6px_18px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.07)]">
-                <Folder className="h-4 w-4 text-[#a5a1ff]" />
+              <div className="flex w-fit items-center gap-2 rounded-xl border border-ide-border bg-gradient-to-br from-[color-mix(in_srgb,var(--ide-color-text-strong)_6%,transparent)] to-[color-mix(in_srgb,var(--ide-color-text-strong)_2%,transparent)] px-3 py-2 text-[11px] text-ide-text-secondary shadow-[0_6px_18px_color-mix(in_srgb,var(--ide-color-shadow-color)_45%,transparent),inset_0_1px_0_var(--ide-color-border-subtle)]">
+                <Folder className="h-4 w-4 text-ide-secondary" />
                 <span>Private to this workspace</span>
               </div>
             </header>
@@ -1990,15 +2278,15 @@ export const EditorWorkbench: React.FC = () => {
                   <div>
                     <h2
                       id="editor-start-title"
-                      className="text-sm font-semibold text-white"
+                      className="text-sm font-semibold text-ide-text-strong"
                     >
                       Start a project
                     </h2>
-                    <p className="mt-1 text-xs text-[#777791]">
+                    <p className="mt-1 text-xs text-ide-muted">
                       Choose how you’d like to begin.
                     </p>
                   </div>
-                  <span className="pb-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-[#66667f]">
+                  <span className="pb-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-ide-muted">
                     From your device
                   </span>
                 </div>
@@ -2006,65 +2294,65 @@ export const EditorWorkbench: React.FC = () => {
                 <div className="editor-welcome-actions-stack space-y-1.5 lg:space-y-2.5">
                   <button
                     onClick={() => void openNativeFolder()}
-                    className="editor-welcome-action group flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-[#0DF5C4]/25 bg-gradient-to-r from-[#0DF5C4]/[0.08] to-[#151522] px-3 py-2 text-left text-white shadow-[0_10px_28px_rgba(13,245,196,0.08),inset_0_1px_0_rgba(255,255,255,0.04)] transition duration-200 hover:-translate-y-0.5 hover:border-[#0DF5C4]/55 hover:from-[#0DF5C4]/[0.13] hover:shadow-[0_16px_36px_rgba(13,245,196,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/70 lg:min-h-[74px] lg:gap-3.5 lg:px-4 lg:py-3"
+                    className="editor-welcome-action group flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--ide-color-accent)_25%,transparent)] bg-gradient-to-r from-[color-mix(in_srgb,var(--ide-color-accent)_8%,transparent)] to-ide-welcome-action-bg px-3 py-2 text-left text-ide-text-strong shadow-[0_10px_28px_color-mix(in_srgb,var(--ide-color-accent)_8%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_4%,transparent)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--ide-color-accent)_55%,transparent)] hover:from-[color-mix(in_srgb,var(--ide-color-accent)_13%,transparent)] hover:shadow-[0_16px_36px_color-mix(in_srgb,var(--ide-color-accent)_12%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring/70 lg:min-h-[74px] lg:gap-3.5 lg:px-4 lg:py-3"
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#0DF5C4]/20 bg-[#0DF5C4]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                      <FolderOpen className="h-5 w-5 text-[#0DF5C4]" />
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[color-mix(in_srgb,var(--ide-color-accent)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_8%,transparent)]">
+                      <FolderOpen className="h-5 w-5 text-ide-accent" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block font-semibold text-white transition-colors group-hover:text-[#78f5db]">
+                      <span className="block font-semibold text-ide-text-strong transition-colors group-hover:text-ide-accent">
                         Open a folder
                       </span>
-                      <span className="mt-1 block text-xs text-[#85859e]">
+                      <span className="mt-1 block text-xs text-ide-muted">
                         Best for projects · save edits in place
                       </span>
                     </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#0DF5C4]" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-ide-muted transition group-hover:translate-x-0.5 group-hover:text-ide-accent" />
                   </button>
 
                   <button
                     onClick={() => void openNativeFile()}
-                    className="editor-welcome-action group flex min-h-[56px] w-full items-center gap-3 rounded-2xl border border-white/[0.07] bg-gradient-to-br from-[#171720] to-[#12121a] px-3 py-2 text-left text-white shadow-[0_8px_22px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#6C63FF]/45 hover:shadow-[0_14px_30px_rgba(108,99,255,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6C63FF]/70 lg:min-h-[68px] lg:gap-3.5 lg:px-4 lg:py-3"
+                    className="editor-welcome-action group flex min-h-[56px] w-full items-center gap-3 rounded-2xl border border-ide-border-subtle bg-gradient-to-br from-ide-welcome-secondary-bg-start to-ide-welcome-secondary-bg-end px-3 py-2 text-left text-ide-text-strong shadow-[0_8px_22px_color-mix(in_srgb,var(--ide-color-shadow-color)_45%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_3.5%,transparent)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--ide-color-secondary)_45%,transparent)] hover:shadow-[0_14px_30px_color-mix(in_srgb,var(--ide-color-secondary)_12%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-secondary/70 lg:min-h-[68px] lg:gap-3.5 lg:px-4 lg:py-3"
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#6C63FF]/20 bg-[#6C63FF]/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                      <File className="h-5 w-5 text-[#9690ff]" />
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-secondary)_10%,transparent)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_6%,transparent)]">
+                      <File className="h-5 w-5 text-ide-secondary" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block font-semibold">
                         Open a single file
                       </span>
-                      <span className="mt-1 block text-xs text-[#85859e]">
+                      <span className="mt-1 block text-xs text-ide-muted">
                         Quick edit · open one file
                       </span>
                     </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-[#62627a] transition group-hover:translate-x-0.5 group-hover:text-[#9690ff]" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-ide-muted transition group-hover:translate-x-0.5 group-hover:text-ide-secondary" />
                   </button>
 
                   <div className="grid grid-cols-2 gap-1.5 pt-0 lg:gap-2.5 lg:pt-1">
                     <button
                       onClick={() => setIsCreatingFile(true)}
-                      className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
+                      className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-ide-border-subtle bg-gradient-to-br from-ide-tab-inactive to-ide-panel px-2.5 py-2 text-left shadow-[0_6px_18px_color-mix(in_srgb,var(--ide-color-shadow-color)_40%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_3.5%,transparent)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--ide-color-tertiary)_40%,transparent)] hover:shadow-[0_12px_24px_color-mix(in_srgb,var(--ide-color-tertiary)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-tertiary/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
                     >
-                      <FilePlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
+                      <FilePlus className="h-4 w-4 shrink-0 text-ide-warm-accent" />
                       <span>
-                        <span className="block text-xs font-semibold text-white">
+                        <span className="block text-xs font-semibold text-ide-text-strong">
                           New file
                         </span>
-                        <span className="mt-1 block text-[10px] text-[#777791]">
+                        <span className="mt-1 block text-[10px] text-ide-muted">
                           Create a blank file
                         </span>
                       </span>
                     </button>
                     <button
                       onClick={() => setIsCreatingFolder(true)}
-                      className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-white/[0.07] bg-gradient-to-br from-[#15151e] to-[#111117] px-2.5 py-2 text-left shadow-[0_6px_18px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[#FF9E64]/40 hover:shadow-[0_12px_24px_rgba(255,158,100,0.08)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF9E64]/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
+                      className="editor-welcome-quick-action group flex min-h-[56px] items-center gap-2.5 rounded-xl border border-ide-border-subtle bg-gradient-to-br from-ide-tab-inactive to-ide-panel px-2.5 py-2 text-left shadow-[0_6px_18px_color-mix(in_srgb,var(--ide-color-shadow-color)_40%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_3.5%,transparent)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--ide-color-tertiary)_40%,transparent)] hover:shadow-[0_12px_24px_color-mix(in_srgb,var(--ide-color-tertiary)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-tertiary/60 lg:min-h-[66px] lg:gap-3 lg:px-3 lg:py-2.5"
                     >
-                      <FolderPlus className="h-4 w-4 shrink-0 text-[#FF9E64]" />
+                      <FolderPlus className="h-4 w-4 shrink-0 text-ide-warm-accent" />
                       <span>
-                        <span className="block text-xs font-semibold text-white">
+                        <span className="block text-xs font-semibold text-ide-text-strong">
                           New folder
                         </span>
-                        <span className="mt-1 block text-[10px] text-[#777791]">
+                        <span className="mt-1 block text-[10px] text-ide-muted">
                           Organize your files
                         </span>
                       </span>
@@ -2081,35 +2369,35 @@ export const EditorWorkbench: React.FC = () => {
                   <div>
                     <h2
                       id="editor-workspaces-title"
-                      className="text-sm font-semibold text-white"
+                      className="text-sm font-semibold text-ide-text-strong"
                     >
                       Your workspaces
                     </h2>
-                    <p className="mt-1 text-xs text-[#777791]">
+                    <p className="mt-1 text-xs text-ide-muted">
                       Continue where you left off.
                     </p>
                   </div>
-                  <span className="rounded-full border border-[#29283a] bg-[#151520] px-2.5 py-1 text-[10px] font-mono text-[#85859e]">
+                  <span className="rounded-full border border-ide-border bg-ide-surface px-2.5 py-1 text-[10px] font-mono text-ide-muted">
                     {workspaces.length}
                   </span>
                 </div>
                 <div className="space-y-2.5 text-xs">
                   {workspaces.length === 0 ? (
-                    <div className="editor-welcome-empty flex min-h-[116px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.12] bg-gradient-to-br from-white/[0.025] to-transparent px-4 py-3 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] lg:min-h-[220px] lg:px-6 lg:py-8">
-                      <span className="editor-welcome-empty-icon flex h-9 w-9 items-center justify-center rounded-xl border border-[#6C63FF]/25 bg-[#6C63FF]/10 shadow-[0_8px_24px_rgba(108,99,255,0.16),inset_0_1px_0_rgba(255,255,255,0.07)] lg:h-12 lg:w-12 lg:rounded-2xl">
-                        <FolderTree className="h-4 w-4 text-[#9690ff] lg:h-5 lg:w-5" />
+                    <div className="editor-welcome-empty flex min-h-[116px] flex-col items-center justify-center rounded-2xl border border-dashed border-ide-border bg-gradient-to-br from-ide-hover to-transparent px-4 py-3 text-center shadow-[inset_0_1px_0_var(--ide-color-border)] lg:min-h-[220px] lg:px-6 lg:py-8">
+                      <span className="editor-welcome-empty-icon flex h-9 w-9 items-center justify-center rounded-xl border border-ide-secondary/25 bg-ide-secondary/10 shadow-[0_8px_24px_color-mix(in_srgb,var(--ide-color-secondary)_16%,transparent),inset_0_1px_0_var(--ide-color-border)] lg:h-12 lg:w-12 lg:rounded-2xl">
+                        <FolderTree className="h-4 w-4 text-ide-secondary lg:h-5 lg:w-5" />
                       </span>
-                      <h3 className="mt-2.5 text-sm font-semibold text-white lg:mt-4">
+                      <h3 className="mt-2.5 text-sm font-semibold text-ide-text-strong lg:mt-4">
                         No workspaces yet
                       </h3>
-                      <p className="mt-1 max-w-xs text-[11px] leading-4 text-[#85859e] lg:mt-1.5 lg:text-xs lg:leading-5">
+                      <p className="mt-1 max-w-xs text-[11px] leading-4 text-ide-muted lg:mt-1.5 lg:text-xs lg:leading-5">
                         Browse workspaces to launch a cloud environment, or open
                         a local project above.
                       </p>
                       <button
                         type="button"
                         onClick={() => setPage("workspaces")}
-                        className="mt-2.5 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-[#09090e] shadow-[0_8px_22px_rgba(108,99,255,0.22),inset_0_1px_0_rgba(255,255,255,0.25)] transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_30px_rgba(108,99,255,0.32)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 lg:mt-5 lg:py-2.5"
+                        className="mt-2.5 inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold text-ide-accent-fg shadow-[0_8px_22px_color-mix(in_srgb,var(--ide-color-secondary)_22%,transparent),inset_0_1px_0_var(--ide-color-border)] transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_30px_color-mix(in_srgb,var(--ide-color-secondary)_32%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring lg:mt-5 lg:py-2.5"
                         style={{ backgroundColor: theme.secondary }}
                       >
                         Browse workspaces
@@ -2126,14 +2414,14 @@ export const EditorWorkbench: React.FC = () => {
                             setLoadedProjectName(workspace.name),
                           );
                         }}
-                        className="w-full flex items-center gap-3 rounded-xl border border-[#29283a] bg-[#151520] p-3.5 text-left text-white transition hover:border-[#0DF5C4]/40 hover:bg-[#191927] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/60"
+                        className="w-full flex items-center gap-3 rounded-xl border border-ide-border bg-ide-surface p-3.5 text-left text-ide-text-strong transition hover:border-[color-mix(in_srgb,var(--ide-color-accent)_40%,transparent)] hover:bg-ide-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring/60"
                       >
-                        <Sparkles className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
+                        <Sparkles className="h-4 w-4 shrink-0 text-ide-accent" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate font-semibold">
                             {workspace.name}
                           </span>
-                          <span className="mt-1 block truncate font-mono text-[10px] text-[#777791]">
+                          <span className="mt-1 block truncate font-mono text-[10px] text-ide-muted">
                             {workspace.repo} / {workspace.branch} ·{" "}
                             {workspace.status}
                           </span>
@@ -2149,9 +2437,9 @@ export const EditorWorkbench: React.FC = () => {
             {isCreatingFile && (
               <form
                 onSubmit={handleCreateNewFile}
-                className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
+                className="rounded-2xl border border-ide-border-strong bg-ide-surface p-4 shadow-lg space-y-3"
               >
-                <div className="text-xs font-bold text-white font-mono">
+                <div className="text-xs font-bold text-ide-text-strong font-mono">
                   Enter File Name
                 </div>
                 <div className="flex gap-2">
@@ -2162,11 +2450,11 @@ export const EditorWorkbench: React.FC = () => {
                     placeholder="e.g. app.ts, main.py, server.js"
                     value={newFileNameInput}
                     onChange={(e) => setNewFileNameInput(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
+                    className="flex-1 px-3 py-2 bg-ide-input-bg border border-ide-input-border rounded-xl text-xs font-mono text-ide-text-strong focus:outline-none focus:border-ide-focus-ring"
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-ide-accent-fg"
                     style={{ backgroundColor: theme.primary }}
                   >
                     Create & Open
@@ -2174,7 +2462,7 @@ export const EditorWorkbench: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsCreatingFile(false)}
-                    className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
+                    className="px-3 py-2 rounded-xl bg-ide-elevated text-xs text-ide-text-strong"
                   >
                     Cancel
                   </button>
@@ -2184,9 +2472,9 @@ export const EditorWorkbench: React.FC = () => {
             {isCreatingFolder && (
               <form
                 onSubmit={handleCreateNewFolder}
-                className="rounded-2xl border border-[#2a2a3e] bg-[#161624] p-4 shadow-lg space-y-3"
+                className="rounded-2xl border border-ide-border-strong bg-ide-surface p-4 shadow-lg space-y-3"
               >
-                <div className="text-xs font-bold text-white font-mono">
+                <div className="text-xs font-bold text-ide-text-strong font-mono">
                   Create Workspace Folder
                 </div>
                 <div className="flex gap-2">
@@ -2199,11 +2487,11 @@ export const EditorWorkbench: React.FC = () => {
                     onChange={(event) =>
                       setNewFolderNameInput(event.target.value)
                     }
-                    className="flex-1 px-3 py-2 bg-[#101018] border border-[#262638] rounded-xl text-xs font-mono text-white focus:outline-none focus:border-[#6C63FF]"
+                    className="flex-1 px-3 py-2 bg-ide-input-bg border border-ide-input-border rounded-xl text-xs font-mono text-ide-text-strong focus:outline-none focus:border-ide-focus-ring"
                   />
                   <button
                     type="submit"
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e]"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-ide-accent-fg"
                     style={{ backgroundColor: theme.primary }}
                   >
                     Create Folder
@@ -2211,7 +2499,7 @@ export const EditorWorkbench: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setIsCreatingFolder(false)}
-                    className="px-3 py-2 rounded-xl bg-[#202030] text-xs text-white"
+                    className="px-3 py-2 rounded-xl bg-ide-elevated text-xs text-ide-text-strong"
                   >
                     Cancel
                   </button>
@@ -2221,10 +2509,10 @@ export const EditorWorkbench: React.FC = () => {
           </div>
         </div>
         <TerminalPanel
-          colorMode={colorMode}
           isOpen={isTerminalOpen}
           onClose={() => setIsTerminalOpen(false)}
-          primaryColor={theme.primary}
+          onFocusChange={setIsTerminalFocused}
+          terminalTheme={theme.terminal}
           projectName={loadedProjectName}
         />
       </div>
@@ -2234,7 +2522,7 @@ export const EditorWorkbench: React.FC = () => {
   // 2. Full Main Editor Workbench (Matches Screenshot 1 Pixel-Perfect with 100% Dynamic Files & Content)
   return (
     <div
-      className={`editor-workbench-root flex h-full min-h-0 flex-col bg-[#0b0b12] text-[#d6d6e6] overflow-hidden font-sans select-none ${isZenMode ? "editor-workbench-zen" : ""} ${editorSettings.density === "compact" ? "editor-density-compact" : ""}`}
+      className={`editor-workbench-root flex h-full min-h-0 flex-col bg-ide-workbench-bg text-ide-text overflow-hidden font-sans select-none ${isZenMode ? "editor-workbench-zen" : ""} ${editorSettings.density === "compact" ? "editor-density-compact" : ""}`}
       style={
         {
           "--ide-explorer-width": `${explorerWidth}px`,
@@ -2267,25 +2555,25 @@ export const EditorWorkbench: React.FC = () => {
       />
 
       {/* Project navigation and editor actions */}
-      <header className="editor-workbench-header z-20 shrink-0 border-b border-[#1c1c2b] bg-gradient-to-b from-[#11111a] to-[#0e0e16] font-sans text-xs">
-        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-white/[0.035] px-3 sm:px-4">
+      <header className="editor-workbench-header z-20 shrink-0 border-b border-ide-elevated bg-gradient-to-b from-ide-tab-inactive to-ide-panel font-sans text-xs">
+        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-ide-border-subtle px-3 sm:px-4">
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setIsFileTreeOpen((prev) => !prev)}
               title="Toggle File Explorer"
               aria-label="Toggle File Explorer"
-              className="rounded-lg p-1.5 text-[#8e8ea8] transition hover:bg-white/[0.06] hover:text-white"
+              className="rounded-lg p-1.5 text-ide-muted transition hover:bg-ide-hover hover:text-ide-text-strong"
             >
               {isFileTreeOpen ? (
                 <PanelLeftClose className="h-4 w-4" />
               ) : (
-                <PanelLeftOpen className="h-4 w-4 text-[#0DF5C4]" />
+                <PanelLeftOpen className="h-4 w-4 text-ide-accent" />
               )}
             </button>
-            <div className="flex min-w-0 items-center gap-2 text-[#77778f]">
+            <div className="flex min-w-0 items-center gap-2 text-ide-muted">
               <button
                 type="button"
-                className="max-w-[35vw] truncate font-semibold text-[#c8c8d8]"
+                className="max-w-[35vw] truncate font-semibold text-ide-text-secondary"
                 title="Navigate to workspace root"
                 onClick={() => {
                   setSelectedFolder("");
@@ -2296,11 +2584,11 @@ export const EditorWorkbench: React.FC = () => {
                   ? "Local workspace"
                   : loadedProjectName || "Local workspace"}
               </button>
-              <span className="text-[#4e4e65]">/</span>
+              <span className="text-ide-subtle">/</span>
               <div className="relative min-w-0">
                 <button
                   type="button"
-                  className="max-w-[35vw] truncate font-semibold text-white"
+                  className="max-w-[35vw] truncate font-semibold text-ide-text-strong"
                   aria-label="Browse file location"
                   aria-expanded={isBreadcrumbMenuOpen}
                   title={activeFile?.path || "No file open"}
@@ -2329,21 +2617,21 @@ export const EditorWorkbench: React.FC = () => {
               </div>
               {activeFile?.isDirty && (
                 <span
-                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#0DF5C4]"
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-ide-success"
                   title="Unsaved changes"
                 />
               )}
             </div>
           </div>
-          <span className="hidden items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-[#63637a] xl:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#0DF5C4] shadow-[0_0_9px_rgba(13,245,196,.6)]" />
+          <span className="hidden items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-ide-muted xl:flex">
+            <span className="h-1.5 w-1.5 rounded-full bg-ide-success shadow-[0_0_9px_color-mix(in_srgb,var(--ide-color-success)_60%,transparent)]" />
             Workspace
           </span>
         </div>
         <div className="editor-toolbar-row relative flex min-h-10 items-center justify-between gap-2 px-3 sm:px-4">
           {searchMode === "quick-open" ? (
-            <div className="flex w-full items-center gap-2 rounded-lg border border-[#6C63FF]/35 bg-black/25 px-2.5 py-1.5 shadow-[0_0_20px_rgba(108,99,255,0.08)]">
-              <Command className="h-3.5 w-3.5 shrink-0 text-[#0DF5C4]" />
+            <div className="flex w-full items-center gap-2 rounded-lg border border-[color-mix(in_srgb,var(--ide-color-secondary)_35%,transparent)] bg-ide-input-bg px-2.5 py-1.5 shadow-[0_0_20px_color-mix(in_srgb,var(--ide-color-secondary)_8%,transparent)]">
+              <Command className="h-3.5 w-3.5 shrink-0 text-ide-accent" />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -2357,9 +2645,9 @@ export const EditorWorkbench: React.FC = () => {
                 aria-label="Quick open files and folders"
                 autoComplete="off"
                 spellCheck={false}
-                className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-[#77778f]"
+                className="min-w-0 flex-1 bg-transparent text-xs text-ide-text-strong outline-none placeholder:text-ide-muted"
               />
-              <span className="hidden text-[9px] text-[#77778f] sm:inline">
+              <span className="hidden text-[9px] text-ide-muted sm:inline">
                 ↑ ↓ select · Enter open
               </span>
               <button
@@ -2367,14 +2655,14 @@ export const EditorWorkbench: React.FC = () => {
                 onClick={() => setSearchMode(null)}
                 title="Close (Esc)"
                 aria-label="Close Quick Open"
-                className="rounded p-1 text-[#8e8ea8] transition hover:bg-white/[0.07] hover:text-white"
+                className="rounded p-1 text-ide-muted transition hover:bg-ide-hover hover:text-ide-text-strong"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
 
-              <div className="absolute left-3 right-3 top-full z-50 mt-2 max-h-[min(56vh,460px)] overflow-y-auto rounded-xl border border-white/[0.12] bg-[#11111b]/[0.99] p-1.5 shadow-[0_22px_65px_rgba(0,0,0,0.65),0_0_30px_rgba(108,99,255,0.1)] backdrop-blur-xl">
+              <div className="absolute left-3 right-3 top-full z-50 mt-2 max-h-[min(56vh,460px)] overflow-y-auto rounded-xl border border-ide-border bg-ide-dropdown-bg p-1.5 shadow-[0_22px_65px_var(--ide-color-shadow-strong),0_0_30px_color-mix(in_srgb,var(--ide-color-secondary)_10%,transparent)] backdrop-blur-xl">
                 {quickOpenItems.length === 0 ? (
-                  <p className="px-3 py-5 text-center text-[11px] text-[#77778f]">
+                  <p className="px-3 py-5 text-center text-[11px] text-ide-muted">
                     {searchQuery.trim()
                       ? "No files or folders match your search."
                       : "This workspace has no files or folders yet."}
@@ -2388,26 +2676,26 @@ export const EditorWorkbench: React.FC = () => {
                       onClick={() => openQuickOpenItem(item)}
                       className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition ${
                         index === quickOpenSelection
-                          ? "bg-[#6C63FF]/[0.14] text-white"
-                          : "text-[#aaaabd] hover:bg-white/[0.045]"
+                          ? "bg-ide-active text-ide-text-strong"
+                          : "text-ide-text-secondary hover:bg-ide-hover"
                       }`}
                     >
                       {item.kind === "file" ? (
-                        <FileCode className="h-3.5 w-3.5 shrink-0 text-[#a5a1ff]" />
+                        <FileCode className="h-3.5 w-3.5 shrink-0 text-ide-secondary" />
                       ) : (
-                        <Folder className="h-3.5 w-3.5 shrink-0 text-[#FFAE64]" />
+                        <Folder className="h-3.5 w-3.5 shrink-0 text-ide-tertiary" />
                       )}
                       <span className="truncate font-mono text-[10px]">
                         {item.path}
                       </span>
-                      <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wide text-[#66667d]">
+                      <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wide text-ide-muted">
                         {item.kind}
                       </span>
                     </button>
                   ))
                 )}
                 {quickOpenItems.length > 100 && (
-                  <p className="px-3 py-2 text-center text-[9px] text-[#66667d]">
+                  <p className="px-3 py-2 text-center text-[9px] text-ide-muted">
                     Showing first 100 results — refine your search.
                   </p>
                 )}
@@ -2419,9 +2707,9 @@ export const EditorWorkbench: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void openNativeFolder()}
-                  className="editor-toolbar-button editor-toolbar-folder inline-flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.025] px-2.5 py-1.5 text-[10px] text-[#a2a2b7] transition hover:border-[#0DF5C4]/25 hover:bg-[#0DF5C4]/[0.06] hover:text-white sm:text-[11px]"
+                  className="editor-toolbar-button editor-toolbar-folder inline-flex items-center gap-1.5 rounded-lg border border-ide-border-subtle bg-ide-input-bg px-2.5 py-1.5 text-[10px] text-ide-text-secondary transition hover:border-[color-mix(in_srgb,var(--ide-color-accent)_25%,transparent)] hover:bg-ide-accent-soft hover:text-ide-text-strong sm:text-[11px]"
                 >
-                  <FolderOpen className="h-3.5 w-3.5 text-[#0DF5C4]" />
+                  <FolderOpen className="h-3.5 w-3.5 text-ide-accent" />
                   <span>Open Folder</span>
                 </button>
                 <button
@@ -2429,7 +2717,7 @@ export const EditorWorkbench: React.FC = () => {
                   onClick={() => void openNativeFile()}
                   title="Open File"
                   aria-label="Open File"
-                  className="editor-toolbar-button rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-white/15 hover:bg-white/[0.06] hover:text-white"
+                  className="editor-toolbar-button editor-icon-button rounded-lg border border-ide-border-subtle bg-ide-input-bg p-1.5 text-ide-text-tertiary transition hover:border-ide-border hover:bg-ide-hover hover:text-ide-text-strong"
                 >
                   <File className="h-3.5 w-3.5" />
                 </button>
@@ -2441,7 +2729,7 @@ export const EditorWorkbench: React.FC = () => {
                   }}
                   title="Search in Files (Ctrl+Shift+F)"
                   aria-label="Search in Files"
-                  className="editor-toolbar-button rounded-lg border border-white/[0.07] bg-white/[0.025] p-1.5 text-[#8e8ea8] transition hover:border-[#6C63FF]/30 hover:bg-[#6C63FF]/[0.07] hover:text-white"
+                  className="editor-toolbar-button editor-icon-button rounded-lg border border-ide-border-subtle bg-ide-input-bg p-1.5 text-ide-text-tertiary transition hover:border-ide-secondary/30 hover:bg-ide-secondary/[0.07] hover:text-ide-text-strong"
                 >
                   <SearchCode className="h-3.5 w-3.5" />
                 </button>
@@ -2450,7 +2738,7 @@ export const EditorWorkbench: React.FC = () => {
                 {dirtyFiles.length > 0 && (
                   <button
                     onClick={() => setIsChangesOpen(true)}
-                    className="editor-toolbar-button hidden items-center gap-1 rounded-lg border border-[#0DF5C4]/20 bg-[#0DF5C4]/[0.06] px-2.5 py-1.5 text-[10px] text-[#0DF5C4] transition hover:bg-[#0DF5C4]/10 sm:flex"
+                    className="editor-toolbar-button hidden items-center gap-1 rounded-lg border border-ide-accent/20 bg-ide-accent/[0.06] px-2.5 py-1.5 text-[10px] text-ide-accent transition hover:bg-ide-accent/10 sm:flex"
                   >
                     Show Changes ({dirtyFiles.length})
                   </button>
@@ -2459,17 +2747,17 @@ export const EditorWorkbench: React.FC = () => {
                   onClick={handleSaveFile}
                   disabled={isSaving || !activeFile?.isDirty}
                   title="Save changes (Ctrl+S)"
-                  className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-[#6C63FF]/30 bg-[#6C63FF]/[0.10] px-2.5 py-1.5 text-[10px] font-semibold text-[#c8c4ff] transition hover:bg-[#6C63FF]/20 disabled:opacity-40 sm:text-[11px]"
+                  className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-ide-secondary/30 bg-ide-secondary/[0.10] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--ide-color-secondary-readable)] transition hover:bg-ide-secondary/20 disabled:opacity-80 sm:text-[11px]"
                 >
                   <span>{isSaving ? "Saving..." : "Save"}</span>
-                  <kbd className="hidden text-[9px] text-[#8f89db] lg:inline">
+                  <kbd className="hidden text-[9px] text-ide-text-tertiary lg:inline">
                     Ctrl S
                   </kbd>
                 </button>
                 <button
                   onClick={handleRunCode}
                   disabled={isRunningCode || !activeFile}
-                  className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-[#0DF5C4]/35 bg-[#0DF5C4]/[0.10] px-3 py-1.5 text-[10px] font-semibold text-[#0DF5C4] transition hover:bg-[#0DF5C4]/[0.18] active:scale-[.98] disabled:opacity-40 sm:text-[11px]"
+                  className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-ide-accent/35 bg-ide-accent/10 px-3 py-1.5 text-[10px] font-semibold text-[var(--ide-color-accent-readable)] transition hover:bg-ide-accent/[0.18] active:scale-[.98] disabled:opacity-80 sm:text-[11px]"
                 >
                   <Play
                     className={`h-3 w-3 fill-current ${isRunningCode ? "animate-spin" : ""}`}
@@ -2480,20 +2768,21 @@ export const EditorWorkbench: React.FC = () => {
                   onClick={() => setIsAiDrawerOpen((prev) => !prev)}
                   title="Toggle AI Assistant"
                   aria-label="Toggle AI Assistant"
-                  className="editor-toolbar-button flex items-center gap-1 rounded-lg p-1.5 text-[#8e8ea8] transition hover:bg-white/[0.06] hover:text-white"
+                  className="editor-toolbar-button flex items-center gap-1 rounded-lg p-1.5 text-ide-text-tertiary transition hover:bg-ide-hover hover:text-ide-text-strong"
                 >
                   <Bot className="h-4 w-4" style={{ color: theme.primary }} />
                   <span className="hidden text-[11px] md:inline">AI</span>
                   {isAiDrawerOpen ? (
                     <PanelRightClose className="ml-0.5 h-3.5 w-3.5" />
                   ) : (
-                    <PanelRightOpen className="ml-0.5 h-3.5 w-3.5 text-[#6C63FF]" />
+                    <PanelRightOpen className="ml-0.5 h-3.5 w-3.5 text-ide-secondary" />
                   )}
                 </button>
                 <IconButton
                   label="Open editor settings"
                   shortcut="Ctrl+,"
                   onClick={() => setIsSettingsOpen(true)}
+                  className="editor-icon-button"
                 >
                   <Settings2 aria-hidden="true" />
                 </IconButton>
@@ -2501,6 +2790,7 @@ export const EditorWorkbench: React.FC = () => {
                   label="Keyboard shortcuts"
                   shortcut="?"
                   onClick={() => setIsShortcutsOpen(true)}
+                  className="editor-icon-button"
                 >
                   <CircleHelp aria-hidden="true" />
                 </IconButton>
@@ -2515,21 +2805,21 @@ export const EditorWorkbench: React.FC = () => {
         {/* Left Pane: Files Explorer Drawer (Collapsible) */}
         {isFileTreeOpen && (
           <div
-            className="editor-explorer-pane relative bg-[#0d0d15] border-r border-[#1c1c2b] flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto"
+            className="editor-explorer-pane relative bg-ide-sidebar-bg border-r border-ide-elevated flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto"
           >
             {searchMode === "workspace" && (
-              <section className="absolute inset-0 z-10 flex flex-col overflow-hidden border-r border-[#a5a1ff]/15 bg-gradient-to-b from-[#171724] via-[#10101a] to-[#0c0c13] shadow-[18px_0_45px_rgba(0,0,0,0.32),inset_-1px_0_0_rgba(165,161,255,0.08)]">
-                <div className="border-b border-white/[0.07] bg-gradient-to-r from-[#6C63FF]/[0.10] via-transparent to-[#0DF5C4]/[0.04] p-3 shadow-[0_8px_24px_rgba(0,0,0,0.18)]">
+              <section className="absolute inset-0 z-10 flex flex-col overflow-hidden border-r border-[color-mix(in_srgb,var(--ide-color-secondary)_15%,transparent)] bg-gradient-to-b from-ide-surface-raised via-ide-tab-inactive to-ide-panel shadow-[18px_0_45px_color-mix(in_srgb,var(--ide-color-shadow-color)_80%,transparent),inset_-1px_0_0_color-mix(in_srgb,var(--ide-color-secondary)_8%,transparent)]">
+                <div className="border-b border-ide-border-subtle bg-gradient-to-r from-[color-mix(in_srgb,var(--ide-color-secondary)_10%,transparent)] via-transparent to-[color-mix(in_srgb,var(--ide-color-accent)_4%,transparent)] p-3 shadow-[0_8px_24px_color-mix(in_srgb,var(--ide-color-shadow-color)_45%,transparent)]">
                   <div className="mb-3 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#a5a1ff]/20 bg-gradient-to-br from-[#6C63FF]/20 to-[#0DF5C4]/[0.08] shadow-[0_4px_14px_rgba(108,99,255,0.16)]">
-                        <SearchCode className="h-3.5 w-3.5 text-[#b5b1ff]" />
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg border border-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] bg-gradient-to-br from-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] to-[color-mix(in_srgb,var(--ide-color-accent)_8%,transparent)] shadow-[0_4px_14px_color-mix(in_srgb,var(--ide-color-secondary)_16%,transparent)]">
+                        <SearchCode className="h-3.5 w-3.5 text-ide-secondary" />
                       </div>
                       <div>
-                        <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#d6d4f4]">
+                        <h2 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ide-text-secondary">
                           Search
                         </h2>
-                        <p className="mt-0.5 text-[9px] text-[#73738e]">
+                        <p className="mt-0.5 text-[9px] text-ide-muted">
                           Across workspace files
                         </p>
                       </div>
@@ -2539,13 +2829,13 @@ export const EditorWorkbench: React.FC = () => {
                       onClick={() => setSearchMode(null)}
                       title="Close search (Esc)"
                       aria-label="Close workspace search"
-                      className="rounded-lg border border-white/[0.06] bg-white/[0.025] p-1.5 text-[#85859e] transition hover:border-white/[0.12] hover:bg-white/[0.07] hover:text-white"
+                      className="rounded-lg border border-ide-border-subtle bg-ide-input-bg p-1.5 text-ide-muted transition hover:border-ide-border hover:bg-ide-hover hover:text-ide-text-strong"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2 rounded-xl border border-[#a5a1ff]/25 bg-[#090910]/80 px-2.5 py-2 shadow-[0_6px_22px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.045)] transition focus-within:border-[#a5a1ff]/55 focus-within:shadow-[0_0_0_3px_rgba(108,99,255,0.12),0_8px_25px_rgba(0,0,0,0.35)]">
-                    <Search className="h-3.5 w-3.5 shrink-0 text-[#a5a1ff]" />
+                  <div className="flex items-center gap-2 rounded-xl border border-[color-mix(in_srgb,var(--ide-color-secondary)_25%,transparent)] bg-ide-input-bg px-2.5 py-2 shadow-[0_6px_22px_color-mix(in_srgb,var(--ide-color-shadow-color)_95%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_4.5%,transparent)] transition focus-within:border-[color-mix(in_srgb,var(--ide-color-secondary)_55%,transparent)] focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--ide-color-secondary)_12%,transparent),0_8px_25px_color-mix(in_srgb,var(--ide-color-shadow-color)_87.5%,transparent)]">
+                    <Search className="h-3.5 w-3.5 shrink-0 text-ide-secondary" />
                     <input
                       ref={searchInputRef}
                       type="text"
@@ -2556,7 +2846,7 @@ export const EditorWorkbench: React.FC = () => {
                       aria-label="Search text across workspace files"
                       autoComplete="off"
                       spellCheck={false}
-                      className="min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-[#66667f]"
+                      className="min-w-0 flex-1 bg-transparent text-[11px] text-ide-text-strong outline-none placeholder:text-ide-muted"
                     />
                     {searchQuery && (
                       <button
@@ -2564,18 +2854,18 @@ export const EditorWorkbench: React.FC = () => {
                         onClick={() => setSearchQuery("")}
                         title="Clear search"
                         aria-label="Clear search"
-                        className="rounded p-0.5 text-[#77778f] hover:text-white"
+                        className="rounded p-0.5 text-ide-muted hover:text-ide-text-strong"
                       >
                         <X className="h-3 w-3" />
                       </button>
                     )}
                   </div>
                   <div className="mt-2 flex items-center justify-between px-0.5">
-                    <span className="text-[9px] uppercase tracking-[0.12em] text-[#686880]">
+                    <span className="text-[9px] uppercase tracking-[0.12em] text-ide-muted">
                       {searchQuery.trim() ? "Results" : "Find text in project"}
                     </span>
                     {searchQuery.trim() && (
-                      <span className="rounded-full border border-[#a5a1ff]/15 bg-[#6C63FF]/[0.08] px-2 py-0.5 text-[9px] font-medium text-[#bbb7ff]">
+                      <span className="rounded-full border border-[color-mix(in_srgb,var(--ide-color-secondary)_15%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-secondary)_8%,transparent)] px-2 py-0.5 text-[9px] font-medium text-ide-secondary">
                         {workspaceSearchMatches.length}{" "}
                         {workspaceSearchMatches.length === 1
                           ? "match"
@@ -2587,17 +2877,17 @@ export const EditorWorkbench: React.FC = () => {
 
                 <div className="flex-1 space-y-1 overflow-y-auto p-2">
                   {!searchQuery.trim() ? (
-                    <div className="mt-4 rounded-xl border border-white/[0.05] bg-white/[0.018] px-3 py-4 text-center">
-                      <SearchCode className="mx-auto h-5 w-5 text-[#77749e]" />
-                      <p className="mt-2 text-[10px] text-[#85859e]">
+                    <div className="mt-4 rounded-xl border border-ide-border-subtle bg-ide-input-bg px-3 py-4 text-center">
+                      <SearchCode className="mx-auto h-5 w-5 text-ide-secondary" />
+                      <p className="mt-2 text-[10px] text-ide-muted">
                         Search all files in this workspace
                       </p>
-                      <p className="mt-1 text-[9px] text-[#5f5f75]">
+                      <p className="mt-1 text-[9px] text-ide-muted">
                         Press Esc to close
                       </p>
                     </div>
                   ) : workspaceSearchMatches.length === 0 ? (
-                    <p className="rounded-xl border border-white/[0.05] bg-white/[0.018] px-3 py-5 text-center text-[10px] text-[#77778f]">
+                    <p className="rounded-xl border border-ide-border-subtle bg-ide-input-bg px-3 py-5 text-center text-[10px] text-ide-muted">
                       No matches found.
                     </p>
                   ) : (
@@ -2606,19 +2896,19 @@ export const EditorWorkbench: React.FC = () => {
                         key={`${match.file.id}-${match.line}-${match.column}-${index}`}
                         type="button"
                         onClick={() => openWorkspaceSearchMatch(match)}
-                        className="group w-full rounded-xl border border-transparent bg-white/[0.018] px-2.5 py-2 text-left transition hover:border-[#a5a1ff]/20 hover:bg-gradient-to-r hover:from-[#6C63FF]/[0.10] hover:to-[#0DF5C4]/[0.035] hover:shadow-[0_5px_18px_rgba(0,0,0,0.24)]"
+                        className="group w-full rounded-xl border border-transparent bg-ide-input-bg px-2.5 py-2 text-left transition hover:border-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] hover:bg-gradient-to-r hover:from-[color-mix(in_srgb,var(--ide-color-secondary)_10%,transparent)] hover:to-[color-mix(in_srgb,var(--ide-color-accent)_3.5%,transparent)] hover:shadow-[0_5px_18px_color-mix(in_srgb,var(--ide-color-shadow-color)_60%,transparent)]"
                       >
                         <span className="flex min-w-0 items-center gap-1.5">
-                          <FileCode className="h-3 w-3 shrink-0 text-[#9a95ec] group-hover:text-[#c2bfff]" />
-                          <span className="truncate font-mono text-[9px] text-[#c7c5e4] group-hover:text-white">
+                          <FileCode className="h-3 w-3 shrink-0 text-ide-secondary group-hover:text-ide-text-strong" />
+                          <span className="truncate font-mono text-[9px] text-ide-text-secondary group-hover:text-ide-text-strong">
                             {match.file.path}
                           </span>
                         </span>
                         <span className="mt-1.5 flex min-w-0 items-center gap-2 pl-[18px]">
-                          <span className="shrink-0 rounded border border-white/[0.05] bg-black/20 px-1 text-[8px] text-[#70708a]">
+                          <span className="shrink-0 rounded border border-ide-border-subtle bg-ide-input-bg px-1 text-[8px] text-ide-muted">
                             {match.line + 1}
                           </span>
-                          <span className="truncate font-mono text-[9px] text-[#85859a] group-hover:text-[#c4c4d5]">
+                          <span className="truncate font-mono text-[9px] text-ide-muted group-hover:text-ide-text-secondary">
                             {match.text.trim() || "(empty line)"}
                           </span>
                         </span>
@@ -2630,76 +2920,76 @@ export const EditorWorkbench: React.FC = () => {
             )}
             <div className="p-3 space-y-4">
               {/* Header with Project Name + Action Icons */}
-              <div className="flex items-center justify-between pb-2 border-b border-[#1a1a28]">
-                <div className="flex items-center gap-2 truncate">
-                  <div className="w-2.5 h-2.5 rounded bg-[#0DF5C4] shrink-0" />
-                  <span className="font-bold text-white text-xs truncate">
+              <div className="editor-explorer-header flex min-w-0 items-center justify-between gap-2 pb-2 border-b border-ide-border">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded bg-ide-accent shrink-0" />
+                  <span
+                    className="min-w-0 flex-1 truncate font-bold text-ide-text-strong text-xs"
+                    title={loadedProjectName || "Local workspace"}
+                  >
                     {loadedProjectName || "Local workspace"}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="editor-explorer-header-actions flex shrink-0 items-center">
                   <button
                     onClick={() => setIsCreatingFolder(true)}
                     title="New Folder"
-                    className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
+                    aria-label="New Folder"
+                    className="editor-icon-button editor-explorer-header-action rounded hover:bg-ide-surface-hover text-ide-text-dim hover:text-ide-text-strong"
                   >
-                    <FolderPlus className="w-3.5 h-3.5" />
+                    <FolderPlus className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => setIsCreatingFile(true)}
                     title="New File"
-                    className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
+                    aria-label="New File"
+                    className="editor-icon-button editor-explorer-header-action rounded hover:bg-ide-surface-hover text-ide-text-dim hover:text-ide-text-strong"
                   >
-                    <FilePlus className="w-3.5 h-3.5" />
+                    <FilePlus className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => void openNativeFile()}
                     title="Open Local File"
                     aria-label="Open Local File"
-                    className="p-1 rounded hover:bg-[#1a1a28] text-[#71718c] hover:text-white"
+                    className="editor-icon-button editor-explorer-header-action rounded hover:bg-ide-surface-hover text-ide-text-dim hover:text-ide-text-strong"
                   >
-                    <FolderOpen className="w-3.5 h-3.5" />
+                    <FolderOpen className="h-4 w-4" />
                   </button>
                 </div>
               </div>
 
               {/* Dynamic File List */}
               <div className="editor-explorer-tree space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-[#63637e] uppercase tracking-wider px-1">
+                <div className="flex items-center justify-between text-[10px] text-ide-text-dim uppercase tracking-wider px-1">
                   <span>WORKSPACE FILES ({treeFiles.length})</span>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="editor-explorer-filter-row flex items-center gap-1">
+                  <Search aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-ide-text-dim" />
                   <input
                     value={explorerFilter}
                     onChange={(event) => setExplorerFilter(event.target.value)}
-                    className="ide-input min-w-0 flex-1"
+                    className="ide-input editor-explorer-filter min-w-0 flex-1"
                     placeholder="Filter files"
                     aria-label="Filter workspace files"
                   />
-                  <IconButton
-                    label="Collapse all folders"
-                    onClick={() => setCollapsedFolders(new Set(treeFolders))}
-                  >
-                    <ChevronRight aria-hidden="true" />
-                  </IconButton>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => setSelectedFolder("")}
-                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors ${selectedFolder === "" ? "bg-[#1a1a2b] text-white" : "text-[#8b8ba8] hover:bg-[#141420] hover:text-white"}`}
+                  className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors ${selectedFolder === "" ? "bg-ide-surface-hover-strong text-ide-text-strong" : "text-ide-text-tertiary hover:bg-ide-surface hover:text-ide-text-strong"}`}
                 >
-                  <Folder className="h-3.5 w-3.5 text-[#0DF5C4]" />
+                  <Folder className="h-3.5 w-3.5 text-ide-accent" />
                   <span>Workspace root</span>
                 </button>
 
                 {treeFiles.length === 0 && treeFolders.length === 0 ? (
-                  <div className="p-4 text-center text-[11px] text-[#63637e] space-y-2">
+                  <div className="p-4 text-center text-[11px] text-ide-muted space-y-2">
                     <p>No files loaded.</p>
                     <button
                       onClick={() => setIsCreatingFile(true)}
-                      className="px-2.5 py-1 rounded bg-[#181826] text-white hover:bg-[#202034] text-[10px]"
+                      className="px-2.5 py-1 rounded bg-ide-surface text-ide-text-strong hover:bg-ide-surface-hover text-[10px]"
                     >
                       + Create First File
                     </button>
@@ -2717,7 +3007,7 @@ export const EditorWorkbench: React.FC = () => {
                           type="button"
                           key={file.id}
                           onClick={() => openFileInEditor(file)}
-                          className={`flex w-full min-w-0 items-center gap-2 truncate rounded px-2 py-1.5 text-left ${activeFile?.id === file.id ? "editor-explorer-active" : "text-[#8b8ba8] hover:bg-[#141420]"}`}
+                          className={`flex w-full min-w-0 items-center gap-2 truncate rounded px-2 py-1.5 text-left ${activeFile?.id === file.id ? "editor-explorer-active" : "text-ide-muted hover:bg-ide-surface"}`}
                           title={file.path}
                         >
                           <span className="editor-file-type">{file.iconType}</span>
@@ -2733,9 +3023,9 @@ export const EditorWorkbench: React.FC = () => {
               {isCreatingFolder && (
                 <form
                   onSubmit={handleCreateNewFolder}
-                  className="p-2 bg-[#161624] border border-[#2b2b3e] rounded-xl space-y-2"
+                  className="p-2 bg-ide-surface border border-ide-border-strong rounded-xl space-y-2"
                 >
-                  <div className="text-[10px] text-[#8b8ba8]">
+                  <div className="text-[10px] text-ide-muted">
                     New folder in {selectedFolder || "workspace root"}
                   </div>
                   <input
@@ -2745,19 +3035,19 @@ export const EditorWorkbench: React.FC = () => {
                     placeholder="folder-name"
                     value={newFolderNameInput}
                     onChange={(e) => setNewFolderNameInput(e.target.value)}
-                    className="w-full px-2 py-1 bg-[#101018] border border-[#262638] rounded-lg text-xs font-mono text-white focus:outline-none"
+                    className="w-full px-2 py-1 bg-ide-input-bg border border-ide-input-border rounded-lg text-xs font-mono text-ide-text-strong focus:outline-none"
                   />
                   <div className="flex justify-end gap-1">
                     <button
                       type="button"
                       onClick={() => setIsCreatingFolder(false)}
-                      className="px-2 py-0.5 text-[10px] text-[#787896]"
+                      className="px-2 py-0.5 text-[10px] text-ide-muted"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-2 py-0.5 text-[10px] rounded font-semibold text-[#09090e]"
+                      className="px-2 py-0.5 text-[10px] rounded font-semibold text-ide-accent-fg"
                       style={{ backgroundColor: theme.primary }}
                     >
                       Create Folder
@@ -2770,9 +3060,9 @@ export const EditorWorkbench: React.FC = () => {
               {isCreatingFile && (
                 <form
                   onSubmit={handleCreateNewFile}
-                  className="p-2 bg-[#161624] border border-[#2b2b3e] rounded-xl space-y-2"
+                  className="p-2 bg-ide-surface border border-ide-border-strong rounded-xl space-y-2"
                 >
-                  <div className="text-[10px] text-[#8b8ba8]">
+                  <div className="text-[10px] text-ide-muted">
                     New file in {selectedFolder || "workspace root"}
                   </div>
                   <input
@@ -2782,19 +3072,19 @@ export const EditorWorkbench: React.FC = () => {
                     placeholder="filename.ext"
                     value={newFileNameInput}
                     onChange={(e) => setNewFileNameInput(e.target.value)}
-                    className="w-full px-2 py-1 bg-[#101018] border border-[#262638] rounded-lg text-xs font-mono text-white focus:outline-none"
+                    className="w-full px-2 py-1 bg-ide-input-bg border border-ide-input-border rounded-lg text-xs font-mono text-ide-text-strong focus:outline-none"
                   />
                   <div className="flex justify-end gap-1">
                     <button
                       type="button"
                       onClick={() => setIsCreatingFile(false)}
-                      className="px-2 py-0.5 text-[10px] text-[#787896]"
+                      className="px-2 py-0.5 text-[10px] text-ide-muted"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-2 py-0.5 text-[10px] rounded font-semibold text-[#09090e]"
+                      className="px-2 py-0.5 text-[10px] rounded font-semibold text-ide-accent-fg"
                       style={{ backgroundColor: theme.primary }}
                     >
                       Add
@@ -2805,14 +3095,15 @@ export const EditorWorkbench: React.FC = () => {
             </div>
 
             {/* Bottom Actions */}
-            <div className="editor-explorer-footer p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] text-[#63637e]">
+            <div className="editor-explorer-footer shrink-0 p-3 border-t border-ide-border flex items-center justify-between text-xs text-ide-muted">
               <button
                 onClick={requestCloseProject}
-                className="hover:text-white"
+                title="Close Folder"
+                className="hover:text-ide-text-strong"
               >
                 ← Close Folder
               </button>
-              <span>Total: {treeFiles.length} files</span>
+              <span title={`Total: ${treeFiles.length} files`}>Total: {treeFiles.length} files</span>
             </div>
           </div>
         )}
@@ -2846,12 +3137,12 @@ export const EditorWorkbench: React.FC = () => {
         )}
 
         {/* Center Pane: Active Code Editor */}
-        <div className="editor-center-pane flex min-h-0 min-w-0 flex-1 flex-col bg-[#09090f] overflow-hidden">
+        <div className="editor-center-pane flex min-h-0 min-w-0 flex-1 flex-col bg-ide-editor-bg overflow-hidden">
           {/* Tabs Bar */}
-          <div className="editor-tabs-bar h-9 bg-[#0c0c14] border-b border-[#1c1c2b] flex items-center justify-between px-2 shrink-0">
+          <div className="editor-tabs-bar h-9 bg-ide-panel border-b border-ide-elevated flex items-center justify-between px-2 shrink-0">
             <div className="editor-tabs-scroll flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
               {openFiles.length === 0 ? (
-                <span className="text-[11px] text-[#63637e] font-mono px-2">
+                <span className="text-[11px] text-ide-text-dim font-mono px-2">
                   No files open
                 </span>
               ) : (
@@ -2893,22 +3184,22 @@ export const EditorWorkbench: React.FC = () => {
                     title={file.path}
                     className={`editor-file-tab group h-8 px-3 rounded-t-lg flex items-center gap-2 text-xs font-mono border-t-2 transition-colors cursor-pointer ${
                       activeFile?.id === file.id
-                        ? "bg-[#09090f] text-white font-semibold border-[#6C63FF]"
-                        : "bg-[#11111a] text-[#80809c] border-transparent hover:text-white"
+                        ? "bg-ide-editor-bg text-ide-text-strong font-semibold border-ide-accent"
+                        : "bg-ide-tab-inactive text-ide-muted border-transparent hover:text-ide-text-strong"
                     }`}
                   >
-                    <span className="editor-file-type text-[10px] px-1 rounded bg-white/10 font-bold uppercase">
+                    <span className="editor-file-type text-[10px] px-1 rounded bg-ide-accent-soft font-bold uppercase">
                       {file.iconType}
                     </span>
                     <span className="editor-file-tab-name">{file.name}</span>
                     {pinnedTabs.includes(file.id) && (
-                      <Pin className="h-3 w-3 text-[#0DF5C4]" aria-label="Pinned tab" />
+                      <Pin className="h-3 w-3 text-ide-accent" aria-label="Pinned tab" />
                     )}
                     {file.isDirty && (
                       <span
                         title="Unsaved changes"
                         aria-label="Unsaved changes"
-                        className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4]"
+                        className="w-1.5 h-1.5 rounded-full bg-ide-success"
                       />
                     )}
                     <button
@@ -2919,7 +3210,7 @@ export const EditorWorkbench: React.FC = () => {
                       type="button"
                       title={`Close ${file.name}`}
                       aria-label={`Close ${file.name}`}
-                      className="opacity-0 group-hover:opacity-100 hover:text-white text-[#63637e] p-0.5 rounded"
+                      className="editor-icon-button opacity-0 group-hover:opacity-100 hover:text-ide-text-strong text-ide-muted rounded"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -2928,11 +3219,12 @@ export const EditorWorkbench: React.FC = () => {
               )}
             </div>
 
-            <div className="editor-tabs-actions flex items-center gap-2 text-xs text-[#63637e] pr-2">
+            <div className="editor-tabs-actions flex items-center gap-2 text-xs text-ide-muted pr-2">
               <IconButton
                 label={isSplitEditor ? "Close split editor" : "Split editor"}
                 onClick={() => setIsSplitEditor((split) => !split)}
                 aria-pressed={isSplitEditor}
+                className="editor-icon-button"
               >
                 <Split aria-hidden="true" />
               </IconButton>
@@ -2940,6 +3232,7 @@ export const EditorWorkbench: React.FC = () => {
                 label={isZenMode ? "Exit focus mode" : "Focus editor"}
                 shortcut="Ctrl+Shift+Z"
                 onClick={() => setIsZenMode((mode) => !mode)}
+                className="editor-icon-button"
               >
                 <Columns aria-hidden="true" />
               </IconButton>
@@ -2949,10 +3242,10 @@ export const EditorWorkbench: React.FC = () => {
           {/* Interactive Code Editor Area */}
           <div className={`editor-code-area relative flex min-h-[180px] flex-1 overflow-hidden font-mono text-xs ${isSplitEditor ? "editor-split-view" : ""}`}>
             {searchMode === "file" && (
-              <section className="absolute right-4 top-3 z-30 w-[min(390px,calc(100%-2rem))] overflow-hidden rounded-2xl border border-white/[0.13] bg-gradient-to-br from-[#191923]/[0.99] via-[#11111b]/[0.99] to-[#0d0d14]/[0.99] shadow-[0_28px_80px_rgba(0,0,0,0.72),0_10px_34px_rgba(108,99,255,0.14),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl">
-                <div className="h-px bg-gradient-to-r from-[#0DF5C4]/70 via-[#6C63FF]/60 to-[#FF9E64]/40" />
-                <div className="flex items-center gap-2 border-b border-white/[0.07] px-3 py-2.5">
-                  <Search className="h-4 w-4 shrink-0 text-[#0DF5C4]" />
+              <section className="absolute right-4 top-3 z-30 w-[min(390px,calc(100%-2rem))] overflow-hidden rounded-2xl border border-ide-border bg-gradient-to-br from-ide-surface-raised via-ide-topbar-bg to-ide-bg shadow-ide-shadow-strong backdrop-blur-xl">
+                  <div className="h-px bg-gradient-to-r from-ide-accent/70 via-ide-secondary/60 to-ide-warm-accent/40" />
+                <div className="flex items-center gap-2 border-b border-ide-border-subtle px-3 py-2.5">
+                  <Search className="h-4 w-4 shrink-0 text-ide-accent" />
                   <input
                     ref={searchInputRef}
                     type="text"
@@ -2990,10 +3283,10 @@ export const EditorWorkbench: React.FC = () => {
                     )}
                     autoComplete="off"
                     spellCheck={false}
-                    className={`min-w-0 flex-1 rounded-md border px-1 py-1 text-xs text-white outline-none placeholder:text-[#66667c] ${
+                    className={`min-w-0 flex-1 rounded-md border px-1 py-1 text-xs text-ide-text-strong outline-none placeholder:text-ide-text-placeholder ${
                       findResult.error ||
                       (searchQuery && activeFileMatches.length === 0)
-                        ? "border-[#ff6b7a]/70"
+                        ? "border-ide-danger/70"
                         : "border-transparent bg-transparent"
                     }`}
                   />
@@ -3004,8 +3297,8 @@ export const EditorWorkbench: React.FC = () => {
                         className={`whitespace-nowrap text-[10px] ${
                           findResult.error ||
                           (searchQuery && activeFileMatches.length === 0)
-                            ? "text-[#ff9e9e]"
-                            : "text-[#84849b]"
+                            ? "text-ide-danger"
+                            : "text-ide-text-tertiary"
                         }`}
                       >
                         {findResult.error
@@ -3043,8 +3336,8 @@ export const EditorWorkbench: React.FC = () => {
                           onClick={option.toggle}
                           className={`rounded-md px-1 py-1 font-mono text-[10px] transition ${
                             option.value
-                              ? "bg-[#6C63FF]/25 text-[#c5c0ff]"
-                              : "text-[#77778f] hover:bg-white/[0.07] hover:text-white"
+                              ? "bg-ide-secondary/25 text-[var(--ide-color-secondary-readable)]"
+                              : "text-ide-muted hover:bg-ide-hover hover:text-ide-text-strong"
                           }`}
                         >
                           {option.text}
@@ -3064,8 +3357,8 @@ export const EditorWorkbench: React.FC = () => {
                         }}
                         className={`rounded-md px-1 py-1 text-[10px] ${
                           findInSelection
-                            ? "bg-[#6C63FF]/25 text-[#c5c0ff]"
-                            : "text-[#77778f] hover:bg-white/[0.07] hover:text-white"
+                            ? "bg-ide-secondary/25 text-[var(--ide-color-secondary-readable)]"
+                            : "text-ide-muted hover:bg-ide-hover hover:text-ide-text-strong"
                         }`}
                       >
                         Sel
@@ -3076,7 +3369,7 @@ export const EditorWorkbench: React.FC = () => {
                         aria-label="Toggle Replace"
                         aria-expanded={isReplaceOpen}
                         onClick={() => setIsReplaceOpen((open) => !open)}
-                        className="rounded-md px-1 py-1 text-[10px] text-[#77778f] transition hover:bg-white/[0.07] hover:text-white"
+                        className="rounded-md px-1 py-1 text-[10px] text-ide-muted transition hover:bg-ide-hover hover:text-ide-text-strong"
                       >
                         ▾
                       </button>
@@ -3088,7 +3381,7 @@ export const EditorWorkbench: React.FC = () => {
                     aria-label="Previous match"
                     disabled={activeFileMatches.length === 0}
                     onClick={() => navigateFileSearch(-1)}
-                    className="rounded-lg px-1.5 py-1 text-[#8e8ea8] transition hover:bg-white/[0.07] hover:text-white disabled:opacity-30"
+                    className="rounded-lg px-1.5 py-1 text-ide-text-tertiary transition hover:bg-ide-hover hover:text-ide-text-strong disabled:opacity-30"
                   >
                     ↑
                   </button>
@@ -3098,7 +3391,7 @@ export const EditorWorkbench: React.FC = () => {
                     aria-label="Next match"
                     disabled={activeFileMatches.length === 0}
                     onClick={() => navigateFileSearch(1)}
-                    className="rounded-lg px-1.5 py-1 text-[#8e8ea8] transition hover:bg-white/[0.07] hover:text-white disabled:opacity-30"
+                    className="rounded-lg px-1.5 py-1 text-ide-text-tertiary transition hover:bg-ide-hover hover:text-ide-text-strong disabled:opacity-30"
                   >
                     ↓
                   </button>
@@ -3107,31 +3400,31 @@ export const EditorWorkbench: React.FC = () => {
                     onClick={closeFileFind}
                     title="Close (Esc)"
                     aria-label="Close search"
-                    className="rounded p-1 text-[#77778f] transition hover:bg-white/[0.07] hover:text-white"
+                    className="rounded p-1 text-ide-muted transition hover:bg-ide-hover hover:text-ide-text-strong"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between border-t border-white/[0.06] px-3 py-2 text-[9px] text-[#696980]">
+                <div className="flex items-center justify-between border-t border-ide-border-subtle px-3 py-2 text-[9px] text-ide-text-dim">
                   <span>{findResult.error ?? "Current file"}</span>
                   <span>Enter to cycle · Esc to close</span>
                 </div>
                 {searchMode === "file" && isReplaceOpen && (
-                  <div className="flex items-center gap-2 border-t border-white/[0.06] px-3 py-2">
+                  <div className="flex items-center gap-2 border-t border-ide-border-subtle px-3 py-2">
                     <input
                       ref={replaceInputRef}
                       value={replaceQuery}
                       onChange={(event) => setReplaceQuery(event.target.value)}
                       aria-label="Replace with"
                       placeholder="Replace with..."
-                      className="min-w-0 flex-1 rounded-md border border-white/[0.09] bg-black/20 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-[#66667c] focus:border-[#6C63FF]/60"
+                      className="min-w-0 flex-1 rounded-md border border-ide-border bg-ide-input-bg px-2 py-1.5 text-[11px] text-ide-text-strong outline-none placeholder:text-ide-text-placeholder focus:border-ide-secondary/60"
                     />
                     <button
                       type="button"
                       onClick={replaceCurrentFindMatch}
                       disabled={!activeFileMatch}
-                      className="rounded-md border border-white/[0.1] px-2 py-1.5 text-[10px] text-[#aaa9c2] hover:bg-white/[0.06] disabled:opacity-40"
+                      className="rounded-md border border-ide-border px-2 py-1.5 text-[10px] text-ide-text-secondary hover:bg-ide-hover disabled:opacity-40"
                     >
                       Replace
                     </button>
@@ -3140,7 +3433,7 @@ export const EditorWorkbench: React.FC = () => {
                       onClick={replaceAllFindMatches}
                       disabled={!activeFileMatches.length}
                       title="Replace All (Ctrl+Alt+Enter)"
-                      className="rounded-md border border-white/[0.1] px-2 py-1.5 text-[10px] text-[#aaa9c2] hover:bg-white/[0.06] disabled:opacity-40"
+                      className="rounded-md border border-ide-border px-2 py-1.5 text-[10px] text-ide-text-secondary hover:bg-ide-hover disabled:opacity-40"
                     >
                       Replace All
                     </button>
@@ -3149,19 +3442,19 @@ export const EditorWorkbench: React.FC = () => {
               </section>
             )}
             {!activeFile ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-[#656582] space-y-3">
-                <FileCode className="w-10 h-10 text-[#45455c]" />
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-ide-text-dim space-y-3">
+                <FileCode className="w-10 h-10 text-ide-gutter-fg" />
                 <p>No file selected.</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setIsCreatingFile(true)}
-                    className="px-3 py-1.5 rounded-xl bg-[#151522] border border-[#242436] text-white hover:border-white/30"
+                    className="px-3 py-1.5 rounded-xl bg-ide-surface-raised border border-ide-border-control text-ide-text-strong hover:border-ide-border-strong"
                   >
                     + Create File
                   </button>
                   <button
                     onClick={() => void openNativeFile()}
-                    className="px-3 py-1.5 rounded-xl bg-[#151522] border border-[#242436] text-white hover:border-white/30"
+                    className="px-3 py-1.5 rounded-xl bg-ide-surface-raised border border-ide-border-control text-ide-text-strong hover:border-ide-border-strong"
                   >
                     Open Local File
                   </button>
@@ -3169,9 +3462,13 @@ export const EditorWorkbench: React.FC = () => {
               </div>
             ) : (
               <>
-                <div className="relative flex-1 overflow-hidden bg-[#09090f]">
+                <div className="relative flex-1 overflow-hidden bg-ide-editor-bg">
                   {currentCode.length === 0 && !isEditorHintDismissed && (
-                    <div className="editor-empty-hint" aria-label="Editor tips">
+                    <div
+                      className="editor-empty-hint"
+                      aria-label="Editor tips"
+                      style={{ left: editorContentLeft }}
+                    >
                       <button
                         type="button"
                         className="editor-empty-hint-action"
@@ -3239,7 +3536,7 @@ export const EditorWorkbench: React.FC = () => {
                     path={activeFile.path}
                     language={getMonacoLanguageId(activeFile.language)}
                     value={currentCode}
-                    theme={MONACO_THEME}
+                    theme={monacoThemeName}
                     beforeMount={handleMonacoBeforeMount}
                     onMount={handleMonacoMount}
                     onChange={(value) => {
@@ -3261,6 +3558,20 @@ export const EditorWorkbench: React.FC = () => {
                       scrollBeyondLastLine: false,
                       smoothScrolling: true,
                       bracketPairColorization: { enabled: true },
+                      autoClosingBrackets: "always",
+                      autoClosingQuotes: "always",
+                      autoIndent: "full",
+                      formatOnType: true,
+                      formatOnPaste: true,
+                      quickSuggestions: {
+                        other: true,
+                        comments: false,
+                        strings: true,
+                      },
+                      suggestOnTriggerCharacters: true,
+                      snippetSuggestions: "top",
+                      linkedEditing: true,
+                      inlineSuggest: { enabled: true },
                       guides: {
                         indentation: true,
                         bracketPairs: true,
@@ -3290,19 +3601,19 @@ export const EditorWorkbench: React.FC = () => {
 
           {/* Execution Output (if run) */}
           {saveError && (
-            <div className="bg-[#2a1118] border-t border-[#7f1d1d] px-3 py-2 text-xs font-mono text-[#fca5a5]">
+            <div className="bg-ide-surface-danger border-t border-ide-border-danger px-3 py-2 text-xs font-mono text-ide-danger">
               Save error: {saveError}
             </div>
           )}
 
           {runOutput && (
-            <div className="h-16 bg-[#0a0a12] border-t border-[#1e1e2d] p-3 text-xs font-mono text-[#0DF5C4] flex items-center justify-between">
+            <div className="h-16 bg-ide-editor-bg border-t border-ide-border p-3 text-xs font-mono text-ide-success flex items-center justify-between">
               <pre className="whitespace-pre-wrap overflow-auto">
                 {runOutput}
               </pre>
               <button
                 onClick={() => setRunOutput(null)}
-                className="text-[#656580] hover:text-white text-xs"
+                className="text-ide-text-dim hover:text-ide-text-strong text-xs"
               >
                 ✕
               </button>
@@ -3310,19 +3621,19 @@ export const EditorWorkbench: React.FC = () => {
           )}
 
           <TerminalPanel
-            colorMode={colorMode}
             isOpen={isTerminalOpen}
             onClose={() => setIsTerminalOpen(false)}
-            primaryColor={theme.primary}
+            onFocusChange={setIsTerminalFocused}
+            terminalTheme={theme.terminal}
             projectName={loadedProjectName}
           />
 
           {/* Bottom Editor Status Bar */}
-          <div className="editor-status-bar h-6 bg-[#0c0c14] border-t border-[#181824] px-3 flex items-center justify-between text-[11px] font-mono text-[#6c6c88] shrink-0">
+          <div className="editor-status-bar h-6 bg-ide-panel border-t border-ide-border px-3 flex items-center justify-between text-[11px] font-mono text-ide-statusbar-fg shrink-0">
             <div className="editor-status-group editor-status-left">
               <button
                 type="button"
-                className="editor-status-branch text-[#0DF5C4] flex items-center gap-1"
+                className="editor-status-branch text-ide-accent flex items-center gap-1"
                 title="Current branch (preview)"
                 onClick={() => addToast({ type: "info", title: "Local preview branch", description: "Git integration will be connected by the backend." })}
               >
@@ -3497,21 +3808,21 @@ export const EditorWorkbench: React.FC = () => {
                 );
               }}
             />
-            <div className="editor-ai-panel bg-[#0c0c14] border-l border-[#1c1c2b] flex flex-col justify-between shrink-0 font-sans text-xs overflow-hidden">
+            <div className="editor-ai-panel bg-ide-panel border-l border-ide-elevated flex flex-col justify-between shrink-0 font-sans text-xs overflow-hidden">
             {/* AI Header */}
-            <div className="p-3 border-b border-[#1c1c2b] flex items-center justify-between bg-[#0e0e16]">
+            <div className="p-3 border-b border-ide-elevated flex items-center justify-between bg-ide-surface">
               <div className="flex items-center gap-2">
                 <div
-                  className="w-5 h-5 rounded-md flex items-center justify-center text-white"
+                  className="w-5 h-5 rounded-md flex items-center justify-center text-ide-text-strong"
                   style={{ backgroundColor: theme.primary }}
                 >
-                  <Sparkles className="w-3 h-3 text-[#09090e]" />
+                  <Sparkles className="w-3 h-3 text-ide-accent-fg" />
                 </div>
                 <div>
-                  <span className="font-bold text-white text-xs">
+                  <span className="font-bold text-ide-text-strong text-xs">
                     AI Assistant
                   </span>
-                  <span className="text-[10px] text-[#0DF5C4] font-mono ml-1.5">
+                  <span className="text-[10px] text-ide-accent font-mono ml-1.5">
                     Interactive Engine
                   </span>
                 </div>
@@ -3530,15 +3841,15 @@ export const EditorWorkbench: React.FC = () => {
 
             {/* AI Chat Stream */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 select-text">
-              <div className="editor-ai-context px-2.5 py-1 rounded-lg bg-[#141420] border border-[#232336] text-[11px] font-mono text-[#8b8ba8] flex items-center gap-1.5">
-                <FileCode className="w-3 h-3 text-[#0DF5C4]" />
+              <div className="editor-ai-context px-2.5 py-1 rounded-lg bg-ide-surface border border-ide-border-control text-[11px] font-mono text-ide-text-tertiary flex items-center gap-1.5">
+                <FileCode className="w-3 h-3 text-ide-accent" />
                 <span>
                   Context: {activeFile ? activeFile.name : "Workspace"}
                 </span>
               </div>
 
               {aiHistory.length === 0 ? (
-                <div className="editor-ai-empty-state p-4 text-center text-xs text-[#71718c] space-y-2">
+                <div className="editor-ai-empty-state p-4 text-center text-xs text-ide-text-dim space-y-2">
                   <p>
                     Ask anything about your code or request functions,
                     optimizations, and bug fixes.
@@ -3547,19 +3858,19 @@ export const EditorWorkbench: React.FC = () => {
               ) : (
                 aiHistory.map((item, i) => (
                   <div key={i} className="space-y-2">
-                    <div className="text-[11px] font-bold font-mono text-[#a4a4c4]">
+                    <div className="text-[11px] font-bold font-mono text-ide-text-secondary">
                       {item.sender}
                     </div>
-                    <div className="p-3 rounded-xl bg-[#141422] border border-[#232338] text-white text-xs leading-relaxed">
+                    <div className="p-3 rounded-xl bg-ide-surface border border-ide-border-control text-ide-text-strong text-xs leading-relaxed">
                       {item.text}
                     </div>
 
                     {item.code && (
-                      <div className="bg-[#09090f] border border-[#202030] rounded-xl overflow-hidden font-mono text-xs">
-                        <pre className="p-3 text-[11px] text-[#d6d6e8] leading-relaxed overflow-x-auto">
+                      <div className="bg-ide-editor-bg border border-ide-border rounded-xl overflow-hidden font-mono text-xs">
+                        <pre className="p-3 text-[11px] text-ide-text leading-relaxed overflow-x-auto">
                           <code>{item.code}</code>
                         </pre>
-                        <div className="p-2 border-t border-[#1a1a28] flex justify-between">
+                        <div className="p-2 border-t border-ide-border flex justify-between">
                           <button
                             type="button"
                             onClick={() => {
@@ -3574,13 +3885,13 @@ export const EditorWorkbench: React.FC = () => {
                                   }),
                                 );
                             }}
-                            className="px-3 py-1 rounded-lg text-xs text-[#9a9cac] hover:bg-white/[0.06]"
+                            className="px-3 py-1 rounded-lg text-xs text-ide-text-soft hover:bg-ide-hover"
                           >
                             Copy code
                           </button>
                           <button
                             onClick={() => applyDiffToActiveFile(item.code!)}
-                            className="px-3 py-1 rounded-lg text-xs font-semibold text-[#09090e]"
+                            className="px-3 py-1 rounded-lg text-xs font-semibold text-ide-accent-fg"
                             style={{ backgroundColor: theme.primary }}
                           >
                             Apply Diff to Editor
@@ -3593,7 +3904,7 @@ export const EditorWorkbench: React.FC = () => {
               )}
 
               {isAiLoading && (
-                <div className="p-3 text-xs text-[#0DF5C4] font-mono flex items-center gap-2">
+                <div className="p-3 text-xs text-ide-accent font-mono flex items-center gap-2">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span>
                     AI generating code for {activeFile?.name || "file"}...
@@ -3603,7 +3914,7 @@ export const EditorWorkbench: React.FC = () => {
             </div>
 
             {/* Bottom Prompt Input */}
-            <div className="p-3 border-t border-[#1c1c2b] bg-[#0e0e16]">
+            <div className="p-3 border-t border-ide-elevated bg-ide-surface">
               <form onSubmit={handleSendAi} className="relative">
                 {aiHistory.length === 0 && (
                   <div className="editor-ai-suggestions" aria-label="Suggested prompts">
@@ -3634,16 +3945,16 @@ export const EditorWorkbench: React.FC = () => {
                     }
                   }}
                   aria-label="Ask AI to write or fix code"
-                  className="editor-ai-input w-full pl-3 pr-10 py-2.5 bg-[#141422] border border-[#242438] rounded-xl text-xs text-white placeholder-[#595975] focus:outline-none focus:border-[#6C63FF]"
+                  className="editor-ai-input w-full pl-3 pr-10 py-2.5 bg-ide-surface border border-ide-border-control rounded-xl text-xs text-ide-text-strong placeholder-ide-text-placeholder focus:outline-none focus:border-ide-focus-ring"
                 />
                 <button
                   type="submit"
                   aria-label="Send prompt to AI"
                   title="Send prompt"
-                  className="editor-ai-send absolute right-2 top-2 p-1.5 rounded-lg text-[#09090e]"
+                  className="editor-ai-send absolute right-2 top-2 p-1.5 rounded-lg text-ide-accent-fg"
                   style={{ backgroundColor: theme.primary }}
                 >
-                  <Send className="w-3 h-3 text-[#09090e]" />
+                  <Send className="w-3 h-3 text-ide-accent-fg" />
                 </button>
               </form>
             </div>
@@ -3849,30 +4160,30 @@ export const EditorWorkbench: React.FC = () => {
       )}
       {isClosePromptOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ide-overlay p-4"
           role="presentation"
         >
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="close-folder-title"
-            className="w-full max-w-md space-y-4 rounded-2xl border border-[#303044] bg-[#11111a] p-5 shadow-2xl"
+            className="w-full max-w-md space-y-4 rounded-2xl border border-ide-modal-border bg-ide-tab-inactive p-5 shadow-[0_25px_50px_-12px_color-mix(in_srgb,var(--ide-color-shadow-strong)_40%,transparent)]"
           >
             <div>
               <h2
                 id="close-folder-title"
-                className="text-base font-bold text-white"
+                className="text-base font-bold text-ide-text-strong"
               >
                 Unsaved changes
               </h2>
-              <p className="mt-1 text-xs leading-relaxed text-[#a1a1b7]">
+              <p className="mt-1 text-xs leading-relaxed text-ide-text-body">
                 {dirtyFiles.length} file{dirtyFiles.length === 1 ? "" : "s"} in{" "}
                 {loadedProjectName} have unsaved changes. Save them to the
                 original files before closing?
               </p>
             </div>
             {saveError && (
-              <p className="rounded-lg border border-red-900 bg-red-950/50 p-2 text-xs text-red-300">
+              <p className="rounded-lg border border-ide-border-danger bg-ide-surface-danger p-2 text-xs text-ide-danger">
                 {saveError}
               </p>
             )}
@@ -3881,7 +4192,7 @@ export const EditorWorkbench: React.FC = () => {
                 type="button"
                 disabled={isSaving}
                 onClick={() => setIsClosePromptOpen(false)}
-                className="rounded-lg border border-[#343444] px-3 py-2 text-xs text-white hover:bg-white/5 disabled:opacity-50"
+                className="rounded-lg border border-ide-modal-border px-3 py-2 text-xs text-ide-text-strong hover:bg-ide-hover disabled:opacity-50"
               >
                 Keep editing
               </button>
@@ -3889,7 +4200,7 @@ export const EditorWorkbench: React.FC = () => {
                 type="button"
                 disabled={isSaving}
                 onClick={() => void closeProjectNow(true)}
-                className="rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                className="rounded-lg border border-ide-danger/40 px-3 py-2 text-xs text-[var(--ide-color-danger-readable)] hover:bg-ide-danger/10 disabled:opacity-80"
               >
                 Discard Changes
               </button>
@@ -3897,7 +4208,7 @@ export const EditorWorkbench: React.FC = () => {
                 type="button"
                 disabled={isSaving}
                 onClick={() => void closeProjectNow(false)}
-                className="rounded-lg bg-[#0DF5C4] px-3 py-2 text-xs font-semibold text-[#07110f] disabled:opacity-50"
+                className="rounded-lg bg-ide-accent px-3 py-2 text-xs font-semibold text-ide-accent-fg disabled:opacity-50"
               >
                 {isSaving ? "Saving..." : "Save Changes"}
               </button>
@@ -3906,22 +4217,22 @@ export const EditorWorkbench: React.FC = () => {
         </div>
       )}
       {isChangesOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ide-overlay p-4">
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="editor-changes-title"
-            className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#303044] bg-[#11111a] shadow-2xl"
+            className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-ide-modal-border bg-ide-tab-inactive shadow-[0_25px_50px_-12px_color-mix(in_srgb,var(--ide-color-shadow-strong)_40%,transparent)]"
           >
-            <div className="flex items-center justify-between border-b border-[#29293a] p-4">
+            <div className="flex items-center justify-between border-b border-ide-border-control p-4">
               <div>
                 <h2
                   id="editor-changes-title"
-                  className="text-sm font-bold text-white"
+                  className="text-sm font-bold text-ide-text-strong"
                 >
                   Changes
                 </h2>
-                <p className="mt-1 text-[11px] text-[#8b8ba8]">
+                <p className="mt-1 text-[11px] text-ide-text-tertiary">
                   Working copy compared with the last saved version
                 </p>
               </div>
@@ -3929,7 +4240,7 @@ export const EditorWorkbench: React.FC = () => {
                 type="button"
                 aria-label="Close changes"
                 onClick={() => setIsChangesOpen(false)}
-                className="rounded p-1 text-[#8b8ba8] hover:bg-white/5 hover:text-white"
+                className="rounded p-1 text-ide-text-tertiary hover:bg-ide-hover hover:text-ide-text-strong"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -3939,25 +4250,25 @@ export const EditorWorkbench: React.FC = () => {
                 <details
                   key={file.id}
                   open={dirtyFiles.length === 1}
-                  className="overflow-hidden rounded-xl border border-[#2b2b3d] bg-[#0b0b12]"
+                  className="overflow-hidden rounded-xl border border-ide-border-control bg-ide-workbench-bg"
                 >
-                  <summary className="cursor-pointer px-3 py-2 text-xs font-mono text-[#0DF5C4]">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-mono text-ide-accent">
                     {file.path}
                   </summary>
-                  <div className="grid min-w-0 gap-px border-t border-[#2b2b3d] bg-[#2b2b3d] md:grid-cols-2">
-                    <div className="min-w-0 bg-[#101017]">
-                      <div className="border-b border-[#242434] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#f87171]">
+                  <div className="grid min-w-0 gap-px border-t border-ide-border-control bg-ide-border-control md:grid-cols-2">
+                    <div className="min-w-0 bg-ide-workspace-surface">
+                      <div className="border-b border-ide-border-control px-3 py-1.5 text-[10px] uppercase tracking-wide text-ide-danger">
                         Saved
                       </div>
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-5 text-[#b7a2a2]">
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-5 text-ide-text-danger-soft">
                         {savedFileContents[file.id] || ""}
                       </pre>
                     </div>
-                    <div className="min-w-0 bg-[#101017]">
-                      <div className="border-b border-[#242434] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#0DF5C4]">
+                    <div className="min-w-0 bg-ide-workspace-surface">
+                      <div className="border-b border-ide-border-control px-3 py-1.5 text-[10px] uppercase tracking-wide text-ide-success">
                         Current
                       </div>
-                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-5 text-[#c6e8dc]">
+                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px] leading-5 text-ide-success">
                         {fileContents[file.id] || ""}
                       </pre>
                     </div>
@@ -3965,11 +4276,11 @@ export const EditorWorkbench: React.FC = () => {
                 </details>
               ))}
             </div>
-            <div className="flex justify-end border-t border-[#29293a] p-3">
+            <div className="flex justify-end border-t border-ide-border-control p-3">
               <button
                 type="button"
                 onClick={() => setIsChangesOpen(false)}
-                className="rounded-lg border border-[#343444] px-3 py-2 text-xs text-white hover:bg-white/5"
+                className="rounded-lg border border-ide-modal-border px-3 py-2 text-xs text-ide-text-strong hover:bg-ide-hover"
               >
                 Done
               </button>

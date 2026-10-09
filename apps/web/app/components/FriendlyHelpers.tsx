@@ -56,23 +56,23 @@ export const ModalHost: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ide-overlay p-4 backdrop-blur-sm">
       <section
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="app-modal-title"
         aria-describedby="app-modal-message"
-        className="w-full max-w-md rounded-xl border border-[#303040] bg-[#111119] p-5 shadow-2xl shadow-black/50"
+        className="w-full max-w-md rounded-xl border border-ide-modal-border bg-ide-surface-overlay p-5 shadow-2xl shadow-ide-shadow-color"
       >
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[#0DF5C4]/25 bg-[#0DF5C4]/10 text-[#0DF5C4]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[color-mix(in_srgb,var(--ide-color-accent)_25%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)] text-ide-accent">
             <AlertCircle className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 id="app-modal-title" className="text-sm font-semibold text-white">
+            <h2 id="app-modal-title" className="text-sm font-semibold text-ide-text-strong">
               {request.mode === "confirm" ? "Confirm action" : "Notice"}
             </h2>
-            <p id="app-modal-message" className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#b8b8ca]">
+            <p id="app-modal-message" className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ide-text-body">
               {request.message}
             </p>
           </div>
@@ -80,7 +80,7 @@ export const ModalHost: React.FC = () => {
             type="button"
             aria-label="Close dialog"
             onClick={() => close(false)}
-            className="rounded-md p-1 text-[#85859e] hover:bg-white/5 hover:text-white"
+            className="rounded-md p-1 text-ide-text-dim hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_5%,transparent)] hover:text-ide-text-strong"
           >
             <X className="h-4 w-4" />
           </button>
@@ -90,7 +90,7 @@ export const ModalHost: React.FC = () => {
             <button
               type="button"
               onClick={() => close(false)}
-              className="rounded-lg border border-[#343444] px-3.5 py-2 text-xs font-medium text-[#c5c5d3] transition hover:bg-white/5 hover:text-white"
+              className="rounded-lg border border-ide-border-strong px-3.5 py-2 text-xs font-medium text-ide-text-secondary transition hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_5%,transparent)] hover:text-ide-text-strong"
             >
               Cancel
             </button>
@@ -99,7 +99,7 @@ export const ModalHost: React.FC = () => {
             type="button"
             autoFocus
             onClick={() => close(true)}
-            className="rounded-lg bg-[#0DF5C4] px-3.5 py-2 text-xs font-semibold text-[#08110f] transition hover:brightness-110"
+            className="rounded-lg bg-ide-accent px-3.5 py-2 text-xs font-semibold text-ide-accent-fg transition hover:brightness-110"
           >
             {request.mode === "confirm" ? "Continue" : "OK"}
           </button>
@@ -114,7 +114,7 @@ export const HelpfulInfo: React.FC<{ text: string; className?: string }> = ({
   className = "",
 }) => (
   <span
-    className={`inline-flex items-center justify-center rounded-full border border-white/10 bg-white/5 text-[#b7b7d0] ${className}`}
+    className={`inline-flex items-center justify-center rounded-full border border-ide-border bg-ide-input-bg text-ide-text-body ${className}`}
     title={text}
     aria-label={text}
   >
@@ -132,16 +132,16 @@ export const FriendlyHint: React.FC<{
   if (!visible) return null;
 
   return (
-    <div className="flex items-start gap-3 rounded-2xl border border-[#242436] bg-[#111119]/90 p-3 text-left shadow-lg">
-      <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-xl bg-[#0DF5C4]/10 text-[#0DF5C4] border border-[#0DF5C4]/30">
+    <div className="flex items-start gap-3 rounded-2xl border border-ide-surface-hover-strong bg-ide-surface-overlay p-3 text-left shadow-lg">
+      <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)] text-ide-accent border border-[color-mix(in_srgb,var(--ide-color-accent)_30%,transparent)]">
         <Sparkles className="w-3.5 h-3.5" />
       </div>
       <div className="flex-1">
-        <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-[#8c8ca5]">
+        <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-ide-muted">
           Quick guide
         </div>
-        <div className="mt-1 text-sm font-semibold text-white">{title}</div>
-        <p className="mt-1 text-xs leading-relaxed text-[#a8a8c0]">{body}</p>
+        <div className="mt-1 text-sm font-semibold text-ide-text-strong">{title}</div>
+        <p className="mt-1 text-xs leading-relaxed text-ide-text-body">{body}</p>
       </div>
       {onDismiss && (
         <button
@@ -151,7 +151,7 @@ export const FriendlyHint: React.FC<{
             setVisible(false);
             onDismiss();
           }}
-          className="rounded-lg border border-[#2a2a3e] bg-[#171724] p-1 text-[#8c8ca5] hover:text-white"
+          className="rounded-lg border border-ide-border bg-ide-surface-raised p-1 text-ide-muted hover:text-ide-text-strong"
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -159,4 +159,3 @@ export const FriendlyHint: React.FC<{
     </div>
   );
 };
-

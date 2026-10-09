@@ -197,15 +197,15 @@ export const RepositoriesPage: React.FC = () => {
           <>
             <button
               onClick={() => setIsNewRepoModalOpen(true)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-transform hover:scale-[1.02] shadow-lg"
-              style={{ backgroundColor: theme.primary, color: "#09090e" }}
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-ide-accent-fg flex items-center gap-2 transition-transform hover:scale-[1.02] shadow-lg"
+              style={{ backgroundColor: theme.primary }}
             >
               <Plus className="w-4 h-4" />
               <span>New Repository</span>
             </button>
             <button
               onClick={() => setPage("workspaces")}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-[#171724] hover:bg-[#202030] border border-[#2b2b40] text-white flex items-center gap-2 transition-colors"
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-ide-surface-control hover:bg-ide-surface-control-hover border border-ide-border-strong text-ide-text-strong flex items-center gap-2 transition-colors"
             >
               <span>Workspaces</span>
               <ArrowRight className="w-4 h-4" />
@@ -220,15 +220,15 @@ export const RepositoriesPage: React.FC = () => {
       />
 
       {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#11111a] border border-[#1f1f2e] p-3 rounded-2xl">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[var(--ide-color-repository-toolbar)] border border-[var(--ide-color-repository-border)] p-3 rounded-2xl">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 text-[#686884] absolute left-3 top-3 pointer-events-none" />
+          <Search className="w-4 h-4 text-ide-muted absolute left-3 top-3 pointer-events-none" />
           <input
             type="text"
             placeholder="Search repositories by name or description..."
             value={searchRepoQuery}
             onChange={(e) => setSearchRepoQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-[#161622] border border-[#252536] rounded-xl text-xs text-white placeholder-[#585870] focus:outline-none focus:border-[#6C63FF]"
+            className="w-full pl-9 pr-4 py-2 bg-ide-surface-control border border-ide-border-control rounded-xl text-xs text-ide-text-strong placeholder-ide-text-placeholder focus:outline-none focus:border-ide-repository-focus"
           />
         </div>
 
@@ -240,8 +240,8 @@ export const RepositoriesPage: React.FC = () => {
               onClick={() => setRepoFilter(f)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize whitespace-nowrap transition-colors ${
                 repoFilter === f
-                  ? "bg-white/10 text-white border border-white/30"
-                  : "bg-[#151520] text-[#7a7a98] border border-transparent hover:text-white"
+                  ? "bg-ide-active text-ide-text-strong border border-ide-border-strong"
+                  : "bg-ide-surface text-ide-muted border border-transparent hover:text-ide-text-strong"
               }`}
             >
               {f === "starred" ? "★ Starred" : f}
@@ -255,22 +255,22 @@ export const RepositoriesPage: React.FC = () => {
         {isDataLoading ? (
           <RepositoryRowSkeleton count={4} />
         ) : filteredRepos.length === 0 && repositories.length === 0 ? (
-          <div className="py-16 flex flex-col items-center justify-center gap-4 text-center bg-[#11111a] border border-[#1f1f2e] rounded-2xl">
-            <div className="w-16 h-16 rounded-2xl bg-[#1b1b2a] border border-[#2b2b3e] flex items-center justify-center">
-              <GitFork className="w-7 h-7 text-[#4e4e72]" />
+          <div className="py-16 flex flex-col items-center justify-center gap-4 text-center bg-[var(--ide-color-repository-toolbar)] border border-[var(--ide-color-repository-border)] rounded-2xl">
+            <div className="w-16 h-16 rounded-2xl bg-ide-surface-empty border border-ide-border-strong flex items-center justify-center">
+              <GitFork className="w-7 h-7 text-ide-text-faint" />
             </div>
             <div>
-              <p className="text-sm font-semibold text-white mb-1">
+              <p className="text-sm font-semibold text-ide-text-strong mb-1">
                 No repositories yet
               </p>
-              <p className="text-xs text-[#7e7e98] max-w-xs">
+              <p className="text-xs text-ide-text-quiet max-w-xs">
                 Create your first repository to get started. Your projects will
                 appear here for fast access.
               </p>
             </div>
             <button
               onClick={() => setIsNewRepoModalOpen(true)}
-              className="mt-2 px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-2 shadow-md"
+              className="mt-2 px-4 py-2 rounded-xl text-xs font-semibold text-ide-accent-fg flex items-center gap-2 shadow-md"
               style={{ backgroundColor: theme.primary }}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -278,12 +278,12 @@ export const RepositoriesPage: React.FC = () => {
             </button>
           </div>
         ) : filteredRepos.length === 0 ? (
-          <div className="p-12 text-center bg-[#11111a] border border-[#1f1f2e] rounded-2xl">
-            <FolderGit2 className="w-10 h-10 text-[#555570] mx-auto mb-3" />
-            <h3 className="text-white text-sm font-semibold">
+          <div className="p-12 text-center bg-[var(--ide-color-repository-toolbar)] border border-[var(--ide-color-repository-border)] rounded-2xl">
+            <FolderGit2 className="w-10 h-10 text-ide-text-faint mx-auto mb-3" />
+            <h3 className="text-ide-text-strong text-sm font-semibold">
               No results found
             </h3>
-            <p className="text-xs text-[#7e7e98] mt-1">
+            <p className="text-xs text-ide-text-quiet mt-1">
               Try adjusting your search term or filter.
             </p>
           </div>
@@ -291,53 +291,53 @@ export const RepositoriesPage: React.FC = () => {
           filteredRepos.map((repo) => (
             <div
               key={repo.id}
-              className="bg-[#111119] border border-[#1f1f2d] hover:border-[#2e2e42] rounded-2xl p-5 transition-all shadow-md group"
+              className="bg-ide-surface-overlay border border-ide-repository-border hover:border-ide-border-strong rounded-2xl p-5 transition-all shadow-md group"
             >
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 {/* Repo Info */}
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-3">
-                    <h3 className="text-base font-bold text-white hover:underline cursor-pointer flex items-center gap-2">
-                      <FolderGit2 className="w-4 h-4 text-[#8b8ba8]" />
+                    <h3 className="text-base font-bold text-ide-text-strong hover:underline cursor-pointer flex items-center gap-2">
+                      <FolderGit2 className="w-4 h-4 text-ide-text-tertiary" />
                       <span>{repo.name}</span>
                     </h3>
 
                     {/* Visibility badge */}
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#1a1a26] text-[#8e8ea6] border border-[#272738] flex items-center gap-1">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-ide-surface-control text-ide-text-tertiary border border-ide-border-control flex items-center gap-1">
                       <Globe className="w-2.5 h-2.5" />
                       Public
                     </span>
 
                     {/* Deploy status */}
                     {repo.deployStatus === "live" && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#0DF5C4]/10 text-[#0DF5C4] border border-[#0DF5C4]/30 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-ide-success/10 text-[var(--ide-color-success-readable)] border border-ide-success/30 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-ide-success animate-pulse" />
                         Live Traffic
                       </span>
                     )}
                     {repo.deployStatus === "building" && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#FF9E64]/10 text-[#FF9E64] border border-[#FF9E64]/30 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#FF9E64] animate-spin" />
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-ide-warning/10 text-[var(--ide-color-warning-readable)] border border-ide-warning/30 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-ide-warning animate-spin" />
                         Building
                       </span>
                     )}
                   </div>
 
-                  <p className="text-xs text-[#8c8ca5] max-w-2xl leading-relaxed">
+                  <p className="text-xs text-ide-text-tertiary max-w-2xl leading-relaxed">
                     {repo.description}
                   </p>
 
                   {/* Metadata line */}
-                  <div className="flex flex-wrap items-center gap-4 text-xs text-[#6e6e88] pt-1 font-mono">
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-ide-text-faint pt-1 font-mono">
                     <div className="flex items-center gap-1.5">
                       <span
                         className="w-2.5 h-2.5 rounded-full"
                         style={{ backgroundColor: repo.languageColor }}
                       />
-                      <span className="text-[#a4a4be]">{repo.language}</span>
+                      <span className="text-ide-text-secondary">{repo.language}</span>
                     </div>
 
-                    <div className="flex items-center gap-1 text-[#8b8ba8]">
+                    <div className="flex items-center gap-1 text-ide-text-tertiary">
                       <GitBranch className="w-3.5 h-3.5" />
                       <span>{repo.branch}</span>
                       <HelpfulInfo
@@ -362,8 +362,8 @@ export const RepositoriesPage: React.FC = () => {
                     onClick={() => toggleStarRepo(repo.id)}
                     className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 transition-colors ${
                       repo.isStarred
-                        ? "bg-[#FF9E64]/15 border-[#FF9E64]/40 text-[#FF9E64]"
-                        : "bg-[#161622] border-[#252536] text-[#7a7a98] hover:text-white"
+                        ? "bg-ide-warning/15 border-ide-warning/40 text-[var(--ide-color-warning-readable)]"
+                        : "bg-ide-surface-control border-ide-border-control text-ide-muted hover:text-ide-text-strong"
                     }`}
                   >
                     <Star
@@ -376,10 +376,10 @@ export const RepositoriesPage: React.FC = () => {
                   <button
                     onClick={() => handleCopyCloneUrl(repo.id, repo.name)}
                     title="Copy Git Clone URL"
-                    className="p-2 rounded-xl bg-[#161622] hover:bg-[#1f1f2e] border border-[#252536] text-[#8c8ca5] hover:text-white transition-colors"
+                    className="p-2 rounded-xl bg-ide-surface-control hover:bg-ide-surface-control-hover border border-ide-border-control text-ide-text-tertiary hover:text-ide-text-strong transition-colors"
                   >
                     {copiedId === repo.id ? (
-                      <Check className="w-3.5 h-3.5 text-[#0DF5C4]" />
+                      <Check className="w-3.5 h-3.5 text-ide-success" />
                     ) : (
                       <Copy className="w-3.5 h-3.5" />
                     )}
@@ -389,9 +389,9 @@ export const RepositoriesPage: React.FC = () => {
                   <button
                     onClick={() => setPage("deployments")}
                     title="View Deployments"
-                    className="px-3 py-2 rounded-xl bg-[#161622] hover:bg-[#1f1f2e] border border-[#252536] text-xs font-mono text-[#a0a0ba] hover:text-white flex items-center gap-1.5 transition-colors"
+                    className="px-3 py-2 rounded-xl bg-ide-surface-control hover:bg-ide-surface-control-hover border border-ide-border-control text-xs font-mono text-ide-text-secondary hover:text-ide-text-strong flex items-center gap-1.5 transition-colors"
                   >
-                    <Rocket className="w-3.5 h-3.5 text-[#6C63FF]" />
+                    <Rocket className="w-3.5 h-3.5 text-ide-info" />
                     <span className="hidden sm:inline">Deployments</span>
                   </button>
 
@@ -401,7 +401,7 @@ export const RepositoriesPage: React.FC = () => {
                     disabled={deletingId === repo.id}
                     title="Delete Repository"
                     aria-label={`Delete ${repo.name}`}
-                    className="ml-2 p-2 rounded-xl bg-[#241719] hover:bg-[#3a1e22] border border-[#6b3038]/60 hover:border-[#f87171] text-[#c08088] hover:text-[#f87171] transition-colors disabled:opacity-50"
+                    className="ml-2 p-2 rounded-xl bg-ide-surface-danger hover:bg-ide-danger/10 border border-ide-border-danger hover:border-ide-danger text-ide-text-danger-soft hover:text-ide-danger transition-colors disabled:opacity-50"
                   >
                     {deletingId === repo.id ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -415,13 +415,13 @@ export const RepositoriesPage: React.FC = () => {
                     onClick={() => void handleLaunchDevbox(repo)}
                     disabled={launchingId === repo.id}
                     aria-label={`Launch devbox for ${repo.name}`}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-1.5 shadow-md hover:brightness-110 transition-all active:scale-95 disabled:opacity-60"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-ide-accent-fg flex items-center gap-1.5 shadow-md hover:brightness-110 transition-all active:scale-95 disabled:opacity-60"
                     style={{ backgroundColor: theme.primary }}
                   >
                     {launchingId === repo.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#09090e]" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-ide-accent-fg" />
                     ) : (
-                      <Box className="w-3.5 h-3.5 text-[#09090e]" />
+                      <Box className="w-3.5 h-3.5 text-ide-accent-fg" />
                     )}
                     <span>
                       {launchingId === repo.id ? "Launching…" : "Launch Devbox"}
@@ -436,15 +436,15 @@ export const RepositoriesPage: React.FC = () => {
 
       {/* New Repository Modal */}
       {isNewRepoModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#12121a] border border-[#262638] rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-[#202030]">
-              <h3 className="text-white font-bold text-base">
+        <div className="fixed inset-0 bg-ide-overlay backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-ide-surface-card border border-ide-border-strong rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-ide-surface-control-hover">
+              <h3 className="text-ide-text-strong font-bold text-base">
                 Create a New Repository
               </h3>
               <button
                 onClick={() => setIsNewRepoModalOpen(false)}
-                className="text-[#686884] hover:text-white text-sm"
+                className="text-ide-muted hover:text-ide-text-strong text-sm"
               >
                 ✕
               </button>
@@ -452,8 +452,8 @@ export const RepositoriesPage: React.FC = () => {
 
             <form onSubmit={handleCreateRepo} className="space-y-4 text-xs">
               <div>
-                <label className="text-[#8c8ca5] font-mono block mb-1">
-                  Repository Name <span className="text-red-400">*</span>
+                <label className="text-ide-text-tertiary font-mono block mb-1">
+                  Repository Name <span className="text-ide-danger">*</span>
                 </label>
                 <input
                   type="text"
@@ -464,14 +464,14 @@ export const RepositoriesPage: React.FC = () => {
                     setNewRepoName(e.target.value);
                     setNameError("");
                   }}
-                  className={`w-full px-3 py-2.5 rounded-xl bg-[#171724] border text-white focus:outline-none ${
+                  className={`w-full px-3 py-2.5 rounded-xl bg-ide-surface-control border text-ide-text-strong focus:outline-none ${
                     nameError
-                      ? "border-red-500 focus:border-red-500"
-                      : "border-[#2b2b3e] focus:border-[#6C63FF]"
+                      ? "border-ide-danger focus:border-ide-danger"
+                      : "border-ide-border-control focus:border-ide-repository-focus"
                   }`}
                 />
                 {nameError && (
-                  <div className="flex items-center gap-1.5 mt-1.5 text-red-400">
+                  <div className="flex items-center gap-1.5 mt-1.5 text-ide-danger">
                     <AlertCircle className="w-3 h-3 shrink-0" />
                     <span>{nameError}</span>
                   </div>
@@ -479,7 +479,7 @@ export const RepositoriesPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-[#8c8ca5] font-mono block mb-1">
+                <label className="text-ide-text-tertiary font-mono block mb-1">
                   Description (optional)
                 </label>
                 <input
@@ -487,18 +487,18 @@ export const RepositoriesPage: React.FC = () => {
                   placeholder="e.g. High-throughput event pipeline"
                   value={newRepoDesc}
                   onChange={(e) => setNewRepoDesc(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#171724] border border-[#2b2b3e] text-white focus:outline-none focus:border-[#6C63FF]"
+                  className="w-full px-3 py-2.5 rounded-xl bg-ide-surface-control border border-ide-border-control text-ide-text-strong focus:outline-none focus:border-ide-repository-focus"
                 />
               </div>
 
               <div>
-                <label className="text-[#8c8ca5] font-mono block mb-1">
+                <label className="text-ide-text-tertiary font-mono block mb-1">
                   Primary Language
                 </label>
                 <select
                   value={newRepoLang}
                   onChange={(e) => setNewRepoLang(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#171724] border border-[#2b2b3e] text-white focus:outline-none focus:border-[#6C63FF]"
+                  className="w-full px-3 py-2.5 rounded-xl bg-ide-surface-control border border-ide-border-control text-ide-text-strong focus:outline-none focus:border-ide-repository-focus"
                 >
                   <option value="TypeScript">TypeScript</option>
                   <option value="Python">Python</option>
@@ -514,14 +514,14 @@ export const RepositoriesPage: React.FC = () => {
                     setIsNewRepoModalOpen(false);
                     setNameError("");
                   }}
-                  className="px-4 py-2 rounded-xl bg-[#1b1b28] text-[#8e8ea6] hover:text-white"
+                  className="px-4 py-2 rounded-xl bg-ide-surface-hover text-ide-text-tertiary hover:text-ide-text-strong"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isCreatingRepo}
-                  className="px-5 py-2 rounded-xl font-semibold text-[#09090e] flex items-center gap-2 disabled:opacity-60"
+                  className="px-5 py-2 rounded-xl font-semibold text-ide-accent-fg flex items-center gap-2 disabled:opacity-60"
                   style={{ backgroundColor: theme.primary }}
                 >
                   {isCreatingRepo && (

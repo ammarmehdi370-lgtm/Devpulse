@@ -12,10 +12,9 @@ import {
   Cloud,
   Code2,
   GitBranch,
-  Sun,
-  Moon,
 } from "lucide-react";
 import { z } from "zod";
+import { LOGO_COLORS } from "../logoColors";
 
 const emailSchema = z
   .string()
@@ -23,7 +22,7 @@ const emailSchema = z
   .email("Enter a valid work email address.");
 
 export const LoginPage: React.FC = () => {
-  const { login, colorMode, setColorMode } = useApp();
+  const { login } = useApp();
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loginMethod, setLoginMethod] = useState("");
@@ -125,46 +124,44 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <main className="min-h-screen w-full bg-[#080d0d] bg-grid-pattern px-4 py-6 text-white sm:px-8 sm:py-10 font-sans">
-      <div className="mx-auto grid min-h-[min(820px,calc(100vh-3rem))] w-full max-w-[1120px] overflow-hidden rounded-xl border border-[#263130] bg-[#0d1313] shadow-2xl shadow-black/40 lg:grid-cols-[0.92fr_1.08fr]">
+    <main className="min-h-screen w-full bg-[var(--ide-color-login-bg)] bg-grid-pattern px-4 py-6 text-ide-text-strong sm:px-8 sm:py-10 font-sans">
+      <div className="mx-auto grid min-h-[min(820px,calc(100vh-3rem))] w-full max-w-[1120px] overflow-hidden rounded-xl border border-[var(--ide-color-login-border)] bg-[var(--ide-color-login-panel)] shadow-2xl shadow-ide-shadow-color lg:grid-cols-[0.92fr_1.08fr]">
         <section className="flex flex-col justify-center px-6 py-8 sm:px-10 lg:px-12 lg:py-12">
           <div className="mb-10 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#0df5c4] text-[#071110]">
+              <div
+                className="flex h-10 w-10 items-center justify-center rounded-lg"
+                style={{
+                  backgroundColor: LOGO_COLORS.background,
+                  color: LOGO_COLORS.foreground,
+                }}
+              >
                 <Layers className="h-5 w-5" aria-hidden="true" />
               </div>
-              <span className="text-xl font-semibold tracking-tight">
+              <span
+                className="text-xl font-semibold tracking-tight"
+                style={{ color: LOGO_COLORS.wordmarkStrong }}
+              >
                 Devpulse
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-md border border-[#2a3836] bg-[#121c1b] px-2.5 py-1.5 font-mono text-[10px] text-[#9fb1ae]">
-                CLOUD WORKSPACE
-              </span>
-              <button
-                type="button"
-                onClick={() => setColorMode(colorMode === "dark" ? "light" : "dark")}
-                aria-label={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
-                title={`Switch to ${colorMode === "dark" ? "light" : "dark"} mode`}
-                className="flex h-8 w-8 items-center justify-center rounded-md border border-[#2a3836] bg-[#121c1b] text-[#9fb1ae]"
-              >
-                {colorMode === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </button>
-            </div>
+            <span className="rounded-md border border-[var(--ide-color-login-border-soft)] bg-ide-surface px-2.5 py-1.5 font-mono text-[10px] text-ide-muted">
+              CLOUD WORKSPACE
+            </span>
           </div>
 
           <div className="mb-7">
             <h1 className="mb-2 text-3xl font-semibold leading-tight sm:text-4xl">
               Welcome back
             </h1>
-            <p className="text-sm leading-6 text-[#9aa9a7]">
+            <p className="text-sm leading-6 text-[var(--ide-color-login-muted)]">
               Sign in to continue to your projects and workspaces.
             </p>
           </div>
 
           {authError && (
             <div
-              className="mb-5 rounded-lg border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-sm text-[#fca5a5]"
+              className="mb-5 rounded-lg border border-ide-danger/40 bg-ide-danger/10 px-4 py-3 text-sm text-[var(--ide-color-login-error)]"
               role="alert"
             >
               {authError}
@@ -175,7 +172,7 @@ export const LoginPage: React.FC = () => {
             <button
               onClick={() => handleLogin("google")}
               disabled={isLoading}
-              className="flex min-h-12 w-full items-center justify-center gap-3 rounded-lg bg-[#f7f9f8] px-4 text-sm font-semibold text-[#18201f] transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0df5c4] disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-12 w-full items-center justify-center gap-3 rounded-lg bg-ide-text-high px-4 text-sm font-semibold text-ide-accent-fg transition-colors hover:bg-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLoading && loginMethod === "google" ? (
                 <Loader2 className="h-[18px] w-[18px] animate-spin" />
@@ -215,7 +212,7 @@ export const LoginPage: React.FC = () => {
               <button
                 onClick={() => handleLogin("github")}
                 disabled={isLoading}
-                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#33403e] bg-[#131a19] px-3 text-sm font-medium text-[#e2e8e7] transition-colors hover:border-[#52625f] hover:bg-[#192220] disabled:opacity-60"
+                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--ide-color-login-border-strong)] bg-ide-surface px-3 text-sm font-medium text-ide-text-strong transition-colors hover:border-ide-border-strong hover:bg-ide-surface-hover disabled:opacity-60"
               >
                 <svg
                   className="h-4 w-4 fill-current"
@@ -233,10 +230,10 @@ export const LoginPage: React.FC = () => {
               <button
                 onClick={() => handleLogin("gitlab")}
                 disabled={isLoading}
-                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#33403e] bg-[#131a19] px-3 text-sm font-medium text-[#e2e8e7] transition-colors hover:border-[#52625f] hover:bg-[#192220] disabled:opacity-60"
+                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--ide-color-login-border-strong)] bg-ide-surface px-3 text-sm font-medium text-ide-text-strong transition-colors hover:border-ide-border-strong hover:bg-ide-surface-hover disabled:opacity-60"
               >
                 <svg
-                  className="h-4 w-4 text-[#fc6d26]"
+                  className="h-4 w-4 text-ide-tertiary"
                   viewBox="0 0 24 24"
                   fill="currentColor"
                   aria-hidden="true"
@@ -254,7 +251,7 @@ export const LoginPage: React.FC = () => {
             <button
               onClick={() => handleLogin("sso")}
               disabled={isLoading}
-              className="flex min-h-10 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm text-[#a6b2b0] transition-colors hover:bg-[#141d1c] hover:text-white disabled:opacity-60"
+              className="flex min-h-10 w-full items-center justify-center gap-2 rounded-lg px-3 text-sm text-ide-text-secondary transition-colors hover:bg-ide-surface-hover hover:text-ide-text-strong disabled:opacity-60"
             >
               <KeyRound className="h-4 w-4" aria-hidden="true" />
               <span>
@@ -266,11 +263,11 @@ export const LoginPage: React.FC = () => {
           </div>
 
           <div className="my-6 flex items-center gap-3" aria-hidden="true">
-            <div className="h-px flex-1 bg-[#293331]" />
-            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-[#74817f]">
+            <div className="h-px flex-1 bg-[var(--ide-color-login-divider)]" />
+            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-ide-muted">
               or use work email
             </span>
-            <div className="h-px flex-1 bg-[#293331]" />
+            <div className="h-px flex-1 bg-[var(--ide-color-login-divider)]" />
           </div>
 
           <form
@@ -282,13 +279,13 @@ export const LoginPage: React.FC = () => {
           >
             <label
               htmlFor="work-email"
-              className="block text-xs font-medium text-[#c5cfcd]"
+              className="block text-xs font-medium text-ide-text-secondary"
             >
               Work email
             </label>
             <div className="relative">
               <Mail
-                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#71807d]"
+                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ide-color-login-text-subtle)]"
                 aria-hidden="true"
               />
               <input
@@ -298,7 +295,7 @@ export const LoginPage: React.FC = () => {
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="name@company.com"
                 autoComplete="email"
-                className="min-h-12 w-full rounded-lg border border-[#34403e] bg-[#0a1010] pl-10 pr-3 text-sm text-white placeholder:text-[#61706d] focus:border-[#0df5c4] focus:outline-none focus:ring-2 focus:ring-[#0df5c4]/15"
+                className="min-h-12 w-full rounded-lg border border-[var(--ide-color-login-input-border)] bg-[var(--ide-color-login-input-bg)] pl-10 pr-3 text-sm text-ide-text-strong placeholder:text-ide-muted focus:border-ide-accent focus:outline-none focus:ring-2 focus:ring-ide-accent/15"
                 aria-invalid={Boolean(emailError)}
                 aria-describedby={emailError ? "email-error" : undefined}
               />
@@ -306,7 +303,7 @@ export const LoginPage: React.FC = () => {
             {emailError && (
               <p
                 id="email-error"
-                className="text-xs text-[#fca5a5]"
+                className="text-xs text-[var(--ide-color-login-error)]"
                 role="alert"
               >
                 {emailError}
@@ -315,7 +312,7 @@ export const LoginPage: React.FC = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="group flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#0df5c4] px-4 text-sm font-semibold text-[#071110] transition-colors hover:bg-[#39f8d0] disabled:cursor-not-allowed disabled:opacity-60"
+              className="group flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-ide-accent px-4 text-sm font-semibold text-ide-accent-fg transition-colors hover:bg-[var(--ide-color-login-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span>
                 {isLoading && loginMethod === "email"
@@ -330,18 +327,18 @@ export const LoginPage: React.FC = () => {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-[11px] leading-5 text-[#71807d]">
+          <p className="mt-6 text-center text-[11px] leading-5 text-[var(--ide-color-login-text-subtle)]">
             By continuing, you agree to our{" "}
             <a
               href="/terms"
-              className="text-[#b7c5c2] underline underline-offset-2 hover:text-white"
+              className="text-[var(--ide-color-login-text-secondary)] underline underline-offset-2 hover:text-ide-text-strong"
             >
               Terms
             </a>{" "}
             and{" "}
             <a
               href="/privacy"
-              className="text-[#b7c5c2] underline underline-offset-2 hover:text-white"
+              className="text-[var(--ide-color-login-text-secondary)] underline underline-offset-2 hover:text-ide-text-strong"
             >
               Privacy Policy
             </a>
@@ -349,38 +346,38 @@ export const LoginPage: React.FC = () => {
           </p>
         </section>
 
-        <aside className="relative hidden flex-col justify-between overflow-hidden border-l border-[#263130] bg-[#101817] p-8 lg:flex xl:p-10">
+        <aside className="relative hidden flex-col justify-between overflow-hidden border-l border-[var(--ide-color-login-border)] bg-[var(--ide-color-login-aside)] p-8 lg:flex xl:p-10">
           <div>
-            <div className="mb-8 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[#8da19d]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0df5c4]" />
+            <div className="mb-8 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-ide-muted">
+              <span className="h-1.5 w-1.5 rounded-full bg-ide-accent" />
               Development workspace
             </div>
-            <h2 className="max-w-md text-3xl font-semibold leading-tight text-[#f3f7f6]">
+            <h2 className="max-w-md text-3xl font-semibold leading-tight text-ide-text-strong">
               Pick up where your next idea begins.
             </h2>
-            <p className="mt-4 max-w-md text-sm leading-6 text-[#96a5a2]">
+            <p className="mt-4 max-w-md text-sm leading-6 text-ide-text-secondary">
               Your repositories, cloud environments, and everyday development
               tools in one workspace.
             </p>
           </div>
 
-          <div className="my-10 overflow-hidden rounded-lg border border-[#2d3a38] bg-[#0b1110] shadow-xl shadow-black/20">
-            <div className="flex h-11 items-center justify-between border-b border-[#26312f] px-4">
-              <div className="flex items-center gap-2 text-xs text-[#b2bfbd]">
+          <div className="my-10 overflow-hidden rounded-lg border border-ide-border-strong bg-[var(--ide-color-login-code-bg)] shadow-xl shadow-ide-shadow-active">
+            <div className="flex h-11 items-center justify-between border-b border-[var(--ide-color-login-border)] px-4">
+              <div className="flex items-center gap-2 text-xs text-ide-text-secondary">
                 <Terminal
-                  className="h-3.5 w-3.5 text-[#0df5c4]"
+                  className="h-3.5 w-3.5 text-ide-accent"
                   aria-hidden="true"
                 />
                 devpulse-core
               </div>
-              <span className="rounded border border-[#34413f] px-2 py-0.5 font-mono text-[10px] text-[#94a29f]">
+              <span className="rounded border border-[var(--ide-color-login-input-border)] px-2 py-0.5 font-mono text-[10px] text-ide-muted">
                 main
               </span>
             </div>
             <div className="grid grid-cols-[112px_1fr]">
-              <div className="space-y-3 border-r border-[#26312f] p-3 text-[10px] text-[#82918e]">
-                <div className="flex items-center gap-2 text-[#d0d9d7]">
-                  <Cloud className="h-3.5 w-3.5 text-[#0df5c4]" /> Workspaces
+              <div className="space-y-3 border-r border-[var(--ide-color-login-border)] p-3 text-[10px] text-ide-muted">
+                <div className="flex items-center gap-2 text-[var(--ide-color-login-code-foreground)]">
+                  <Cloud className="h-3.5 w-3.5 text-ide-accent" /> Workspaces
                 </div>
                 <div className="flex items-center gap-2">
                   <GitBranch className="h-3.5 w-3.5" /> Repositories
@@ -390,48 +387,48 @@ export const LoginPage: React.FC = () => {
                 </div>
               </div>
               <div className="overflow-hidden p-4 font-mono text-[11px] leading-6">
-                <div className="mb-2 text-[#71807d]">src / index.ts</div>
+                <div className="mb-2 text-[var(--ide-color-login-code-comment)]">src / index.ts</div>
                 <div>
-                  <span className="mr-4 text-[#5b6966]">01</span>
-                  <span className="text-[#91a7ff]">
+                  <span className="mr-4 text-[var(--ide-color-login-code-line)]">01</span>
+                  <span className="text-[var(--ide-color-login-code-keyword)]">
                     export async function
                   </span>{" "}
-                  <span className="text-[#f4d58d]">startRuntime</span>() {"{"}
+                  <span className="text-[var(--ide-color-login-code-function)]">startRuntime</span>() {"{"}
                 </div>
                 <div>
-                  <span className="mr-4 text-[#5b6966]">02</span>{" "}
-                  <span className="text-[#91a7ff]">const</span> workspace ={" "}
-                  <span className="text-[#a7d9c2]">await</span> connect();
+                  <span className="mr-4 text-[var(--ide-color-login-code-line)]">02</span>{" "}
+                  <span className="text-[var(--ide-color-login-code-keyword)]">const</span> workspace ={" "}
+                  <span className="text-[var(--ide-color-login-code-string)]">await</span> connect();
                 </div>
                 <div>
-                  <span className="mr-4 text-[#5b6966]">03</span>{" "}
-                  <span className="text-[#b4c1bf]">return</span>{" "}
+                  <span className="mr-4 text-[var(--ide-color-login-code-line)]">03</span>{" "}
+                  <span className="text-[var(--ide-color-login-code-return)]">return</span>{" "}
                   workspace.ready;
                 </div>
                 <div>
-                  <span className="mr-4 text-[#5b6966]">04</span>
+                  <span className="mr-4 text-[var(--ide-color-login-code-line)]">04</span>
                   {"}"}
                 </div>
-                <div className="mt-3 h-px w-full bg-[#26312f]" />
-                <div className="mt-3 flex items-center gap-2 text-[#869591]">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#0df5c4]" />
+                <div className="mt-3 h-px w-full bg-[var(--ide-color-login-border)]" />
+                <div className="mt-3 flex items-center gap-2 text-ide-muted">
+                  <span className="h-1.5 w-1.5 rounded-full bg-ide-success" />
                   Ready for your next session
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 border-t border-[#293532] pt-5 text-[11px] text-[#84928f]">
+          <div className="grid grid-cols-3 gap-4 border-t border-[var(--ide-color-login-divider)] pt-5 text-[11px] text-ide-muted">
             <div>
-              <span className="mb-1 block text-[#e0e8e6]">Workspaces</span>Cloud
+              <span className="mb-1 block text-ide-text-secondary">Workspaces</span>Cloud
               environments
             </div>
             <div>
-              <span className="mb-1 block text-[#e0e8e6]">Projects</span>
+              <span className="mb-1 block text-ide-text-secondary">Projects</span>
               Repository context
             </div>
             <div>
-              <span className="mb-1 block text-[#e0e8e6]">Tooling</span>Code and
+              <span className="mb-1 block text-ide-text-secondary">Tooling</span>Code and
               releases
             </div>
           </div>

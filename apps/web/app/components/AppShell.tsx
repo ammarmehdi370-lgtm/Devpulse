@@ -6,6 +6,7 @@ import { useApp, PageType } from "../context/AppContext";
 import { ToastContainer } from "./ToastContainer";
 import { friendlyAlert } from "./FriendlyHelpers";
 import { OnboardingTour } from "./OnboardingTour";
+import { LOGO_COLORS } from "../logoColors";
 import {
   Box,
   GitFork,
@@ -51,6 +52,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     setIsFileTreeOpen,
     isTerminalOpen,
     setIsTerminalOpen,
+    isTerminalFocused,
+    setIsTerminalFocused,
   } = useApp();
 
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
@@ -148,13 +151,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         aria-haspopup="menu"
         aria-expanded={isAccountMenuOpen}
         aria-controls="sidebar-account-menu"
-        className={`group flex items-center rounded-xl border text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4]/60 ${
+        className={`group flex items-center rounded-xl border text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring ${
           compact
-            ? "h-10 w-10 justify-center border-transparent bg-transparent p-1 hover:border-white/[0.12] hover:bg-white/[0.05]"
-            : "w-full gap-2.5 border-white/[0.06] bg-white/[0.025] p-2 hover:border-white/[0.11] hover:bg-white/[0.045]"
+            ? "h-10 w-10 justify-center border-transparent bg-transparent p-1 hover:border-[color-mix(in_srgb,var(--ide-color-text-strong)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_5%,transparent)]"
+            : "w-full gap-2.5 border-[color-mix(in_srgb,var(--ide-color-text-strong)_6%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-text-strong)_2.5%,transparent)] p-2 hover:border-[color-mix(in_srgb,var(--ide-color-text-strong)_11%,transparent)] hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_4.5%,transparent)]"
         }`}
       >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#a5a1ff]/20 bg-[#6c63ff]/[0.12] text-[11px] font-semibold tracking-[0.04em] text-[#c9c6ff] transition group-hover:border-[#a5a1ff]/35 group-hover:bg-[#6c63ff]/[0.18]">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-secondary)_12%,transparent)] text-[11px] font-semibold tracking-[0.04em] text-ide-secondary transition group-hover:border-[color-mix(in_srgb,var(--ide-color-secondary)_35%,transparent)] group-hover:bg-[color-mix(in_srgb,var(--ide-color-secondary)_18%,transparent)]">
           {user.name
             .split(" ")
             .map((part) => part[0])
@@ -165,16 +168,16 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         {!compact && (
           <>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[11px] font-semibold text-[#e8e8f2] transition-colors group-hover:text-white">
+              <span className="block truncate text-[11px] font-semibold text-ide-text-high transition-colors group-hover:text-ide-text-strong">
                 {user.name}
               </span>
-              <span className="mt-0.5 block truncate text-[9px] text-[#77778f]">
+              <span className="mt-0.5 block truncate text-[9px] text-ide-muted">
                 {user.email}
               </span>
             </span>
             <ChevronDown
-              className={`h-3.5 w-3.5 shrink-0 text-[#77778f] transition-transform ${
-                isAccountMenuOpen ? "rotate-180 text-[#0DF5C4]" : ""
+              className={`h-3.5 w-3.5 shrink-0 text-ide-muted transition-transform ${
+                isAccountMenuOpen ? "rotate-180 text-ide-accent" : ""
               }`}
               aria-hidden="true"
             />
@@ -277,10 +280,13 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   // Check if current view is Workbench mode (Screenshots 1 & 3)
-  const isWorkbenchMode =
-    page === "editor" || page === "ai-studio" || page === "api-sandbox";
+  const isWorkbenchMode = page === "editor" || page === "api-sandbox";
   const isCompactCloudCore = page === "cloud-core";
   const isAiStudio = page === "ai-studio";
+
+  useEffect(() => {
+    if (!isTerminalOpen || page !== "editor") setIsTerminalFocused(false);
+  }, [isTerminalOpen, page, setIsTerminalFocused]);
   // Standard platform items
   const platformNavItems: {
     id: PageType;
@@ -309,6 +315,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       action: () => {
         setPage("editor");
         setIsTerminalOpen(false);
+        setIsTerminalFocused(false);
       },
     },
     {
@@ -333,6 +340,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       action: () => {
         setPage("editor");
         setIsTerminalOpen(true);
+        setIsTerminalFocused(true);
       },
     },
     {
@@ -362,33 +370,43 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   }, [isWorkbenchMode, page]);
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[#0a0d0e] font-sans text-[#f5f6f6] select-none">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-ide-shell-bg font-sans text-ide-text-high select-none">
       {/* Floating Top Navigation Bar */}
       <div className="topbar-shell relative z-30 shrink-0">
-        <header className="topbar relative grid h-14 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-white/[0.08] bg-[#101116] px-3 shadow-[0_5px_18px_rgba(0,0,0,0.18)] sm:px-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:px-6">
+        <header className="topbar relative grid h-14 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-ide-border bg-ide-topbar-bg px-3 shadow-[0_5px_18px_color-mix(in_srgb,var(--ide-color-shadow-color)_45%,transparent)] sm:px-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:px-6">
           {/* Left: Brand + Info String matching screenshots */}
           <div className="flex min-w-0 items-center gap-2 lg:gap-3">
             <div
               onClick={() => setPage("workspaces")}
               className="flex shrink-0 cursor-pointer items-center gap-2 group"
             >
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#0DF5C4] text-[#081211] shadow-[0_0_18px_rgba(13,245,196,0.18),inset_0_1px_0_rgba(255,255,255,0.45)] transition-transform group-hover:scale-105">
+              <div
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-transform group-hover:scale-105"
+                style={{
+                  backgroundColor: LOGO_COLORS.background,
+                  color: LOGO_COLORS.foreground,
+                  boxShadow: LOGO_COLORS.shadow,
+                }}
+              >
                 <Layers className="h-4 w-4" />
               </div>
-              <span className="text-[13px] font-semibold tracking-tight text-[#f5f6f6]">
+              <span
+                className="text-[13px] font-semibold tracking-tight"
+                style={{ color: LOGO_COLORS.wordmark }}
+              >
                 Devpulse
               </span>
             </div>
 
             <span
-              className="hidden h-5 w-px shrink-0 bg-white/10 sm:block"
+              className="hidden h-5 w-px shrink-0 bg-[color-mix(in_srgb,var(--ide-color-text-strong)_10%,transparent)] sm:block"
               aria-hidden="true"
             />
 
             <div className="topbar-breadcrumbs hidden min-w-0 items-center gap-1 text-[11px] sm:flex">
-              <span className="truncate text-[#8a8c99]">Workspace</span>
-              <span className="text-white/20">/</span>
-              <span className="truncate font-medium text-[#d6d8e2]">
+              <span className="truncate text-ide-muted">Workspace</span>
+              <span className="text-[color:color-mix(in_srgb,var(--ide-color-text-strong)_20%,transparent)]">/</span>
+              <span className="truncate font-medium text-ide-text">
                 {page === "editor"
                   ? "Maestro Code Studio"
                   : page === "ai-studio"
@@ -410,7 +428,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
           {/* Primary navigation */}
           <nav
-            className="hidden items-center gap-0.5 rounded-xl border border-white/[0.045] bg-black/25 p-1 xl:flex"
+            className="hidden items-center gap-0.5 rounded-xl border border-ide-border-subtle bg-ide-panel p-1 xl:flex"
             aria-label="Primary navigation"
           >
             {[
@@ -443,10 +461,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               className="topbar-pill flex items-center gap-1.5 px-2 sm:px-2.5"
             >
               <Search
-                className="w-3.5 h-3.5 text-[#7d8383]"
+                className="w-3.5 h-3.5 text-ide-muted"
                 aria-hidden="true"
               />
-              <span className="hidden 2xl:inline text-[#9aa0a0]">Search</span>
+              <span className="hidden 2xl:inline text-ide-text-soft">Search</span>
               <kbd className="topbar-kbd">
                 <span>⌘K</span>
               </kbd>
@@ -474,16 +492,16 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             >
               <Bell className="h-4 w-4" aria-hidden="true" />
               <span
-                className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[#0DF5C4]"
+                className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-ide-accent"
                 aria-label="New notifications"
               />
             </button>
 
             <div
-              className="hidden 2xl:flex items-center gap-2 text-[12px] text-[#9aa0a0] whitespace-nowrap"
+              className="hidden 2xl:flex items-center gap-2 text-[12px] text-ide-text-soft whitespace-nowrap"
               title="Cluster availability"
             >
-              <span className="h-2 w-2 rounded-full bg-[#0DF5C4] animate-pulse" />
+              <span className="h-2 w-2 rounded-full bg-ide-accent animate-pulse" />
               <span>Operational</span>
             </div>
           </div>
@@ -492,14 +510,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
       {isMobileNavOpen && (
         <div
-          className="md:hidden fixed inset-0 top-14 z-40 bg-black/70"
+          className="md:hidden fixed inset-0 top-14 z-40 bg-ide-overlay"
           onClick={() => setIsMobileNavOpen(false)}
         >
           <aside
-            className="flex h-full w-72 max-w-[85vw] flex-col overflow-hidden border-r border-[#1e1e2d] bg-[#0b0b12] p-3 shadow-2xl"
+            className="flex h-full w-72 max-w-[85vw] flex-col overflow-hidden border-r border-ide-border-strong bg-ide-sidebar-surface p-3 shadow-2xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="shrink-0 px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
+            <div className="shrink-0 px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-ide-muted">
               PLATFORM
             </div>
             <nav
@@ -519,7 +537,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                       setIsMobileNavOpen(false);
                     }}
                     aria-current={isActive ? "page" : undefined}
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0DF5C4] ${isActive ? "text-[#09090e] font-semibold" : "text-[#c4c4dc] hover:bg-[#141420]"}`}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring ${isActive ? "text-ide-accent-fg font-semibold" : "text-ide-text-secondary hover:bg-ide-surface"}`}
                     style={isActive ? { backgroundColor: theme.primary } : {}}
                   >
                     <Icon className="w-4 h-4" />
@@ -528,8 +546,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                 );
               })}
             </nav>
-            <div className="mt-3 shrink-0 space-y-2 border-t border-[#1e1e2d] pt-3">
-              <div className="px-1 text-[9px] font-mono uppercase tracking-[0.16em] text-[#63637e]">
+            <div className="mt-3 shrink-0 space-y-2 border-t border-ide-border-strong pt-3">
+              <div className="px-1 text-[9px] font-mono uppercase tracking-[0.16em] text-ide-muted">
                 System · Account
               </div>
               <button
@@ -538,7 +556,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                 aria-haspopup="menu"
                 aria-expanded={Boolean(settingsMenuPosition)}
                 aria-label="Open settings menu"
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium text-[#9393aa] transition-colors hover:bg-white/[0.045] hover:text-white"
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium text-ide-muted transition-colors hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_4.5%,transparent)] hover:text-ide-text-strong"
               >
                 <Settings className="h-3.5 w-3.5" />
                 <span>Settings &amp; Theme</span>
@@ -608,7 +626,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             id="sidebar-account-menu"
             role="menu"
             aria-label="Account menu"
-            className="w-72 overflow-hidden rounded-2xl border border-white/[0.12] bg-gradient-to-br from-[#1b1b27] via-[#111219] to-[#0d0e14] p-2 shadow-[0_28px_80px_rgba(0,0,0,0.68),0_10px_34px_rgba(108,99,255,0.16),inset_0_1px_0_rgba(255,255,255,0.07)] ring-1 ring-black/30"
+            className="w-72 overflow-hidden rounded-2xl border border-ide-border bg-gradient-to-br from-ide-surface-hover via-ide-surface-overlay to-ide-panel p-2 shadow-[0_28px_80px_var(--ide-color-shadow-strong),0_10px_34px_color-mix(in_srgb,var(--ide-color-secondary)_16%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_7%,transparent)] ring-1 ring-ide-shadow-color"
             style={{
               position: "fixed",
               top: accountMenuPosition.top,
@@ -616,9 +634,9 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               zIndex: 110,
             }}
           >
-            <div className="h-px rounded-full bg-gradient-to-r from-[#0DF5C4]/75 via-[#6C63FF]/70 to-[#FF9E64]/45" />
+            <div className="h-px rounded-full bg-gradient-to-r from-ide-accent via-ide-secondary to-ide-tertiary" />
             <div className="flex items-center gap-3 rounded-xl px-3 py-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#a5a1ff]/20 bg-[#6c63ff]/[0.12] text-sm font-semibold tracking-[0.04em] text-[#c9c6ff]">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--ide-color-secondary)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-secondary)_12%,transparent)] text-sm font-semibold tracking-[0.04em] text-ide-secondary">
                 {user.name
                   .split(" ")
                   .map((part) => part[0])
@@ -627,20 +645,20 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                   .toUpperCase()}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-white">
+                <span className="block truncate text-sm font-semibold text-ide-text-strong">
                   {user.name}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-[#9293a4]">
+                <span className="mt-0.5 block truncate text-xs text-ide-text-soft">
                   {user.email}
                 </span>
               </span>
             </div>
-            <div className="mx-2 my-1 border-t border-white/[0.08]" />
-            <div className="px-3 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-[#77798b]">
+            <div className="mx-2 my-1 border-t border-ide-border" />
+            <div className="px-3 py-2 text-[10px] font-medium uppercase tracking-[0.14em] text-ide-muted">
               {user.role}
               {user.handle ? ` · @${user.handle}` : ""}
             </div>
-            <div className="mx-2 my-1 border-t border-white/[0.08]" />{" "}
+            <div className="mx-2 my-1 border-t border-ide-border" />{" "}
             <button
               type="button"
               role="menuitem"
@@ -649,7 +667,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                 setAccountMenuPosition(null);
                 logout();
               }}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#f2a3a3] transition hover:bg-red-400/10 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/60"
+              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-ide-danger transition hover:bg-[color-mix(in_srgb,var(--ide-color-danger)_10%,transparent)] hover:text-ide-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
             >
               <LogOut className="h-4 w-4" aria-hidden="true" />
               Sign out
@@ -665,7 +683,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         {/* 1. WORKBENCH MODE SIDEBAR (Matches Screenshot 1 & Screenshot 3 Left Sidebar) */}
         {isWorkbenchMode ? (
           <aside
-            className={`${isSidebarOpen ? "w-60" : "w-14"} min-h-0 overflow-hidden border-r border-white/[0.07] bg-[#0b0c11] shadow-[8px_0_28px_rgba(0,0,0,0.12)] flex flex-col shrink-0 hidden md:flex font-sans transition-[width] duration-200`}
+            className={`${isSidebarOpen ? "w-60" : "w-14"} min-h-0 overflow-hidden border-r border-ide-border-subtle bg-ide-sidebar-surface shadow-[8px_0_28px_color-mix(in_srgb,var(--ide-color-shadow-color)_30%,transparent)] flex flex-col shrink-0 hidden md:flex font-sans transition-[width] duration-200`}
           >
             <div
               ref={workbenchSidebarContentRef}
@@ -674,7 +692,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               {/* Top Header */}
               <div className="min-w-0">
                 <div
-                  className={`flex items-center ${isSidebarOpen ? "justify-between" : "justify-center"} px-1 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#77788b]`}
+                  className={`flex items-center ${isSidebarOpen ? "justify-between" : "justify-center"} px-1 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ide-muted`}
                 >
                   {isSidebarOpen && <span>WORKBENCH</span>}
                   <button
@@ -703,10 +721,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                       const isSelected =
                         (item.id === "editor" &&
                           page === "editor" &&
-                          !isTerminalOpen) ||
+                          !isTerminalFocused) ||
                         (item.id === "terminal" &&
                           page === "editor" &&
-                          isTerminalOpen) ||
+                          isTerminalFocused) ||
                         (item.id === "api-sandbox" && page === "api-sandbox");
                       return (
                         <button
@@ -717,8 +735,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                           }}
                           className={`group relative w-full flex items-center rounded-lg px-2.5 py-2.5 text-[12px] font-medium transition-all duration-150 ${
                             isSelected
-                              ? "bg-white/[0.07] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                              : "text-[#9a9baa] hover:bg-white/[0.04] hover:text-[#e5e6ed]"
+                              ? "bg-ide-hover text-ide-text-strong shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_4%,transparent)]"
+                              : "text-ide-muted hover:bg-ide-input-bg hover:text-ide-text"
                           }`}
                           aria-current={isSelected ? "page" : undefined}
                         >
@@ -732,8 +750,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                             <span
                               className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${
                                 isSelected
-                                  ? "bg-[#0DF5C4]/[0.10] text-[#0DF5C4]"
-                                  : "text-[#77798d] group-hover:text-[#c5c7d3]"
+                                  ? "bg-[color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)] text-ide-accent"
+                                  : "text-ide-muted group-hover:text-ide-text-secondary"
                               }`}
                             >
                               <Icon className="h-4 w-4" />
@@ -751,7 +769,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               {isSidebarOpen && (
                 <button
                   onClick={() => setPage("workspaces")}
-                  className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[11px] font-medium text-[#77798d] transition-colors hover:bg-white/[0.035] hover:text-[#c9cad4]"
+                  className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[11px] font-medium text-ide-muted transition-colors hover:bg-[color-mix(in_srgb,var(--ide-color-text-strong)_3.5%,transparent)] hover:text-ide-text-secondary"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Exit Workbench</span>
@@ -760,7 +778,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </div>
 
             <div
-              className={`shrink-0 border-t border-[#1a1a28] p-2 ${isSidebarOpen ? "px-3" : "flex justify-center"}`}
+              className={`shrink-0 border-t border-ide-surface-hover p-2 ${isSidebarOpen ? "px-3" : "flex justify-center"}`}
             >
               {renderAccountButton(!isSidebarOpen)}
             </div>
@@ -768,7 +786,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
         ) : (
           /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
           <aside
-            className={`${isSidebarOpen ? (isCompactCloudCore ? "flex w-[68px] md:w-60" : "hidden w-60 md:flex") : "hidden w-14 md:flex"} min-h-0 overflow-hidden border-r border-white/[0.07] bg-[#0b0c11] shadow-[8px_0_28px_rgba(0,0,0,0.12)] flex-col shrink-0 font-sans transition-[width] duration-200`}
+            className={`${isSidebarOpen ? (isCompactCloudCore ? "flex w-[68px] md:w-60" : "hidden w-60 md:flex") : "hidden w-14 md:flex"} min-h-0 overflow-hidden border-r border-ide-border-subtle bg-ide-sidebar-surface shadow-[8px_0_28px_color-mix(in_srgb,var(--ide-color-shadow-color)_30%,transparent)] flex-col shrink-0 font-sans transition-[width] duration-200`}
           >
             <div
               className={`min-h-0 flex-1 overflow-y-auto space-y-6 ${isSidebarOpen && isCompactCloudCore ? "p-1.5 md:p-3.5" : "p-3.5"}`}
@@ -776,7 +794,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               {/* Platform Section */}
               <div>
                 <div
-                  className={`flex items-center ${isSidebarOpen ? "justify-between" : "justify-center"} px-1 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#77788b] ${isSidebarOpen && isCompactCloudCore ? "hidden md:flex" : ""}`}
+                  className={`flex items-center ${isSidebarOpen ? "justify-between" : "justify-center"} px-1 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ide-muted ${isSidebarOpen && isCompactCloudCore ? "hidden md:flex" : ""}`}
                 >
                   {isSidebarOpen && <span>PLATFORM</span>}
                   <button
@@ -815,8 +833,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                           }
                           className={`group relative w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium transition-all duration-150 ${
                             isActive
-                              ? "bg-white/[0.07] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                              : "text-[#9a9baa] hover:bg-white/[0.04] hover:text-[#e5e6ed]"
+                              ? "bg-ide-hover text-ide-text-strong shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_4%,transparent)]"
+                              : "text-ide-muted hover:bg-ide-input-bg hover:text-ide-text"
                           } ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-2.5" : ""}`}
                           title={isCompactCloudCore ? item.label : undefined}
                         >
@@ -829,8 +847,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                           <span
                             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${
                               isActive
-                                ? "bg-[#0DF5C4]/[0.10] text-[#0DF5C4]"
-                                : "text-[#77798d] group-hover:text-[#c5c7d3]"
+                                ? "bg-[color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)] text-ide-accent"
+                                : "text-ide-muted group-hover:text-ide-text-secondary"
                             } ${isCompactCloudCore ? "md:h-7 md:w-7" : ""}`}
                           >
                             <Icon className="h-4 w-4" />
@@ -851,7 +869,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               {isSidebarOpen && (
                 <div>
                   <div
-                    className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#77788b] ${isCompactCloudCore ? "hidden md:block" : ""}`}
+                    className={`mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ide-muted ${isCompactCloudCore ? "hidden md:block" : ""}`}
                   >
                     System
                   </div>
@@ -864,12 +882,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                       aria-haspopup="menu"
                       aria-expanded={Boolean(settingsMenuPosition)}
                       aria-label="Open settings menu"
-                      className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-[#9a9baa] transition-colors hover:bg-white/[0.04] hover:text-[#e5e6ed] ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-2.5" : ""}`}
+                      className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ide-muted transition-colors hover:bg-ide-input-bg hover:text-ide-text ${isCompactCloudCore ? "justify-center gap-0 px-1.5 md:justify-start md:gap-2.5 md:px-2.5" : ""}`}
                       title={
                         isCompactCloudCore ? "Settings & Theme" : undefined
                       }
                     >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[#77798d] transition group-hover:text-[#c5c7d3]">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ide-muted transition group-hover:text-ide-text-secondary">
                         <Settings className="h-4 w-4" />
                       </span>
                       <span
@@ -884,11 +902,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </div>
 
             <div
-              className={`relative z-10 shrink-0 border-t border-white/[0.07] bg-[#0a0b10] p-2 ${isSidebarOpen ? "space-y-2 p-3.5" : "flex justify-center"}`}
+              className={`relative z-10 shrink-0 border-t border-ide-border-subtle bg-ide-sidebar-bg p-2 ${isSidebarOpen ? "space-y-2 p-3.5" : "flex justify-center"}`}
             >
               {isSidebarOpen && (
                 <div
-                  className={`px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#77788b] ${isCompactCloudCore ? "hidden md:block" : ""}`}
+                  className={`px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-ide-muted ${isCompactCloudCore ? "hidden md:block" : ""}`}
                 >
                   Account
                 </div>
@@ -896,7 +914,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               {renderAccountButton(!isSidebarOpen)}
               {isSidebarOpen && (
                 <div
-                  className={`px-1 pt-0.5 text-[9px] text-[#5f6072] ${isCompactCloudCore ? "hidden md:block" : ""}`}
+                  className={`px-1 pt-0.5 text-[9px] text-ide-subtle ${isCompactCloudCore ? "hidden md:block" : ""}`}
                 >
                   v2.4.18-edge
                 </div>
@@ -907,7 +925,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
         {/* Main Content Pane */}
         <main
-          className={`${page === "editor" ? "flex flex-col overflow-hidden" : isAiStudio ? "overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-[#08080d]`}
+          className={`${page === "editor" ? "flex flex-col overflow-hidden" : isAiStudio ? "overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-ide-app-content-bg`}
         >
           <div
             className={

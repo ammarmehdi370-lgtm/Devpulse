@@ -24,6 +24,7 @@ import {
   Fingerprint,
   Key,
 } from "lucide-react";
+import { LOGO_COLORS } from "../logoColors";
 
 interface LedgerRecord {
   id: string;
@@ -755,10 +756,10 @@ export const ApiSandboxPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-full w-full max-w-none bg-[#07090e] text-[#c7d2e0] font-sans px-[clamp(16px,2.4vw,26px)] pt-0 pb-3 select-none space-y-[18px]">
+    <div className="min-h-full w-full max-w-none bg-ide-bg text-ide-text-secondary font-sans px-[clamp(16px,2.4vw,26px)] pt-0 pb-3 select-none space-y-[18px]">
 
       {/* 1. TOP SANDBOX HEADER STATUS BAR (Pixel-matched) */}
-      <div className="sticky top-0 z-40 -mx-[clamp(16px,2.4vw,26px)] flex h-[58px] flex-nowrap items-center justify-between gap-2 border-b border-[#171a26] bg-[#080910] px-[clamp(16px,2.4vw,26px)]">
+      <div className="sticky top-0 z-40 -mx-[clamp(16px,2.4vw,26px)] flex h-[58px] flex-nowrap items-center justify-between gap-2 border-b border-ide-border-strong bg-ide-bg px-[clamp(16px,2.4vw,26px)]">
         {/* Brand & Subtitle */}
         <div className="flex items-center gap-3">
           <button
@@ -766,18 +767,29 @@ export const ApiSandboxPage: React.FC = () => {
             onClick={() => setPage("workspaces")}
             aria-label="Return to workspaces"
             title="Return to workspaces"
-            className="w-8 h-8 rounded-lg bg-[#11121d] border border-[#37364c] flex items-center justify-center text-[#b9a8ff] shadow-inner"
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{
+              backgroundColor: LOGO_COLORS.background,
+              borderColor: LOGO_COLORS.background,
+              color: LOGO_COLORS.foreground,
+              boxShadow: LOGO_COLORS.shadow,
+            }}
           >
-            <Layers className="w-4 h-4 text-[#c4b5fd]" />
+            <Layers className="w-4 h-4" />
           </button>
           <div>
             <div className="flex min-w-0 items-center gap-2">
-              <span className="font-bold text-white text-sm tracking-tight">Devpulse</span>
-              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-[#172446] text-[#9db7ff] border border-[#344b82] tracking-wider">
+              <span
+                className="font-bold text-sm tracking-tight"
+                style={{ color: LOGO_COLORS.wordmarkStrong }}
+              >
+                Devpulse
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-ide-surface-hover text-[var(--ide-color-info-readable)] border border-ide-info tracking-wider">
                 SANDBOX V4.2
               </span>
             </div>
-            <div className="text-[8px] font-mono tracking-widest text-[#526075] uppercase">
+            <div className="text-[8px] font-mono tracking-widest text-ide-text-placeholder uppercase">
               ISOLATED TELEMETRY & VIRTUAL API FABRIC
             </div>
           </div>
@@ -786,31 +798,31 @@ export const ApiSandboxPage: React.FC = () => {
         {/* Center Indicators */}
         <div className="flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
           {/* Env / Synthetic Mesh Pill */}
-          <div className="hidden min-[900px]:flex items-center gap-2 px-2.5 py-1 rounded-full bg-[#0c121d] border border-[#182335] text-[9px] font-mono">
-            <span className="w-2 h-2 rounded-full bg-[#eab308] animate-pulse" />
-            <span className="text-[#8494a8]">env:</span>
-            <span className="max-w-[90px] truncate text-white font-medium">{scenario.toLowerCase().replaceAll(" ", "-").replaceAll("/", "-")}</span>
+          <div className="hidden min-[900px]:flex items-center gap-2 px-2.5 py-1 rounded-full bg-ide-surface border border-ide-border-strong text-[9px] font-mono">
+            <span className="w-2 h-2 rounded-full bg-ide-warning animate-pulse" />
+            <span className="text-[var(--ide-color-info-readable)]">env:</span>
+            <span className="max-w-[90px] truncate text-ide-text-strong font-medium">{scenario.toLowerCase().replaceAll(" ", "-").replaceAll("/", "-")}</span>
           </div>
 
           {/* Ephemeral Probe Live */}
-          <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-[#052e16]/40 border border-[#166534]/50 text-[9px] font-mono text-[#4ade80]">
-            <span className="w-2 h-2 rounded-full bg-[#22c55e]" />
-            <span className="text-white">Probe Live</span>
-            <span className="text-[#86efac]">• {runtimeLatency}ms</span>
+          <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-ide-success/10 border border-ide-success/50 text-[9px] font-mono text-[var(--ide-color-success-readable)]">
+            <span className="w-2 h-2 rounded-full bg-ide-success" />
+            <span className="text-ide-text-strong">Probe Live</span>
+            <span className="text-[var(--ide-color-success-readable)]">• {runtimeLatency}ms</span>
           </div>
 
           {/* 100% Air-Gapped Pill */}
-          <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-full bg-[#0b1728] border border-[#1e3a5f] text-[9px] font-mono text-[#38bdf8]">
-            <ShieldCheck className="w-3.5 h-3.5 text-[#38bdf8]" />
-            <span className="font-medium text-white">100% Air-Gapped</span>
+          <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-full bg-ide-surface border border-ide-info text-[9px] font-mono text-[var(--ide-color-info-readable)]">
+            <ShieldCheck className="w-3.5 h-3.5 text-ide-info" />
+            <span className="font-medium text-ide-text-strong">100% Air-Gapped</span>
           </div>
 
           {/* Export Schema Button */}
           <button
             onClick={exportSchema}
-            className="hidden sm:flex items-center gap-1 px-2 py-1.5 rounded-lg bg-[#0e1626] hover:bg-[#162238] border border-[#1f2d47] text-white text-[9px] font-mono transition-colors shadow-sm"
+            className="hidden sm:flex items-center gap-1 px-2 py-1.5 rounded-lg bg-ide-surface hover:bg-ide-surface-hover border border-ide-modal-border text-ide-text-strong text-[9px] font-mono transition-colors shadow-sm"
           >
-            <ExternalLink className="w-3.5 h-3.5 text-[#8ca3ba]" />
+            <ExternalLink className="w-3.5 h-3.5 text-ide-info" />
             <span>Export Schema</span>
           </button>
 
@@ -821,15 +833,15 @@ export const ApiSandboxPage: React.FC = () => {
                 ? setIsSnapshotPanelOpen((open) => !open)
                 : setNotice("No sandbox alerts. Requests run locally and do not reach production.")
             }
-            className="w-7 h-7 rounded-lg bg-[#0e1626] hover:bg-[#172338] border border-[#1f2d47] flex items-center justify-center text-[#94a3b8] transition-colors relative"
+            className="w-7 h-7 rounded-lg bg-ide-surface hover:bg-ide-surface-hover border border-ide-modal-border flex items-center justify-center text-ide-info transition-colors relative"
           >
-            <Activity className="w-4 h-4 text-[#38bdf8]" />
-            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />
+            <Activity className="w-4 h-4 text-ide-info" />
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-ide-info" />
           </button>
 
           {/* User Avatar */}
           <div className="flex items-center gap-2 pl-1">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-[#0284c7] to-[#0ea5e9] flex items-center justify-center text-white text-[10px] font-bold ring-2 ring-[#0369a1]/40">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-ide-info to-ide-accent flex items-center justify-center text-ide-text-strong text-[10px] font-bold ring-2 ring-ide-focus-ring/40">
               {user.name
                 .split(/\s+/)
                 .filter(Boolean)
@@ -839,8 +851,8 @@ export const ApiSandboxPage: React.FC = () => {
                 .toUpperCase()}
             </div>
             <div className="hidden min-[900px]:block text-left text-xs leading-tight">
-              <div className="font-semibold text-white">{user.name}</div>
-              <div className="text-[10px] text-[#64748b]">{user.role}</div>
+              <div className="font-semibold text-ide-text-strong">{user.name}</div>
+              <div className="text-[10px] text-ide-text-dim">{user.role}</div>
             </div>
           </div>
         </div>
@@ -850,45 +862,45 @@ export const ApiSandboxPage: React.FC = () => {
       {notice && (
         <div
           role="status"
-          className="fixed right-4 top-16 z-50 flex max-w-lg items-start gap-3 rounded-lg border border-[#344b82] bg-[#101522] px-3 py-2 text-xs text-[#cbd5e1] shadow-xl"
+          className="fixed right-4 top-16 z-50 flex max-w-lg items-start gap-3 rounded-lg border border-ide-info bg-ide-surface px-3 py-2 text-xs text-ide-text shadow-xl"
         >
           <span className="flex-1">{notice}</span>
           <button
             type="button"
             aria-label="Dismiss notice"
             onClick={() => setNotice("")}
-            className="text-[#8494a8] hover:text-white"
+            className="text-ide-info hover:text-ide-text-strong"
           >
             ×
           </button>
         </div>
       )}
       {isSnapshotPanelOpen && (
-        <div className="fixed right-4 top-16 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-[#263047] bg-[#0d101a] p-3 shadow-2xl">
+        <div className="fixed right-4 top-16 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-ide-modal-border bg-ide-surface p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-xs font-bold text-white">Sandbox snapshots</h2>
+            <h2 className="text-xs font-bold text-ide-text-strong">Sandbox snapshots</h2>
             <button
               type="button"
               onClick={() => setIsSnapshotPanelOpen(false)}
-              className="text-xs text-[#8494a8] hover:text-white"
+              className="text-xs text-ide-info hover:text-ide-text-strong"
             >
               Close
             </button>
           </div>
           {snapshots.length === 0 ? (
-            <p className="text-xs text-[#8494a8]">No snapshots yet.</p>
+            <p className="text-xs text-ide-info">No snapshots yet.</p>
           ) : (
             <div className="max-h-64 space-y-2 overflow-y-auto">
               {snapshots.map((snapshot) => (
                 <div
                   key={snapshot.id}
-                  className="flex items-center justify-between gap-3 rounded border border-[#202a3d] bg-[#080b12] p-2"
+                  className="flex items-center justify-between gap-3 rounded border border-ide-modal-border bg-ide-panel p-2"
                 >
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[10px] text-[#60a5fa]">
+                    <div className="truncate font-mono text-[10px] text-ide-info">
                       {snapshot.id}
                     </div>
-                    <div className="text-[10px] text-[#718096]">
+                    <div className="text-[10px] text-ide-muted">
                       {new Date(snapshot.createdAt).toLocaleString()} ·{" "}
                       {snapshot.records.length} visible records
                     </div>
@@ -904,7 +916,7 @@ export const ApiSandboxPage: React.FC = () => {
                       setIsSnapshotPanelOpen(false);
                       setNotice(`Restored ${snapshot.id}.`);
                     }}
-                    className="shrink-0 rounded border border-[#344b82] px-2 py-1 text-[10px] text-[#c7d2fe] hover:bg-[#1e1b4b]"
+                    className="shrink-0 rounded border border-ide-info px-2 py-1 text-[10px] text-ide-text-strong hover:bg-ide-surface-raised"
                   >
                     Restore
                   </button>
@@ -914,42 +926,42 @@ export const ApiSandboxPage: React.FC = () => {
           )}
         </div>
       )}
-      <div className="min-h-[220px] rounded-xl border border-[#1d2030] bg-[#0d0e18] p-[15px] space-y-3">
+      <div className="min-h-[220px] rounded-xl border border-ide-border-strong bg-ide-panel p-[15px] space-y-3">
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_250px] items-start gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#052e16]/60 border border-[#166534] text-xs font-mono font-medium text-[#4ade80]">
-            <span className="w-2 h-2 rounded-full bg-[#22c55e] animate-pulse" />
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-ide-success/10 border border-ide-success text-xs font-mono font-medium text-ide-success">
+            <span className="w-2 h-2 rounded-full bg-ide-success animate-pulse" />
             <span>ISOLATED RUNTIME ACTIVE</span>
           </div>
 
-          <div className="text-xs font-mono text-[#718296] flex items-center gap-1.5">
+          <div className="text-xs font-mono text-ide-text-quiet flex items-center gap-1.5">
             <span>Cluster:</span>
-            <span className="text-[#cbd5e1] font-semibold">browser-local (isolated)</span>
+            <span className="text-ide-text font-semibold">browser-local (isolated)</span>
           </div>
 
-          <div className="text-xs font-mono text-[#718296] flex items-center gap-1.5">
+          <div className="text-xs font-mono text-ide-text-quiet flex items-center gap-1.5">
             <span>Kernel:</span>
-            <span className="text-[#38bdf8] font-semibold">local-simulator-v1</span>
+            <span className="text-ide-info font-semibold">local-simulator-v1</span>
           </div>
 
           {/* Session ID Chip with Copy */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0f1826] border border-[#1d2c42] text-xs font-mono text-[#899cb3]">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface-raised border border-ide-modal-border text-xs font-mono text-ide-info">
             <span>Session ID:</span>
-            <span className="text-white">{sessionId}</span>
+            <span className="text-ide-text-strong">{sessionId}</span>
             <button
               onClick={handleCopyKernel}
-              className="text-[#64748b] hover:text-white transition-colors"
+              className="text-ide-text-dim hover:text-ide-text-strong transition-colors"
               title="Copy session id"
             >
-              {copiedKernel ? <Check className="w-3.5 h-3.5 text-[#22c55e]" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedKernel ? <Check className="w-3.5 h-3.5 text-ide-success" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
 
         {/* Green Shield Banner */}
-        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-[#042f2e]/60 border border-[#0d9488]/40 text-xs font-mono text-[#2dd4bf] min-[900px]:justify-self-end">
-          <ShieldCheck className="w-4 h-4 text-[#2dd4bf] shrink-0" />
-          <span className="font-medium text-[#5eead4]">
+        <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-ide-info/10 border border-ide-success/40 text-xs font-mono text-ide-success min-[900px]:justify-self-end">
+          <ShieldCheck className="w-4 h-4 text-ide-success shrink-0" />
+          <span className="font-medium text-ide-success">
             Shield Active: 100% Synthetic & Zero Production Impact
           </span>
         </div>
@@ -959,14 +971,14 @@ export const ApiSandboxPage: React.FC = () => {
       <div className="grid grid-cols-1 min-[1200px]:grid-cols-[1.2fr_1fr] items-start gap-3">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-lg font-bold text-white tracking-tight">
+            <h1 className="text-lg font-bold text-ide-text-strong tracking-tight">
               Virtual Sandbox: {scenario}
             </h1>
-            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#1e1b4b] text-[#a5b4fc] border border-[#4338ca]/60">
+            <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-ide-surface-raised text-ide-info border border-ide-info/60">
               Faker Engine v5.4
             </span>
           </div>
-          <p className="text-xs text-[#718096] mt-1 max-w-2xl">
+          <p className="text-xs text-ide-muted mt-1 max-w-2xl">
             A local synthetic API simulator. Requests stay in this browser and never reach production services.
           </p>
 
@@ -976,26 +988,26 @@ export const ApiSandboxPage: React.FC = () => {
         <div className="grid min-w-0 grid-cols-2 items-center gap-1.5">
           {/* Scenario Selector Dropdown */}
           <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 text-[10px] font-mono text-[#718096]">Scenario:</span>
+            <span className="shrink-0 text-[10px] font-mono text-ide-muted">Scenario:</span>
             <div className="relative min-w-0 flex-1">
               <select
                 value={scenario}
                 onChange={(e) => applyScenario(e.target.value)}
-                className="block w-full min-w-0 truncate appearance-none bg-[#0e1726] border border-[#1f2d47] text-white text-xs font-mono rounded-lg px-2 py-2 pr-6 hover:border-[#38bdf8] focus:outline-none focus:ring-1 focus:ring-[#38bdf8] transition-colors cursor-pointer"
+                className="block w-full min-w-0 truncate appearance-none bg-ide-surface border border-ide-modal-border text-ide-text-strong text-xs font-mono rounded-lg px-2 py-2 pr-6 hover:border-ide-info focus:outline-none focus:ring-1 focus:ring-ide-focus-ring transition-colors cursor-pointer"
               >
                 <option value="Fintech / Payments v2">Fintech / Payments v2</option>
                 <option value="Auth & Session Token Verification">Auth & Session Token Verification</option>
                 <option value="Rate Limit & Backoff Emulation">Rate Limit & Backoff Emulation</option>
                 <option value="High Load eBPF Simulation">High Load eBPF Simulation</option>
               </select>
-              <ChevronDown className="w-3.5 h-3.5 text-[#64748b] absolute right-2.5 top-2.5 pointer-events-none" />
+              <ChevronDown className="w-3.5 h-3.5 text-ide-text-dim absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
           </div>
 
           {/* Add Synthetic Records */}
           <button
             onClick={handleAddSyntheticRecords}
-            className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg bg-[#064e3b]/80 border border-[#059669]/60 hover:bg-[#065f46] text-[#34d399] text-[10px] font-mono font-medium transition-all shadow-md whitespace-nowrap"
+            className="flex items-center justify-center gap-1 px-2 py-2 rounded-lg bg-ide-accent border border-ide-accent/60 hover:bg-ide-accent/90 text-ide-accent-fg text-[10px] font-mono font-medium transition-all shadow-md whitespace-nowrap"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>+1,000 Synthetic Records</span>
@@ -1004,16 +1016,16 @@ export const ApiSandboxPage: React.FC = () => {
           {/* Snapshot Button */}
           <button
             onClick={snapshotSandbox}
-            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-[#0f1826] border border-[#213047] hover:bg-[#18253b] text-white text-xs font-mono transition-colors"
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-ide-surface-raised border border-ide-modal-border hover:bg-ide-surface-hover text-ide-text-strong text-xs font-mono transition-colors"
           >
-            <Camera className="w-3.5 h-3.5 text-[#38bdf8]" />
+            <Camera className="w-3.5 h-3.5 text-ide-info" />
             <span>Snapshot</span>
           </button>
 
           {/* Reset State Button */}
           <button
             onClick={handleResetState}
-            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-[#1f1620] border border-[#50232c] hover:bg-[#301c27] text-[#f87171] text-xs font-mono transition-colors"
+            className="flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-ide-surface-raised border border-ide-modal-border hover:bg-ide-surface-hover text-ide-danger text-xs font-mono transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset State</span>
@@ -1022,32 +1034,32 @@ export const ApiSandboxPage: React.FC = () => {
       </div>
       {/* Presets Chips */}
       <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-        <span className="text-[#4f5f73] uppercase tracking-wider text-[10px]">PRESETS:</span>
+        <span className="text-ide-text-placeholder uppercase tracking-wider text-[10px]">PRESETS:</span>
         <button
           onClick={() => applyScenario("Fintech / Payments v2")}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1e1b4b]/80 border border-[#4f46e5]/50 hover:bg-[#312e81] text-[#c7d2fe] transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface-raised/80 border border-ide-info/50 hover:bg-ide-info text-[var(--ide-color-info-readable)] hover:text-[var(--ide-color-secondary-fg)] transition-colors"
         >
           <span>+ Stripe/Ledger v2.4</span>
         </button>
         <button
           onClick={() => applyScenario("Auth0 / Token Verification")}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0f192b] border border-[#1e3458] hover:bg-[#1b2b46] text-[#cbd5e1] transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface-raised border border-ide-modal-border hover:bg-ide-surface-hover-strong text-ide-text transition-colors"
         >
-          <Key className="w-3 h-3 text-[#facc15]" />
+          <Key className="w-3 h-3 text-ide-warning" />
           <span>Auth0 & JWT Verification</span>
         </button>
         <button
           onClick={() => applyScenario("Kafka / SQS Event Bus")}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0f192b] border border-[#1e3458] hover:bg-[#1b2b46] text-[#cbd5e1] transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface-raised border border-ide-modal-border hover:bg-ide-surface-hover-strong text-ide-text transition-colors"
         >
-          <Radio className="w-3 h-3 text-[#38bdf8]" />
+          <Radio className="w-3 h-3 text-ide-info" />
           <span>Kafka / SQS Event Bus</span>
         </button>
         <button
           onClick={() => applyScenario("Apollo Federation Subgraph")}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0f192b] border border-[#1e3458] hover:bg-[#1b2b46] text-[#cbd5e1] transition-colors"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface-raised border border-ide-modal-border hover:bg-ide-surface-hover-strong text-ide-text transition-colors"
         >
-          <Layers className="w-3 h-3 text-[#818cf8]" />
+          <Layers className="w-3 h-3 text-ide-info" />
           <span>Apollo Federation Subgraph</span>
         </button>
       </div>
@@ -1056,104 +1068,104 @@ export const ApiSandboxPage: React.FC = () => {
       {/* 4. FOUR TELEMETRY & STATS CARDS */}
       <div className="grid grid-cols-1 min-[520px]:grid-cols-2 min-[1100px]:grid-cols-4 gap-3">
         {/* Card 1: Virtual Isolation */}
-        <div className="h-[112px] p-2.5 rounded-lg bg-[#0b0c14] border border-[#1d2030] flex flex-col justify-between relative overflow-hidden">
-          <div className="flex items-center justify-between text-[#718096]">
+        <div className="h-[112px] p-2.5 rounded-lg bg-ide-panel border border-ide-border-strong flex flex-col justify-between relative overflow-hidden">
+          <div className="flex items-center justify-between text-ide-muted">
             <span className="text-[10px] font-mono font-semibold uppercase tracking-wider">
               VIRTUAL ISOLATION
             </span>
-            <div className="w-6 h-6 rounded-md bg-[#0f1c2e] border border-[#1a3354] flex items-center justify-center text-[#38bdf8]">
-              <Lock className="w-3 h-3 text-[#38bdf8]" />
+            <div className="w-6 h-6 rounded-md bg-ide-surface-raised border border-ide-modal-border flex items-center justify-center text-ide-info">
+              <Lock className="w-3 h-3 text-ide-info" />
             </div>
           </div>
           <div className="mt-1 min-w-0">
-            <div className="whitespace-nowrap text-xl font-black text-white font-mono tracking-tight flex items-baseline gap-2">
+            <div className="whitespace-nowrap text-xl font-black text-ide-text-strong font-mono tracking-tight flex items-baseline gap-2">
               100%
-              <span className="text-xs font-semibold text-[#38bdf8] font-mono">Air-Gapped</span>
+              <span className="text-xs font-semibold text-ide-info font-mono">Air-Gapped</span>
             </div>
-            <div className="truncate whitespace-nowrap text-[9px] font-mono text-[#526075] mt-0.5">
+            <div className="truncate whitespace-nowrap text-[9px] font-mono text-ide-text-placeholder mt-0.5">
               Ephemeral RAM • Zero Live DB writes
             </div>
           </div>
           {/* Progress bar line */}
-          <div className="w-full h-1 bg-[#101826] rounded-full overflow-hidden mt-3">
-            <div className="w-full h-full bg-[#38bdf8]" />
+          <div className="w-full h-1 bg-ide-surface-raised rounded-full overflow-hidden mt-3">
+            <div className="w-full h-full bg-ide-info" />
           </div>
         </div>
 
         {/* Card 2: Synthetic Masking */}
-        <div className="h-[112px] p-2.5 rounded-lg bg-[#0b0c14] border border-[#1d2030] flex flex-col justify-between relative overflow-hidden">
-          <div className="flex items-center justify-between text-[#718096]">
+        <div className="h-[112px] p-2.5 rounded-lg bg-ide-panel border border-ide-border-strong flex flex-col justify-between relative overflow-hidden">
+          <div className="flex items-center justify-between text-ide-muted">
             <span className="text-[10px] font-mono font-semibold uppercase tracking-wider">
               SYNTHETIC MASKING
             </span>
-            <div className="w-6 h-6 rounded-md bg-[#07251f] border border-[#0f4d3f] flex items-center justify-center text-[#34d399]">
-              <Fingerprint className="w-3 h-3 text-[#34d399]" />
+            <div className="w-6 h-6 rounded-md bg-ide-success/10 border border-ide-success flex items-center justify-center text-ide-success">
+              <Fingerprint className="w-3 h-3 text-ide-success" />
             </div>
           </div>
           <div className="mt-1 min-w-0">
-            <div className="whitespace-nowrap text-xl font-black text-white font-mono tracking-tight flex items-baseline gap-2">
+            <div className="whitespace-nowrap text-xl font-black text-ide-text-strong font-mono tracking-tight flex items-baseline gap-2">
               0 PII
-              <span className="text-xs font-semibold text-[#34d399] font-mono">Masked</span>
+              <span className="text-xs font-semibold text-ide-success font-mono">Masked</span>
             </div>
-            <div className="truncate whitespace-nowrap text-[9px] font-mono text-[#526075] mt-0.5">
+            <div className="truncate whitespace-nowrap text-[9px] font-mono text-ide-text-placeholder mt-0.5">
               Synthetic data • Seed alpha_49
             </div>
           </div>
-          <div className="w-full h-1 bg-[#101826] rounded-full overflow-hidden mt-3">
-            <div className="w-full h-full bg-[#10b981]" />
+          <div className="w-full h-1 bg-ide-surface-raised rounded-full overflow-hidden mt-3">
+            <div className="w-full h-full bg-ide-success" />
           </div>
         </div>
 
         {/* Card 3: Gateway Telemetry */}
-        <div className="h-[112px] p-2.5 rounded-lg bg-[#0b0c14] border border-[#1d2030] flex flex-col justify-between relative overflow-hidden">
-          <div className="flex items-center justify-between text-[#718096]">
+        <div className="h-[112px] p-2.5 rounded-lg bg-ide-panel border border-ide-border-strong flex flex-col justify-between relative overflow-hidden">
+          <div className="flex items-center justify-between text-ide-muted">
             <span className="text-[10px] font-mono font-semibold uppercase tracking-wider">
               GATEWAY TELEMETRY
             </span>
-            <div className="w-6 h-6 rounded-md bg-[#2e1d0f] border border-[#5c3a1e] flex items-center justify-center text-[#fbbf24]">
-              <Activity className="w-3 h-3 text-[#fbbf24]" />
+            <div className="w-6 h-6 rounded-md bg-ide-surface-raised border border-ide-warning flex items-center justify-center text-ide-warning">
+              <Activity className="w-3 h-3 text-ide-warning" />
             </div>
           </div>
           <div className="mt-1 min-w-0">
-            <div className="whitespace-nowrap text-xl font-black text-white font-mono tracking-tight flex items-baseline gap-2">
+            <div className="whitespace-nowrap text-xl font-black text-ide-text-strong font-mono tracking-tight flex items-baseline gap-2">
               {runtimeLatency}ms
-              <span className="text-xs font-semibold text-[#fbbf24] font-mono">
+              <span className="text-xs font-semibold text-ide-warning font-mono">
                 {requestsPerMinute}/1000 RPM
               </span>
             </div>
-            <div className="truncate whitespace-nowrap text-[9px] font-mono text-[#526075] mt-0.5">
+            <div className="truncate whitespace-nowrap text-[9px] font-mono text-ide-text-placeholder mt-0.5">
               Local requests • no upstream connection
             </div>
           </div>
-          <div className="w-full h-1 bg-[#101826] rounded-full overflow-hidden mt-3">
+          <div className="w-full h-1 bg-ide-surface-raised rounded-full overflow-hidden mt-3">
             <div
-              className="h-full bg-[#f59e0b] transition-all"
+              className="h-full bg-ide-warning transition-all"
               style={{ width: `${rateLimitPercent}%` }}
             />
           </div>
         </div>
 
         {/* Card 4: Security Envelope */}
-        <div className="h-[112px] p-2.5 rounded-lg bg-[#0b0c14] border border-[#1d2030] flex flex-col justify-between relative overflow-hidden">
-          <div className="flex items-center justify-between text-[#718096]">
+        <div className="h-[112px] p-2.5 rounded-lg bg-ide-panel border border-ide-border-strong flex flex-col justify-between relative overflow-hidden">
+          <div className="flex items-center justify-between text-ide-muted">
             <span className="text-[10px] font-mono font-semibold uppercase tracking-wider">
               SECURITY ENVELOPE
             </span>
-            <div className="w-6 h-6 rounded-md bg-[#1f162e] border border-[#432d66] flex items-center justify-center text-[#c084fc]">
-              <ShieldCheck className="w-3 h-3 text-[#c084fc]" />
+            <div className="w-6 h-6 rounded-md bg-ide-surface-raised border border-ide-secondary flex items-center justify-center text-ide-secondary">
+              <ShieldCheck className="w-3 h-3 text-ide-secondary" />
             </div>
           </div>
           <div className="mt-1 min-w-0">
-            <div className="whitespace-nowrap text-xl font-black text-white font-mono tracking-tight flex items-baseline gap-2">
+            <div className="whitespace-nowrap text-xl font-black text-ide-text-strong font-mono tracking-tight flex items-baseline gap-2">
               TLS 1.3
-              <span className="text-xs font-semibold text-[#a855f7] font-mono">mTLS Mock</span>
+              <span className="text-xs font-semibold text-ide-secondary font-mono">mTLS Mock</span>
             </div>
-            <div className="truncate whitespace-nowrap text-[9px] font-mono text-[#526075] mt-0.5">
+            <div className="truncate whitespace-nowrap text-[9px] font-mono text-ide-text-placeholder mt-0.5">
               Synthetic JWT • SHA-256 Digest Enforced
             </div>
           </div>
-          <div className="w-full h-1 bg-[#101826] rounded-full overflow-hidden mt-3">
-            <div className="w-full h-full bg-[#a855f7]" />
+          <div className="w-full h-1 bg-ide-surface-raised rounded-full overflow-hidden mt-3">
+            <div className="w-full h-full bg-ide-secondary" />
           </div>
         </div>
       </div>
@@ -1162,37 +1174,37 @@ export const ApiSandboxPage: React.FC = () => {
       <div className="grid grid-cols-1 min-[1200px]:grid-cols-[minmax(0,1.42fr)_minmax(0,1fr)] gap-4">
 
         {/* LEFT COLUMN: HTTP REQUEST WORKBENCH */}
-        <div className="p-3 rounded-lg bg-[#0b0c14] border border-[#1d2030] flex flex-col justify-between space-y-2">
+        <div className="p-3 rounded-lg bg-ide-panel border border-ide-border-strong flex flex-col justify-between space-y-2">
 
           {/* Top Bar inside Request Workbench */}
-          <div className="flex items-center justify-between pb-2 border-b border-[#141c29]">
+          <div className="flex items-center justify-between pb-2 border-b border-ide-border-strong">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-[#1e1b4b] flex items-center justify-center text-[#818cf8]">
+              <div className="w-6 h-6 rounded bg-ide-surface-raised flex items-center justify-center text-ide-info">
                 <Code2 className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h2 className="text-sm font-bold text-white tracking-tight">HTTP Request Workbench</h2>
-                <div className="text-[10px] font-mono text-[#526075]">OpenAPI 3.1 Contract Validated</div>
+                <h2 className="text-sm font-bold text-ide-text-strong tracking-tight">HTTP Request Workbench</h2>
+                <div className="text-[10px] font-mono text-ide-text-placeholder">OpenAPI 3.1 Contract Validated</div>
               </div>
             </div>
 
             {/* Latency Simulator Dropdown */}
             <div className="flex items-center gap-1.5 text-xs font-mono">
-              <span className="text-[#eab308] text-[11px] flex items-center gap-1">
+              <span className="text-ide-warning text-[11px] flex items-center gap-1">
                 <span>⏱</span> Latency Sim:
               </span>
               <div className="relative">
                 <select
                   value={latencySim}
                   onChange={(e) => setLatencySim(e.target.value)}
-                  className="appearance-none bg-[#0e1626] border border-[#1d2a40] text-xs text-[#38bdf8] font-mono rounded px-2.5 py-1 pr-6 hover:border-[#38bdf8] focus:outline-none cursor-pointer"
+                  className="appearance-none bg-ide-surface border border-ide-modal-border text-xs text-[var(--ide-color-info-readable)] font-mono rounded px-2.5 py-1 pr-6 hover:border-ide-info focus:outline-none cursor-pointer"
                 >
                   <option value="24ms (Realistic Edge)">24ms (Realistic Edge)</option>
                   <option value="5ms (In-Memory MicroVM)">5ms (In-Memory MicroVM)</option>
                   <option value="120ms (Cross-Region Simulated)">120ms (Cross-Region Simulated)</option>
                   <option value="450ms (Jitter Spikes)">450ms (Jitter Spikes)</option>
                 </select>
-                <ChevronDown className="w-3 h-3 text-[#64748b] absolute right-1.5 top-2 pointer-events-none" />
+                <ChevronDown className="w-3 h-3 text-ide-text-dim absolute right-1.5 top-2 pointer-events-none" />
               </div>
             </div>
           </div>
@@ -1204,7 +1216,7 @@ export const ApiSandboxPage: React.FC = () => {
               <select
                 value={httpMethod}
                 onChange={(e) => setHttpMethod(e.target.value as HttpMethod)}
-                className="appearance-none bg-[#1e1b4b] border border-[#4338ca]/70 text-[#818cf8] font-bold text-xs font-mono rounded-lg px-2 py-2 pr-6 hover:border-[#6366f1] focus:outline-none cursor-pointer"
+                className="appearance-none bg-ide-surface-raised border border-ide-info/70 text-[var(--ide-color-info-readable)] font-bold text-xs font-mono rounded-lg px-2 py-2 pr-6 hover:border-ide-info focus:outline-none cursor-pointer"
               >
                 <option value="POST">POST</option>
                 <option value="GET">GET</option>
@@ -1212,17 +1224,17 @@ export const ApiSandboxPage: React.FC = () => {
                 <option value="DELETE">DELETE</option>
                 <option value="PATCH">PATCH</option>
               </select>
-              <ChevronDown className="w-3 h-3 text-[#818cf8] absolute right-2 top-3 pointer-events-none" />
+              <ChevronDown className="w-3 h-3 text-ide-info absolute right-2 top-3 pointer-events-none" />
             </div>
 
             {/* URL Input Bar */}
-            <div className="flex min-w-0 flex-1 items-center bg-[#060a11] border border-[#162132] rounded-lg px-3 py-2 text-xs font-mono">
-              <span className="text-[#475569] mr-1 hidden min-[1024px]:inline">local://sandbox/v1/</span>
+            <div className="flex min-w-0 flex-1 items-center bg-ide-bg border border-ide-border-strong rounded-lg px-3 py-2 text-xs font-mono">
+              <span className="text-ide-subtle mr-1 hidden min-[1024px]:inline">local://sandbox/v1/</span>
               <input
                 type="text"
                 value={endpointUrl}
                 onChange={(e) => setEndpointUrl(e.target.value)}
-                className="min-w-0 bg-transparent text-white focus:outline-none flex-1 font-mono text-xs"
+                className="min-w-0 bg-transparent text-ide-text-strong focus:outline-none flex-1 font-mono text-xs"
               />
               <button
                 onClick={() => {
@@ -1230,7 +1242,7 @@ export const ApiSandboxPage: React.FC = () => {
                     `local://sandbox/v1/${endpointUrl.replace(/^\/+/, "")}`,
                   );
                 }}
-                className="text-[#64748b] hover:text-white transition-colors ml-2"
+                className="text-ide-text-dim hover:text-ide-text-strong transition-colors ml-2"
                 title="Copy URL"
               >
                 <Copy className="w-3.5 h-3.5" />
@@ -1241,7 +1253,7 @@ export const ApiSandboxPage: React.FC = () => {
             <button
               onClick={handleExecute}
               disabled={isExecuting}
-              className="scroll-mt-16 flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-lg bg-gradient-to-r from-[#4f46e5] to-[#6366f1] hover:from-[#4338ca] hover:to-[#4f46e5] text-white font-mono text-xs font-bold transition-all shadow-lg shadow-indigo-900/30 active:scale-95 disabled:opacity-50"
+              className="scroll-mt-16 flex shrink-0 items-center gap-1.5 px-3 py-2 rounded-lg bg-gradient-to-r from-ide-info to-ide-info hover:from-ide-info hover:to-ide-info text-[var(--ide-color-secondary-fg)] font-mono text-xs font-bold transition-all shadow-lg shadow-indigo-900/30 active:scale-95 disabled:cursor-not-allowed"
             >
               {isExecuting ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -1253,14 +1265,14 @@ export const ApiSandboxPage: React.FC = () => {
           </div>
 
           {/* Sub Navigation Tabs (Body, Auth & Headers, Params, Mock Rules, Schema) */}
-          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-[#141c29] pt-1">
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-ide-border-strong pt-1">
             <div className="flex min-w-0 flex-wrap items-center gap-1">
               <button
                 onClick={() => setRequestTab("body")}
                 className={`px-3 py-1.5 rounded-t-lg text-xs font-mono font-medium transition-colors ${
                   requestTab === "body"
-                    ? "bg-[#101826] text-white border-t-2 border-[#4f46e5]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border-t-2 border-ide-info"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 Body (JSON)
@@ -1269,12 +1281,12 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setRequestTab("auth")}
                 className={`px-3 py-1.5 rounded-t-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 ${
                   requestTab === "auth"
-                    ? "bg-[#101826] text-white border-t-2 border-[#4f46e5]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border-t-2 border-ide-info"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 <span>Auth & Headers</span>
-                <span className="w-4 h-4 rounded-full bg-[#1e1b4b] text-[#818cf8] text-[9px] flex items-center justify-center font-bold">
+                <span                 className="w-4 h-4 rounded-full bg-ide-surface-raised text-ide-text-strong text-[9px] flex items-center justify-center font-bold">
                 {getJsonKeyCount(requestHeaders) + 1}
                 </span>
               </button>
@@ -1282,12 +1294,12 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setRequestTab("params")}
                 className={`px-3 py-1.5 rounded-t-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 ${
                   requestTab === "params"
-                    ? "bg-[#101826] text-white border-t-2 border-[#4f46e5]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border-t-2 border-ide-info"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 <span>Params</span>
-                <span className="w-4 h-4 rounded-full bg-[#064e3b] text-[#34d399] text-[9px] flex items-center justify-center font-bold">
+                <span                 className="w-4 h-4 rounded-full bg-ide-success text-ide-text-strong text-[9px] flex items-center justify-center font-bold">
                   {getJsonKeyCount(queryParams)}
                 </span>
               </button>
@@ -1295,8 +1307,8 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setRequestTab("rules")}
                 className={`px-3 py-1.5 rounded-t-lg text-xs font-mono font-medium transition-colors ${
                   requestTab === "rules"
-                    ? "bg-[#101826] text-white border-t-2 border-[#4f46e5]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border-t-2 border-ide-info"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 Mock Rules
@@ -1305,8 +1317,8 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setRequestTab("schema")}
                 className={`px-3 py-1.5 rounded-t-lg text-xs font-mono font-medium transition-colors ${
                   requestTab === "schema"
-                    ? "bg-[#101826] text-white border-t-2 border-[#4f46e5]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border-t-2 border-ide-info"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 Schema
@@ -1317,14 +1329,14 @@ export const ApiSandboxPage: React.FC = () => {
             <div className="ml-auto flex shrink-0 items-center gap-2 pb-1">
               <button
                 onClick={handleFormatJson}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#0f1724] hover:bg-[#162132] border border-[#1b273b] text-white text-[11px] font-mono transition-colors"
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-ide-surface hover:bg-ide-surface-raised border border-ide-border-strong text-ide-text-strong text-[11px] font-mono transition-colors"
               >
-                <Code2 className="w-3 h-3 text-[#38bdf8]" />
+                <Code2 className="w-3 h-3 text-ide-info" />
                 <span>Format</span>
               </button>
               <button
                 onClick={handleGenerateToken}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#064e3b]/70 hover:bg-[#065f46] border border-[#059669]/60 text-[#34d399] text-[11px] font-mono transition-colors"
+                className="flex items-center gap-1 px-2.5 py-1 rounded bg-ide-accent border border-ide-accent/60 hover:bg-ide-accent/90 text-ide-accent-fg text-[11px] font-mono transition-colors"
               >
                 <Sparkles className="w-3 h-3" />
                 <span>Generate Token</span>
@@ -1333,63 +1345,63 @@ export const ApiSandboxPage: React.FC = () => {
           </div>
 
           {/* JSON Textarea Body */}
-          <div className="relative min-h-[241px] rounded-lg bg-[#05080f] border border-[#151d2a] p-3 font-mono text-xs overflow-hidden">
+          <div className="relative min-h-[241px] rounded-lg bg-ide-bg border border-ide-border-strong p-3 font-mono text-xs overflow-hidden">
             {requestTab === "body" && (
               <textarea
                 aria-label="Request JSON body"
                 value={requestBody}
                 onChange={(e) => setRequestBody(e.target.value)}
-                className="h-full min-h-[221px] w-full bg-transparent text-[#93c5fd] font-mono text-xs focus:outline-none resize-y leading-relaxed"
+                className="h-full min-h-[221px] w-full bg-transparent text-ide-info font-mono text-xs focus:outline-none resize-y leading-relaxed"
                 spellCheck={false}
               />
             )}
             {requestTab === "auth" && (
               <div className="space-y-4">
-                <label className="block space-y-1.5 text-[#94a3b8]">
+                <label className="block space-y-1.5 text-ide-text-strong">
                   <span>Bearer token (synthetic only)</span>
                   <input
                     value={authToken}
                     onChange={(event) => setAuthToken(event.target.value)}
-                    className="w-full rounded border border-[#1b273b] bg-[#080c14] px-3 py-2 text-[#cbd5e1] outline-none focus:border-[#6366f1]"
+                    className="w-full rounded border border-ide-border-strong bg-ide-panel px-3 py-2 text-ide-text outline-none focus:border-ide-info"
                   />
                 </label>
-                <label className="block space-y-1.5 text-[#94a3b8]">
+                <label className="block space-y-1.5 text-ide-info">
                   <span>Request headers (JSON)</span>
                   <textarea
                     value={requestHeaders}
                     onChange={(event) => setRequestHeaders(event.target.value)}
-                    className="min-h-32 w-full rounded border border-[#1b273b] bg-[#080c14] px-3 py-2 text-[#93c5fd] outline-none focus:border-[#6366f1]"
+                    className="min-h-32 w-full rounded border border-ide-border-strong bg-ide-panel px-3 py-2 text-ide-info outline-none focus:border-ide-info"
                     spellCheck={false}
                   />
                 </label>
               </div>
             )}
             {requestTab === "params" && (
-              <label className="block space-y-1.5 text-[#94a3b8]">
+              <label className="block space-y-1.5 text-ide-info">
                 <span>Query parameters (JSON)</span>
                 <textarea
                   value={queryParams}
                   onChange={(event) => setQueryParams(event.target.value)}
-                  className="min-h-52 w-full rounded border border-[#1b273b] bg-[#080c14] px-3 py-2 text-[#93c5fd] outline-none focus:border-[#6366f1]"
+                  className="min-h-52 w-full rounded border border-ide-border-strong bg-ide-panel px-3 py-2 text-ide-info outline-none focus:border-ide-info"
                   spellCheck={false}
                 />
               </label>
             )}
             {requestTab === "rules" && (
-              <label className="block space-y-1.5 text-[#94a3b8]">
+              <label className="block space-y-1.5 text-ide-info">
                 <span>Mock response rules (JSON)</span>
                 <textarea
                   value={mockRules}
                   onChange={(event) => setMockRules(event.target.value)}
-                  className="min-h-52 w-full rounded border border-[#1b273b] bg-[#080c14] px-3 py-2 text-[#93c5fd] outline-none focus:border-[#6366f1]"
+                  className="min-h-52 w-full rounded border border-ide-border-strong bg-ide-panel px-3 py-2 text-ide-info outline-none focus:border-ide-info"
                   spellCheck={false}
                 />
               </label>
             )}
             {requestTab === "schema" && (
-              <div className="space-y-2 text-[#94a3b8]">
+              <div className="space-y-2 text-ide-info">
                 <div>Request body schema for {httpMethod} /{endpointUrl}</div>
-                <pre className="overflow-auto whitespace-pre-wrap text-[#93c5fd]">
+                <pre className="overflow-auto whitespace-pre-wrap text-ide-info">
                   {JSON.stringify(
                     {
                       type: "object",
@@ -1411,31 +1423,31 @@ export const ApiSandboxPage: React.FC = () => {
           </div>
 
           {/* Bottom Verification Footer in Left Column */}
-          <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-[#526075] pt-1">
+          <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-ide-text-placeholder pt-1">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#10b981]" />
-              <span className="text-[#94a3b8]">Strict RFC 8259 • OpenAPI 3.1 Validated</span>
+              <span className="w-2 h-2 rounded-full bg-ide-success" />
+              <span className="text-ide-info">Strict RFC 8259 • OpenAPI 3.1 Validated</span>
             </div>
             <div>
-              <span className="text-[#64748b]">Deterministic Seed:</span>{" "}
-              <span className="text-[#cbd5e1] font-semibold">alpha_49</span>{" "}
-              <span className="text-[#475569]">Bytes: {requestBytes.toLocaleString()} B</span>
+              <span className="text-ide-text-dim">Deterministic Seed:</span>{" "}
+              <span className="text-ide-text font-semibold">alpha_49</span>{" "}
+              <span className="text-ide-subtle">Bytes: {requestBytes.toLocaleString()} B</span>
             </div>
           </div>
         </div>
 
         {/* RIGHT COLUMN: SIMULATED RESPONSE */}
-        <div className="p-2 rounded-lg bg-[#0b0c14] border border-[#1d2030] flex flex-col justify-between space-y-1">
+        <div className="p-2 rounded-lg bg-ide-panel border border-ide-border-strong flex flex-col justify-between space-y-1">
 
           {/* Top Bar inside Response Workbench */}
-          <div className="flex items-center justify-between pb-2 border-b border-[#141c29]">
+          <div className="flex items-center justify-between pb-2 border-b border-ide-border-strong">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded bg-[#052e16] flex items-center justify-center text-[#22c55e]">
+              <div className="w-6 h-6 rounded bg-ide-success/10 flex items-center justify-center text-ide-success">
                 <Activity className="w-3.5 h-3.5" />
               </div>
               <div>
-                <h2 className="text-sm font-bold text-white tracking-tight">Simulated Response</h2>
-                <div className="text-[10px] font-mono text-[#526075]">Synthetic Output</div>
+                <h2 className="text-sm font-bold text-ide-text-strong tracking-tight">Simulated Response</h2>
+                <div className="text-[10px] font-mono text-ide-text-placeholder">Synthetic Output</div>
               </div>
             </div>
 
@@ -1443,13 +1455,19 @@ export const ApiSandboxPage: React.FC = () => {
             <div
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-mono font-bold ${
                 statusCode < 400
-                  ? "bg-[#052e16] border-[#15803d]/70 text-[#4ade80]"
-                  : "bg-[#451a03]/60 border-[#b45309] text-[#fbbf24]"
+                  ? "bg-ide-success/10 border-ide-success/70 text-[var(--ide-color-success-readable)]"
+                  : statusCode === 429
+                    ? "bg-ide-warning/10 border-ide-warning text-[var(--ide-color-warning-readable)]"
+                    : "bg-ide-danger/10 border-ide-danger text-[var(--ide-color-danger-readable)]"
               }`}
             >
               <span
                 className={`w-2 h-2 rounded-full ${
-                  statusCode < 400 ? "bg-[#22c55e]" : "bg-[#f59e0b]"
+                  statusCode < 400
+                    ? "bg-ide-success"
+                    : statusCode === 429
+                      ? "bg-ide-warning"
+                      : "bg-ide-danger"
                 }`}
               />
               <span>
@@ -1468,38 +1486,38 @@ export const ApiSandboxPage: React.FC = () => {
           </div>
 
           {/* Response Telemetry Metrics */}
-          <div className="grid grid-cols-4 gap-1 text-center font-mono py-1 px-2 rounded-lg bg-[#060a12] border border-[#131c2b]">
+          <div className="grid grid-cols-4 gap-1 text-center font-mono py-1 px-2 rounded-lg bg-ide-bg border border-ide-border-strong">
             <div>
-              <div className="text-[10px] text-[#4f5f73] uppercase tracking-wider">LATENCY</div>
-              <div className="text-xs font-bold text-[#34d399] mt-0.5">{latencyValue}</div>
+              <div className="text-[10px] text-ide-text-placeholder uppercase tracking-wider">LATENCY</div>
+              <div className="text-xs font-bold text-[var(--ide-color-success-readable)] mt-0.5">{latencyValue}</div>
             </div>
             <div>
-              <div className="text-[10px] text-[#4f5f73] uppercase tracking-wider">PAYLOAD</div>
-              <div className="text-xs font-bold text-white mt-0.5">{payloadSize}</div>
+              <div className="text-[10px] text-ide-text-placeholder uppercase tracking-wider">PAYLOAD</div>
+              <div className="text-xs font-bold text-ide-text-strong mt-0.5">{payloadSize}</div>
             </div>
             <div>
-              <div className="text-[10px] text-[#4f5f73] uppercase tracking-wider">VIRTUAL ID</div>
-              <div className="text-xs font-bold text-[#60a5fa] mt-0.5">
+              <div className="text-[10px] text-ide-text-placeholder uppercase tracking-wider">VIRTUAL ID</div>
+              <div className="text-xs font-bold text-[var(--ide-color-info-readable)] mt-0.5">
                 {lastTraceId.slice(-8)}
               </div>
             </div>
             <div>
-              <div className="text-[10px] text-[#4f5f73] uppercase tracking-wider">CACHE</div>
-              <div className="text-xs font-bold text-[#fbbf24] mt-0.5">
+              <div className="text-[10px] text-ide-text-placeholder uppercase tracking-wider">CACHE</div>
+              <div className="text-xs font-bold text-[var(--ide-color-warning-readable)] mt-0.5">
                 {lastRunAt === null ? "READY" : "MISS (SIM)"}
               </div>
             </div>
           </div>
 
           {/* Sub Navigation Tabs (Response Body, Headers (11), eBPF Trace, SDK Snippet, Copy) */}
-          <div className="flex items-center justify-between border-b border-[#141c29] pt-1">
+          <div className="flex items-center justify-between border-b border-ide-border-strong pt-1">
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setResponseTab("body")}
                 className={`px-2 py-1 rounded-t-lg text-[10px] font-mono font-medium transition-colors ${
                   responseTab === "body"
-                    ? "bg-[#101826] text-white border-t-2 border-[#10b981]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-ide-text-strong border-t-2 border-ide-accent"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 Response Body
@@ -1508,8 +1526,8 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setResponseTab("headers")}
                 className={`px-2 py-1 rounded-t-lg text-[10px] font-mono font-medium transition-colors ${
                   responseTab === "headers"
-                    ? "bg-[#101826] text-white border-t-2 border-[#10b981]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-ide-text-strong border-t-2 border-ide-accent"
+                    : "text-ide-text-dim hover:text-ide-text-strong"
                 }`}
               >
                 Headers ({Object.keys(responseHeaders).length})
@@ -1518,8 +1536,8 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setResponseTab("ebpf")}
                 className={`px-2 py-1 rounded-t-lg text-[10px] font-mono font-medium transition-colors ${
                   responseTab === "ebpf"
-                    ? "bg-[#101826] text-white border-t-2 border-[#10b981]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-ide-text-strong border-t-2 border-ide-accent"
+                    : "text-ide-text-dim hover:text-ide-info"
                 }`}
               >
                 eBPF Trace
@@ -1528,8 +1546,8 @@ export const ApiSandboxPage: React.FC = () => {
                 onClick={() => setResponseTab("sdk")}
                 className={`px-2 py-1 rounded-t-lg text-[10px] font-mono font-medium transition-colors ${
                   responseTab === "sdk"
-                    ? "bg-[#101826] text-white border-t-2 border-[#10b981]"
-                    : "text-[#64748b] hover:text-[#94a3b8]"
+                    ? "bg-ide-surface-raised text-ide-text-strong border-t-2 border-ide-accent"
+                    : "text-ide-text-dim hover:text-ide-info"
                 }`}
               >
                 SDK Snippet
@@ -1539,11 +1557,11 @@ export const ApiSandboxPage: React.FC = () => {
             {/* Copy Response Button */}
             <button
               onClick={handleCopyResponse}
-              className="text-[#64748b] hover:text-white transition-colors pb-1 pr-1"
+              className="text-ide-text-dim hover:text-ide-text-strong transition-colors pb-1 pr-1"
               title="Copy JSON response"
             >
               {copiedResponse ? (
-                <Check className="w-4 h-4 text-[#22c55e]" />
+                <Check className="w-4 h-4 text-ide-success" />
               ) : (
                 <Copy className="w-4 h-4" />
               )}
@@ -1551,31 +1569,31 @@ export const ApiSandboxPage: React.FC = () => {
           </div>
 
           {/* Response JSON Output */}
-          <div className="relative rounded-lg bg-[#05080f] border border-[#151d2a] p-3 font-mono text-xs overflow-hidden h-[300px] overflow-y-auto">
+          <div className="relative rounded-lg bg-ide-bg border border-ide-border-strong p-3 font-mono text-xs overflow-hidden h-[300px] overflow-y-auto">
             {responseTab === "body" && (
-              <pre className="text-[#38bdf8] leading-relaxed whitespace-pre-wrap font-mono text-xs">
+              <pre className="text-ide-info leading-relaxed whitespace-pre-wrap font-mono text-xs">
                 {responseBody}
               </pre>
             )}
             {responseTab === "headers" && (
-              <div className="space-y-1.5 text-xs font-mono text-[#94a3b8]">
+              <div className="space-y-1.5 text-xs font-mono text-ide-info">
                 {Object.entries(responseHeaders).map(([name, value]) => (
                   <div key={name}>
-                    <span className="text-[#38bdf8]">{name}:</span>{" "}
+                    <span className="text-ide-info">{name}:</span>{" "}
                     {value}
                   </div>
                 ))}
               </div>
             )}
             {responseTab === "ebpf" && (
-              <div className="space-y-1 text-xs font-mono text-[#4ade80]">
+              <div className="space-y-1 text-xs font-mono text-ide-success">
                 {traceLines.map((line) => (
                   <div key={line}>{line}</div>
                 ))}
               </div>
             )}
             {responseTab === "sdk" && (
-              <pre className="text-[#c084fc] font-mono text-xs">
+              <pre className="text-ide-secondary font-mono text-xs">
 {`const response = await fetch("local://sandbox/v1/${endpointUrl.replace(/^\/+/, "")}", {
   method: "${httpMethod}",
   headers: ${JSON.stringify({ "Content-Type": "application/json", Authorization: authToken ? "Bearer [SYNTHETIC_TOKEN]" : "" }, null, 2)},
@@ -1587,26 +1605,26 @@ const result = await response.json();`}
             )}
           </div>
 
-          <div className="text-[11px] font-mono text-[#526075] pt-1">
+          <div className="text-[11px] font-mono text-ide-text-placeholder pt-1">
             Zero customer state persisted outside volatile node RAM.
           </div>
         </div>
       </div>
 
       {/* 6. BOTTOM TABLE: LIVE EPHEMERAL LEDGER & SYNTHETIC STATE TABLE */}
-      <div className="rounded-lg border border-[#1d2030] bg-[#0b0c14] p-3 space-y-3">
+      <div className="rounded-lg border border-ide-border-strong bg-ide-panel p-3 space-y-3">
 
         {/* Table Top Header & Actions */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded bg-[#07251f] border border-[#0f4d3f] flex items-center justify-center text-[#34d399]">
-              <Database className="w-4 h-4 text-[#34d399]" />
+            <div className="w-7 h-7 rounded bg-ide-success border border-ide-success flex items-center justify-center text-ide-success">
+              <Database className="w-4 h-4 text-ide-success" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white tracking-tight">
+              <h2 className="text-sm font-bold text-ide-text-strong tracking-tight">
                 Live Ephemeral Ledger & Synthetic State Table
               </h2>
-              <div className="text-[10px] font-mono text-[#526075]">
+              <div className="text-[10px] font-mono text-ide-text-placeholder">
                 Editable synthetic records held in this browser session
               </div>
             </div>
@@ -1614,27 +1632,27 @@ const result = await response.json();`}
 
           {/* Counts and Flush Button */}
           <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0b121e] border border-[#162335]">
-              <span className="w-2 h-2 rounded-full bg-[#818cf8]" />
-              <span className="text-[#64748b]">mock_customers:</span>
-              <span className="text-white font-bold">{mockCustomersCount}</span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface border border-ide-border-strong">
+              <span className="w-2 h-2 rounded-full bg-ide-info" />
+              <span className="text-ide-text-dim">mock_customers:</span>
+              <span className="text-ide-text-strong font-bold">{mockCustomersCount}</span>
             </div>
 
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0b121e] border border-[#162335]">
-              <span className="w-2 h-2 rounded-full bg-[#34d399]" />
-              <span className="text-[#64748b]">simulated_tx:</span>
-              <span className="text-white font-bold">{simulatedTxCount.toLocaleString()}</span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface border border-ide-border-strong">
+              <span className="w-2 h-2 rounded-full bg-ide-success" />
+              <span className="text-ide-text-dim">simulated_tx:</span>
+              <span className="text-ide-text-strong font-bold">{simulatedTxCount.toLocaleString()}</span>
             </div>
 
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#0b121e] border border-[#162335]">
-              <span className="w-2 h-2 rounded-full bg-[#fbbf24]" />
-              <span className="text-[#64748b]">mock_sessions:</span>
-              <span className="text-white font-bold">{mockSessionsCount}</span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-ide-surface border border-ide-border-strong">
+              <span className="w-2 h-2 rounded-full bg-ide-warning" />
+              <span className="text-ide-text-dim">mock_sessions:</span>
+              <span className="text-ide-text-strong font-bold">{mockSessionsCount}</span>
             </div>
 
             <button
               onClick={handleFlushEphemeralDb}
-              className="px-3 py-1 rounded bg-[#3b1219]/80 border border-[#7f1d1d] hover:bg-[#501a23] text-[#f87171] text-xs font-mono font-medium transition-colors"
+              className="px-3 py-1 rounded bg-ide-surface-raised/80 border border-ide-modal-border hover:bg-ide-surface-hover text-ide-danger text-xs font-mono font-medium transition-colors"
             >
               0x Flush Ephemeral DB
             </button>
@@ -1644,8 +1662,8 @@ const result = await response.json();`}
         {/* Search Bar & Filter Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Search Input */}
-          <div className="flex-1 min-w-[260px] max-w-xl flex items-center bg-[#060a12] border border-[#162234] rounded-lg px-3 py-2 text-xs font-mono">
-            <Search className="w-3.5 h-3.5 text-[#475569] mr-2" />
+          <div className="flex-1 min-w-[260px] max-w-xl flex items-center bg-ide-bg border border-ide-border-strong rounded-lg px-3 py-2 text-xs font-mono">
+            <Search className="w-3.5 h-3.5 text-ide-subtle mr-2" />
             <input
               type="text"
               placeholder="Search synthetic identities, customer IDs, tokens, or hashes..."
@@ -1654,7 +1672,7 @@ const result = await response.json();`}
                 setSearchQuery(e.target.value);
                 setCurrentPage(1);
               }}
-              className="bg-transparent text-white focus:outline-none flex-1 font-mono text-xs placeholder-[#475569]"
+              className="bg-transparent text-ide-text-strong focus:outline-none flex-1 font-mono text-xs placeholder-ide-text-placeholder"
             />
           </div>
 
@@ -1667,8 +1685,8 @@ const result = await response.json();`}
               }}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 activeFilter === "all"
-                  ? "bg-[#1e1b4b] text-[#c7d2fe] border border-[#4338ca]"
-                  : "text-[#64748b] hover:text-white"
+                  ? "bg-ide-surface-raised text-ide-text-strong border border-ide-info"
+                  : "text-ide-text-dim hover:text-ide-text-strong"
               }`}
             >
               All Entities
@@ -1680,8 +1698,8 @@ const result = await response.json();`}
               }}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 activeFilter === "auth"
-                  ? "bg-[#1e1b4b] text-[#c7d2fe] border border-[#4338ca]"
-                  : "text-[#64748b] hover:text-white"
+                  ? "bg-ide-surface-raised text-ide-text-strong border border-ide-info"
+                  : "text-ide-text-dim hover:text-ide-text-strong"
               }`}
             >
               Simulated Auth
@@ -1693,8 +1711,8 @@ const result = await response.json();`}
               }}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 activeFilter === "rate"
-                  ? "bg-[#1e1b4b] text-[#c7d2fe] border border-[#4338ca]"
-                  : "text-[#64748b] hover:text-white"
+                  ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border border-ide-info"
+                  : "text-ide-text-dim hover:text-ide-text-strong"
               }`}
             >
               Rate Limited
@@ -1706,8 +1724,8 @@ const result = await response.json();`}
               }}
               className={`px-3 py-1.5 rounded-lg transition-colors ${
                 activeFilter === "webhook"
-                  ? "bg-[#1e1b4b] text-[#c7d2fe] border border-[#4338ca]"
-                  : "text-[#64748b] hover:text-white"
+                  ? "bg-ide-surface-raised text-[var(--ide-color-info-readable)] border border-ide-info"
+                  : "text-ide-text-dim hover:text-ide-text-strong"
               }`}
             >
               Webhook Dispatched
@@ -1716,11 +1734,11 @@ const result = await response.json();`}
         </div>
 
         {/* Table View */}
-        <div className="rounded-xl border border-[#141d2c] overflow-hidden bg-[#060910]">
+        <div className="rounded-xl border border-ide-border-strong overflow-hidden bg-ide-bg">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs font-mono">
               <thead>
-                <tr className="border-b border-[#141d2c] bg-[#0b1019] text-[#526075] uppercase text-[10px] tracking-wider">
+                <tr className="border-b border-ide-border-strong bg-ide-panel text-ide-text-placeholder uppercase text-[10px] tracking-wider">
                   <th className="py-2.5 px-4">ENTITY ID</th>
                   <th className="py-2.5 px-4">SYNTHETIC IDENTITY & FAKER EMAIL</th>
                   <th className="py-2.5 px-4">VIRTUAL LEDGER VOLUME</th>
@@ -1729,22 +1747,22 @@ const result = await response.json();`}
                   <th className="py-2.5 px-4 text-right">ACTIONS</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#101724]">
+              <tbody className="divide-y divide-ide-border-subtle">
                 {visibleRecords.length === 0 && (
                   <tr>
                     <td
                       colSpan={6}
-                      className="px-4 py-10 text-center text-xs text-[#64748b]"
+                      className="px-4 py-10 text-center text-xs text-ide-text-dim"
                     >
                       No synthetic records match this search or filter.
                     </td>
                   </tr>
                 )}
                 {visibleRecords.map((row) => (
-                  <tr key={row.id} className="hover:bg-[#0c121d] transition-colors group">
+                  <tr key={row.id} className="hover:bg-ide-surface transition-colors group">
                     {/* Entity ID */}
                     <td
-                      className="py-3 px-4 font-bold text-[#60a5fa] cursor-pointer hover:underline"
+                      className="py-3 px-4 font-bold text-ide-info cursor-pointer hover:underline"
                       onClick={() => setInspectedRecord(row)}
                     >
                       {row.id}
@@ -1753,28 +1771,28 @@ const result = await response.json();`}
                     {/* Identity + Email */}
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
-                        <div className="w-5 h-5 rounded-full bg-[#1e293b] text-[#94a3b8] flex items-center justify-center text-[9px] font-bold">
+                        <div className="w-5 h-5 rounded-full bg-ide-surface-hover text-ide-info flex items-center justify-center text-[9px] font-bold">
                           {row.avatar}
                         </div>
-                        <span className="text-[#cbd5e1] font-medium">{row.email}</span>
+                        <span className="text-ide-text font-medium">{row.email}</span>
                       </div>
                     </td>
 
                     {/* Virtual Ledger Volume */}
-                    <td className="py-3 px-4 font-bold text-[#fbbf24]">
+                    <td className="py-3 px-4 font-bold text-ide-warning">
                       {row.volume}
                     </td>
 
                     {/* Simulation State */}
                     <td className="py-3 px-4">
                       {row.status === "AUTH_VERIFIED_SIMULATED" ? (
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#052e16]/60 border border-[#166534] text-[10px] text-[#4ade80] font-semibold">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-ide-success/10 border border-ide-success text-[10px] text-ide-success font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-ide-success" />
                           <span>AUTH_VERIFIED_SIMULATED</span>
                         </div>
                       ) : (
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#451a03]/60 border border-[#b45309] text-[10px] text-[#fbbf24] font-semibold">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-ide-warning/10 border border-ide-warning text-[10px] text-ide-warning font-semibold">
+                          <span className="w-1.5 h-1.5 rounded-full bg-ide-warning" />
                           <span>RATE_LIMIT_TEST_ACTIVE</span>
                         </div>
                       )}
@@ -1783,19 +1801,19 @@ const result = await response.json();`}
                     {/* Security Level */}
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded bg-[#111827] border border-[#1f2937] text-[#9ca3af] text-[10px]">
+                        <span className="px-2 py-0.5 rounded bg-ide-surface-raised border border-ide-modal-border text-ide-text-soft text-[10px]">
                           {row.security}
                         </span>
                         {row.securityBadge && (
-                          <span className="px-2 py-0.5 rounded bg-[#1f1d2b] border border-[#3b3252] text-[#c084fc] text-[10px]">
+                          <span className="px-2 py-0.5 rounded bg-ide-surface-raised border border-ide-secondary text-ide-secondary text-[10px]">
                             {row.securityBadge}
                           </span>
                         )}
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] ${
                             row.webhookDispatched
-                              ? "bg-[#052e16]/60 text-[#4ade80]"
-                              : "bg-[#111827] text-[#64748b]"
+                              ? "bg-ide-success/10 text-ide-success"
+                              : "bg-ide-surface-raised text-ide-text-dim"
                           }`}
                         >
                           {row.webhookDispatched ? "WEBHOOK_SENT" : "NO_WEBHOOK"}
@@ -1808,13 +1826,13 @@ const result = await response.json();`}
                       <div className="flex items-center justify-end gap-3 font-medium">
                         <button
                           onClick={() => setInspectedRecord(row)}
-                          className="text-[#38bdf8] hover:underline"
+                          className="text-ide-info hover:underline"
                         >
                           Inspect
                         </button>
                         <button
                           onClick={() => toggleRecordState(row.id)}
-                          className="text-[#64748b] hover:text-[#cbd5e1] hover:underline"
+                          className="text-ide-text-dim hover:text-ide-text hover:underline"
                         >
                           Mutate
                         </button>
@@ -1828,10 +1846,10 @@ const result = await response.json();`}
         </div>
 
         {/* Pagination & Memory Pool Footer */}
-        <div className="flex flex-wrap items-center justify-between text-xs font-mono text-[#64748b] pt-1">
+        <div className="flex flex-wrap items-center justify-between text-xs font-mono text-ide-text-dim pt-1">
           <div>
             Showing{" "}
-            <span className="text-white font-semibold">
+            <span className="text-ide-text-strong font-semibold">
               {filteredRecords.length === 0
                 ? 0
                 : (currentPage - 1) * pageSize + 1}
@@ -1839,11 +1857,11 @@ const result = await response.json();`}
               {Math.min(currentPage * pageSize, filteredRecords.length)}
             </span>{" "}
             of{" "}
-            <span className="text-white font-semibold">
+            <span className="text-ide-text-strong font-semibold">
               {filteredRecords.length.toLocaleString()}
             </span>{" "}
             entries • Memory Pool:{" "}
-            <span className="text-[#34d399] font-bold">
+            <span className="text-ide-success font-bold">
               {memoryUsedMb.toFixed(1)} MB
             </span>{" "}
             / {memoryLimitMb} MB
@@ -1853,11 +1871,11 @@ const result = await response.json();`}
             <button
               onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
               disabled={currentPage <= 1}
-              className="px-2.5 py-1 rounded bg-[#0d1421] border border-[#1a273a] hover:bg-[#152135] text-[#94a3b8] transition-colors"
+              className="px-2.5 py-1 rounded bg-ide-surface border border-ide-border-strong hover:bg-ide-surface-raised text-ide-text-strong transition-colors"
             >
               &lt; Prev
             </button>
-            <span className="px-2.5 py-1 rounded bg-[#1e1b4b] border border-[#4338ca] text-[#c7d2fe] font-bold">
+            <span className="px-2.5 py-1 rounded bg-ide-surface-raised border border-ide-info text-ide-text-strong font-bold">
               {currentPage} / {pageCount}
             </span>
             <button
@@ -1865,7 +1883,7 @@ const result = await response.json();`}
                 setCurrentPage((page) => Math.min(pageCount, page + 1))
               }
               disabled={currentPage >= pageCount}
-              className="px-2.5 py-1 rounded bg-[#0d1421] border border-[#1a273a] hover:bg-[#152135] text-[#94a3b8] transition-colors"
+              className="px-2.5 py-1 rounded bg-ide-surface border border-ide-border-strong hover:bg-ide-surface-raised text-ide-text-strong transition-colors"
             >
               Next &gt;
             </button>
@@ -1874,81 +1892,81 @@ const result = await response.json();`}
       </div>
 
       {/* 7. BOTTOM PLATFORM FOOTER STATUS STRIP (Pixel-matched) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#141b27] pt-3 text-[11px] font-mono text-[#526075]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ide-border-strong pt-3 text-[11px] font-mono text-ide-text-placeholder">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-[#34d399]">
-            <span className="w-2 h-2 rounded-full bg-[#10b981]" />
-            <span className="font-bold text-white">Devpulse Local Simulator</span>
+          <div className="flex items-center gap-1.5 text-[var(--ide-color-success-readable)]">
+            <span className="w-2 h-2 rounded-full bg-ide-success" />
+            <span className="font-bold text-ide-text-strong">Devpulse Local Simulator</span>
           </div>
           <span>•</span>
           <span>In-memory session</span>
           <span>•</span>
-          <span className="text-[#64748b]">Trace:</span>
-          <span className="text-[#38bdf8]">{lastTraceId}</span>
+          <span className="text-ide-text-dim">Trace:</span>
+          <span className="text-[var(--ide-color-info-readable)]">{lastTraceId}</span>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1">
-            <span className="text-[#64748b]">Last simulated latency:</span>
-            <span className="text-[#34d399] font-bold">{latencyValue}</span>
+            <span className="text-ide-text-dim">Last simulated latency:</span>
+            <span className="text-[var(--ide-color-success-readable)] font-bold">{latencyValue}</span>
           </div>
-          <div className="flex items-center gap-1 text-[#94a3b8]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#10b981]" />
+          <div className="flex items-center gap-1 text-[var(--ide-color-info-readable)]">
+            <span className="w-1.5 h-1.5 rounded-full bg-ide-success" />
             <span>No external requests sent</span>
           </div>
         </div>
       </div>
 
       {inspectedRecord && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ide-overlay p-4">
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="sandbox-record-title"
-            className="w-full max-w-lg rounded-xl border border-[#263047] bg-[#0d101a] p-4 shadow-2xl"
+            className="w-full max-w-lg rounded-xl border border-ide-modal-border bg-ide-surface p-4 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2
                   id="sandbox-record-title"
-                  className="text-sm font-bold text-white"
+                  className="text-sm font-bold text-ide-text-strong"
                 >
                   Synthetic ledger record
                 </h2>
-                <p className="mt-1 font-mono text-xs text-[#60a5fa]">
+                <p className="mt-1 font-mono text-xs text-ide-info">
                   {inspectedRecord.id}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setInspectedRecord(null)}
-                className="rounded px-2 py-1 text-[#94a3b8] hover:bg-white/5 hover:text-white"
+                className="rounded px-2 py-1 text-ide-info hover:bg-ide-hover hover:text-ide-text-strong"
                 aria-label="Close record details"
               >
                 ×
               </button>
             </div>
             <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-              <dt className="text-[#64748b]">Name</dt>
-              <dd className="text-white">{inspectedRecord.name}</dd>
-              <dt className="text-[#64748b]">Email</dt>
-              <dd className="break-all text-white">{inspectedRecord.email}</dd>
-              <dt className="text-[#64748b]">Ledger volume</dt>
-              <dd className="text-amber-300">{inspectedRecord.volume}</dd>
-              <dt className="text-[#64748b]">Simulation state</dt>
-              <dd className="text-white">{inspectedRecord.status}</dd>
-              <dt className="text-[#64748b]">Webhook</dt>
-              <dd className="text-white">
+              <dt className="text-ide-text-dim">Name</dt>
+              <dd className="text-ide-text-strong">{inspectedRecord.name}</dd>
+              <dt className="text-ide-text-dim">Email</dt>
+              <dd className="break-all text-ide-text-strong">{inspectedRecord.email}</dd>
+              <dt className="text-ide-text-dim">Ledger volume</dt>
+              <dd className="text-ide-warning">{inspectedRecord.volume}</dd>
+              <dt className="text-ide-text-dim">Simulation state</dt>
+              <dd className="text-ide-text-strong">{inspectedRecord.status}</dd>
+              <dt className="text-ide-text-dim">Webhook</dt>
+              <dd className="text-ide-text-strong">
                 {inspectedRecord.webhookDispatched ? "Dispatched" : "Not dispatched"}
               </dd>
-              <dt className="text-[#64748b]">Security</dt>
-              <dd className="text-white">{inspectedRecord.security}</dd>
+              <dt className="text-ide-text-dim">Security</dt>
+              <dd className="text-ide-text-strong">{inspectedRecord.security}</dd>
             </dl>
             <div className="mt-5 flex justify-end">
               <button
                 type="button"
                 onClick={() => setInspectedRecord(null)}
-                className="rounded-lg border border-[#343444] px-3 py-2 text-xs text-white hover:bg-white/5"
+                className="rounded-lg border border-ide-modal-border px-3 py-2 text-xs text-ide-text-strong hover:bg-ide-hover"
               >
                 Done
               </button>
