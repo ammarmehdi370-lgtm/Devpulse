@@ -1,7 +1,5 @@
 node_modules
 .pnpm-store
-apps/api/keys/
-*.pem
 .turbo
 dist
 build
@@ -11,10 +9,17 @@ test-results
 .next
 expo-env.d.ts
 *.log
+# Local environment files only; keep shared templates and test fixtures tracked.
 .env
+.env.local
+.env.*.local
 .env.*
 !.env.example
 !.env.test
+# JWT signing keys must never be committed.
+apps/api/keys/
+*.pem
+*.key
 *.tsbuildinfo
 prisma/*.db
 prisma/*.db-journal

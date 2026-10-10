@@ -10,23 +10,41 @@ PUBLIC_KEY="$KEYS_DIR/public.pem"
 
 if [[ -f "$PRIVATE_KEY" && -f "$PUBLIC_KEY" ]]; then
 	echo "Keys already exist at $KEYS_DIR"
-	echo "Delete them first to regenerate:"
-	echo "  rm apps/api/keys/*.pem"
 	exit 0
 fi
 
+if [[ -f "$PUBLIC_KEY" && ! -f "$PRIVATE_KEY" ]]; then
+	echo "ERROR: Public key exists without its private key at $KEYS_DIR" >&2
+	echo "Restore the matching private key or move the public key aside before generating a new pair." >&2
+	exit 1
+fi
+
+if ! command -v openssl >/dev/null 2>&1; then
+	echo "ERROR: openssl was not found. Install OpenSSL and retry." >&2
+	exit 1
+fi
+
 echo "Generating RS256 key pair..."
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$PRIVATE_KEY" 2>/dev/null
-echo "Private key: $PRIVATE_KEY"
+temporary_private="$(mktemp "$KEYS_DIR/private.XXXXXX")"
+temporary_public="$(mktemp "$KEYS_DIR/public.XXXXXX")"
+trap 'rm -f "$temporary_private" "$temporary_public"' EXIT
 
-openssl pkey -in "$PRIVATE_KEY" -pubout -out "$PUBLIC_KEY" 2>/dev/null
-echo "Public key: $PUBLIC_KEY"
+if [[ -f "$PRIVATE_KEY" ]]; then
+	openssl pkey -in "$PRIVATE_KEY" -pubout -out "$temporary_public"
+else
+	openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$temporary_private"
+	openssl pkey -in "$temporary_private" -pubout -out "$temporary_public"
+	openssl pkey -in "$temporary_private" -check -noout
+	chmod 600 "$temporary_private"
+	mv "$temporary_private" "$PRIVATE_KEY"
+fi
 
-openssl pkey -in "$PRIVATE_KEY" -check -noout 2>/dev/null
-echo "Key pair verified"
-
+mv "$temporary_public" "$PUBLIC_KEY"
 chmod 600 "$PRIVATE_KEY"
 chmod 644 "$PUBLIC_KEY"
+
+openssl pkey -in "$PRIVATE_KEY" -check -noout
+echo "Key pair verified"
 echo "Permissions set (private: 600, public: 644)"
 
 cat <<'EOF'
