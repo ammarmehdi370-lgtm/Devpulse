@@ -52,16 +52,28 @@ wrong port. **Symptoms:** API startup reports `ECONNREFUSED` or Prisma
 ### Prisma client not found
 
 **Cause:** Prisma Client has not been generated for the current schema or
-dependency install. **Symptom:** `Cannot find module '.prisma/client'`.
+dependency install. **Symptom:** `Cannot find module '.prisma/client'` or
+`Cannot find module '@prisma/client'`. `@prisma/client` includes the runtime;
+`prisma generate` creates the schema-specific client code that the runtime
+imports, so installing packages alone does not generate it on a fresh clone.
 
-Run:
+Generate the client:
 
 ```bash
-pnpm --filter @devpulse/database db:generate
+pnpm generate
+ls packages/database/node_modules/.prisma/
 ```
 
-Then restart the API. If Prisma generation fails, check the schema with
-`pnpm --filter @devpulse/database exec prisma validate`.
+The directory should contain `client`. `pnpm migrate` also generates the
+client before applying migrations. If generation fails, check the schema with:
+
+```bash
+pnpm --filter @devpulse/database validate
+```
+
+If `pnpm dev` reports that PostgreSQL, Redis, MinIO, or the Prisma client is
+not ready, run `make dev` (or the PowerShell startup script on Windows) to
+complete the ordered startup before launching app services.
 
 ### Migration failed
 
@@ -79,7 +91,7 @@ history conflicts with the database. **Symptom:** `pnpm migrate` or
 2. For pending migrations, apply them safely:
 
    ```bash
-   pnpm --filter @devpulse/database exec prisma migrate deploy
+   pnpm migrate
    ```
 
 3. For a local development database with conflicting data, reset only if its

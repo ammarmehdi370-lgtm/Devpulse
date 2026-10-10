@@ -1,8 +1,12 @@
-.PHONY: infra dev verify verify-win stop clean clean-cache clean-all reset logs build test lint typecheck migrate db-status db-migrate db-reset seed studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
+.PHONY: setup infra dev dev-seed verify verify-win stop clean clean-cache clean-all reset logs build test lint typecheck migrate db-status db-migrate db-reset seed seed-reset generate studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
+setup:
+	pnpm setup
 infra:
 	bash scripts/start-services.sh
 dev:
 	bash scripts/dev-start.sh
+dev-seed:
+	bash scripts/dev-start.sh --seed
 verify:
 	bash scripts/verify-services.sh
 verify-win:
@@ -37,12 +41,15 @@ migrate:
 db-status:
 	pnpm --filter @devpulse/database exec prisma migrate status
 db-migrate:
-	pnpm --filter @devpulse/database exec prisma migrate deploy
+	pnpm --filter @devpulse/database migrate
 db-reset:
-	pnpm --filter @devpulse/database exec prisma migrate reset --force
-	pnpm seed
+	pnpm --filter @devpulse/database seed:reset
 seed:
 	pnpm seed
+seed-reset:
+	pnpm seed:reset
+generate:
+	pnpm generate
 studio:
 	pnpm studio
 e2e-setup:

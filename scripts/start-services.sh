@@ -92,7 +92,7 @@ else
 fi
 
 echo "Running database migrations..."
-pnpm --filter @devpulse/database exec prisma migrate deploy
+pnpm migrate
 
 echo "Seeding database..."
 pnpm seed

@@ -5,6 +5,7 @@
 - Node.js 20.10+
 - pnpm 9.15+
 - Docker Desktop
+- OpenSSL available on `PATH` for generating the session secret and JWT keys
 
 Enable pnpm through Corepack if needed:
 
@@ -28,16 +29,90 @@ From the repository root:
 
 ```bash
 pnpm install
-copy .env.example .env
+pnpm setup
 ```
 
-On macOS/Linux, use:
+The setup script creates `.env` from `.env.example` only when `.env` does not
+already exist. It generates a 32-byte `SESSION_SECRET` when the template
+placeholder is present and creates the RS256 JWT key pair when absent. It
+does not overwrite an existing `.env` or replace an existing private key; if
+only an orphaned public key exists, it stops and asks you to restore the
+matching private key or move that public key aside.
+
+The `pnpm setup` command selects the Bash setup script on macOS/Linux and the
+PowerShell setup script on Windows. You can also run the platform-specific
+script directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
+```
+
+Docker publishes PostgreSQL on host port `5433` (`5433:5432`); host processes
+and Prisma use `localhost:5433`. Services running inside Docker Compose must
+use `postgres:5432`. Update `.env` with real credentials before using
+Anthropic, Stripe, OAuth, email, or AWS features.
+
+### Verify environment setup
+
+Start the database and check that Docker reports it as healthy:
 
 ```bash
-cp .env.example .env
+docker compose up -d postgres
+docker compose ps postgres
 ```
 
-Update `.env` with real credentials before using Anthropic, Stripe, OAuth, email, or AWS features.
+Confirm the host port answers PostgreSQL's readiness probe:
+
+```bash
+docker compose exec -T postgres pg_isready -U devpulse -d devpulse
+```
+
+The expected output includes `accepting connections`. Confirm the host port is
+`5433` (typically shown as `0.0.0.0:5433`):
+
+```bash
+docker compose port postgres 5432
+```
+
+Confirm a host process can open TCP port `5433`:
+
+```bash
+node -e "require('node:net').connect(5433, '127.0.0.1').on('connect', function () { console.log('PostgreSQL host port 5433 is reachable'); this.end(); }).on('error', function (error) { console.error(error.message); process.exitCode = 1; })"
+```
+
+Confirm the API's environment loader sees the configured host-side database
+URL and session secret without printing secret values:
+
+```bash
+pnpm --filter @devpulse/api exec tsx -e "import './src/lib/load-env.ts'; console.log({ databaseHost: new URL(process.env.DATABASE_URL!).host, sessionSecretConfigured: Boolean(process.env.SESSION_SECRET) })"
+```
+
+The expected database host is `localhost:5433` and
+`sessionSecretConfigured` should be `true`. Inside Compose, the API's
+`DATABASE_URL` is overridden to use `postgres:5432`; do not change that to
+`localhost:5433`.
+
+Verify the generated private key and that the public key corresponds to it:
+
+```bash
+openssl pkey -in apps/api/keys/private.pem -check -noout
+```
+
+The command should report `Key is valid`. To verify the public key belongs to
+the private key, compare their normalized public-key fingerprints:
+
+```bash
+openssl pkey -in apps/api/keys/private.pem -pubout -outform DER | openssl dgst -sha256
+openssl pkey -pubin -in apps/api/keys/public.pem -pubout -outform DER | openssl dgst -sha256
+```
+
+The two SHA-256 fingerprints must match. This check works in Bash and
+PowerShell.
+
+If a host connection uses port `5432` while Compose publishes `5433`, it will
+typically fail with `ECONNREFUSED` / `connection refused` (or reach a separate
+local PostgreSQL instance if one is listening there). Use host port `5433`;
+the `5432` port is only for connections from other Compose containers.
 
 ## OAuth sign-in setup
 
@@ -201,13 +276,30 @@ docker compose logs -f postgres redis minio
 Generate the Prisma client:
 
 ```bash
-pnpm --filter @devpulse/database db:generate
+pnpm generate
 ```
 
-Create and apply a development migration:
+Deploy pending migrations. The database package generates the Prisma client
+before applying migrations, so `pnpm migrate` also works on a fresh clone:
 
 ```bash
 pnpm migrate
+```
+
+Confirm the Prisma client was generated at the package-local location:
+
+```bash
+ls packages/database/node_modules/.prisma/
+```
+
+On Windows PowerShell, use `Get-ChildItem packages/database/node_modules/.prisma/`.
+The directory should contain `client`; `pnpm migrate` regenerates it before
+every deploy migration if it is missing or stale.
+
+Create a new development migration with:
+
+```bash
+pnpm --filter @devpulse/database migrate:dev -- --name <migration-name>
 ```
 
 Seed demo data:
@@ -242,16 +334,26 @@ docker compose down -v
 
 ## Run all applications locally
 
-Start infrastructure, run its health checks, and start the web, API,
-Socket.IO, and AI services:
+Start infrastructure, wait for PostgreSQL, Redis, and MinIO, generate the
+Prisma client, apply migrations, create the MinIO bucket, and start the web,
+API, Socket.IO, and AI services:
 
 ```bash
 make dev
 ```
 
-To start just those application services without infrastructure setup, use
-`pnpm dev`. Mobile/Expo is intentionally separate; use `pnpm dev:mobile` as
-described below. `pnpm dev:all` starts every workspace including mobile.
+On Windows PowerShell, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/dev-start.ps1
+```
+
+For demo data, use `make dev-seed` or add `--seed` to either startup script.
+Running `pnpm dev` directly is supported only after Docker is running, `.env`
+exists, the database/Redis/MinIO services are healthy, and the Prisma client
+has been generated. Otherwise it exits with a specific setup instruction.
+Mobile/Expo is intentionally separate; use `pnpm dev:mobile`. `pnpm dev:all`
+includes mobile and performs the same prerequisite checks.
 
 To run the full service health check independently after starting services:
 

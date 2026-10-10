@@ -15,12 +15,17 @@ Devpulse is a Turborepo monorepo for the web, API, real-time, AI, and mobile cli
 ```bash
 corepack enable
 pnpm install
-copy .env.example .env
-docker compose up -d postgres redis minio
-pnpm migrate
-pnpm seed
-pnpm dev
+pnpm setup
+make dev
 ```
+
+`make dev` starts and checks PostgreSQL, Redis, and MinIO, generates the Prisma
+client, applies migrations, creates the MinIO bucket, and then starts the app
+services. On Windows PowerShell, run
+`powershell -ExecutionPolicy Bypass -File scripts/dev-start.ps1` instead.
+Direct `pnpm dev` requires Docker, `.env`, healthy infrastructure, and an
+already generated Prisma client; it prints a setup error if any prerequisite
+is missing.
 
 Local services:
 

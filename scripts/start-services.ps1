@@ -89,7 +89,7 @@ if (-not $minioReady) {
 Write-Host "MinIO is ready" -ForegroundColor Green
 
 Write-Host "Running database migrations..."
-pnpm --filter @devpulse/database exec prisma migrate deploy
+pnpm migrate
 if ($LASTEXITCODE -ne 0) { throw "Database migration failed" }
 
 Write-Host "Seeding database..."
