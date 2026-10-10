@@ -1658,7 +1658,7 @@ async function verifyDatabase(): Promise<void> {
   }
 }
 
-async function ensureMinIOBucket(): Promise<void> {
+async function ensureMinioBucket(): Promise<void> {
   try {
     const exists = await minio.bucketExists(objectBucket);
 
@@ -1684,7 +1684,7 @@ if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") 
   async function startServer(): Promise<void> {
     await verifyDatabase();
     await initKeys();
-    void ensureMinIOBucket();
+    void ensureMinioBucket();
     await new Promise<void>((resolve, reject) => {
       const server = app.listen(port, () => {
         console.log(`Devpulse API listening on :${port}`);

@@ -299,8 +299,32 @@ every deploy migration if it is missing or stale.
 Create a new development migration with:
 
 ```bash
-pnpm --filter @devpulse/database migrate:dev -- --name <migration-name>
+pnpm --filter @devpulse/database exec prisma migrate dev --name <migration-name>
 ```
+
+For the seed upsert indexes in a database that predates the checked-in
+migration, apply the migration with:
+
+```bash
+pnpm --filter @devpulse/database exec prisma migrate deploy
+```
+
+Seed demo data repeatedly without creating duplicates:
+
+```bash
+pnpm seed
+pnpm seed
+pnpm seed
+```
+
+Each invocation should finish with `Seed complete.` Reset only the known
+Devpulse demo fixtures, then reseed them, with:
+
+```bash
+pnpm seed:reset
+```
+
+This reset preserves other users, workspaces, and OAuth accounts.
 
 Seed demo data:
 
@@ -396,9 +420,10 @@ The local services use these URLs:
 ## MinIO Object Storage
 
 MinIO provides S3-compatible object storage for uploaded project artifacts.
-The bucket is created automatically by Docker Compose when the API starts, and
-by `scripts/start-services.sh` during infrastructure setup. The default bucket
-is `devpulse-files`; set `MINIO_BUCKET` to use another name.
+The `minio-init` service creates the bucket after MinIO is healthy. The API
+also checks for the configured bucket during startup and attempts to create it
+if missing; a MinIO failure is logged as a warning and does not stop the API.
+The default bucket is `devpulse-files`; set `MINIO_BUCKET` to use another name.
 
 ### Access the MinIO Console
 
@@ -420,6 +445,13 @@ mc ls devpulse-local/devpulse-files
 Replace the credentials and bucket name when using custom environment values.
 You can also verify it in the console by opening **Buckets** and confirming
 `devpulse-files` is listed.
+
+Alternatively, rerun the idempotent Compose initializer and check its exit
+status:
+
+```bash
+docker compose run --rm minio-init
+```
 
 ### Create the bucket manually
 

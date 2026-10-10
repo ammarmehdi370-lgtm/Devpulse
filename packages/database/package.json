@@ -12,7 +12,7 @@
     "migrate:dev": "pnpm generate && prisma migrate dev",
     "setup": "pnpm generate && prisma migrate deploy",
     "seed": "pnpm generate && tsx prisma/seed.ts",
-    "seed:reset": "pnpm generate && prisma migrate reset --force",
+    "seed:reset": "pnpm generate && tsx prisma/seed.ts --reset",
     "studio": "prisma studio",
     "validate": "prisma validate",
     "db:migrate": "pnpm generate && prisma migrate dev",

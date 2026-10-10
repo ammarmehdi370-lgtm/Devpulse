@@ -116,6 +116,28 @@ the first reported model/constraint if it still fails:
 pnpm seed
 ```
 
+`pnpm seed` is safe to run repeatedly. To clear and recreate only the known
+Devpulse demo fixtures (preserving unrelated users, workspaces, and OAuth
+accounts), run:
+
+```bash
+pnpm seed:reset
+```
+
+### MinIO bucket is missing
+
+The `minio-init` Compose service creates the configured bucket after MinIO is
+healthy. Check the initializer and its logs:
+
+```bash
+docker compose run --rm minio-init
+docker compose logs minio
+```
+
+The API also attempts to create the bucket at startup. If that attempt fails,
+the API logs a warning and continues; file upload requests may not work until
+the bucket is available.
+
 If a disposable local database needs a clean seed state, use `make db-reset`.
 This removes the database contents before applying migrations and reseeding;
 do not use it when data must be retained.
