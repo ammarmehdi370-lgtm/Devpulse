@@ -25,7 +25,8 @@ clean-all:
 	@echo "Full dependency clean complete"
 reset:
 	docker compose down -v
-	$(MAKE) infra
+	bash scripts/dev-start.sh --seed
+	@echo "Full reset complete; demo data was seeded."
 logs:
 	docker compose logs -f $(SERVICE)
 build:

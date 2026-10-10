@@ -417,6 +417,107 @@ The local services use these URLs:
 | MinIO API     | http://localhost:9000        |
 | MinIO console | http://localhost:9001        |
 
+## Service Health Endpoints
+
+Use these endpoints and commands to check each running service. The API health
+response checks PostgreSQL, Redis, and the configured MinIO bucket; it returns
+`{"status":"ok"}` only when all three checks pass. The AI endpoint returns
+`configured: false` (HTTP 503) when `ANTHROPIC_API_KEY` is unset, which is
+expected when developing without AI access.
+
+| Service | Check | Healthy result |
+| ------- | ----- | -------------- |
+| Web | `http://localhost:3000` | App responds with HTTP 2xx |
+| API | `http://localhost:4000/health` | JSON `status` is `ok` |
+| Socket.IO | `http://localhost:4001/health` | JSON `status` is `ok` |
+| AI | `http://localhost:4002/health` | JSON `status` is `ok`, `configured` is `true` |
+| PostgreSQL | `localhost:5433` | `pg_isready` reports accepting connections |
+| Redis | `localhost:6379` | `redis-cli ping` returns `PONG` |
+| MinIO | `http://localhost:9000/minio/health/live` | HTTP 200 |
+| MinIO Console | `http://localhost:9001` | Console login page responds |
+
+Quick checks from Bash (Mac/Linux/Git Bash):
+
+```bash
+curl -i http://localhost:3000/
+curl -sS http://localhost:4000/health
+curl -sS http://localhost:4001/health
+curl -i http://localhost:4002/health
+pg_isready -h localhost -p 5433 -U devpulse -d devpulse
+redis-cli -h localhost -p 6379 ping
+curl -i http://localhost:9000/minio/health/live
+curl -i http://localhost:9001/
+```
+
+On Windows PowerShell, use `Invoke-WebRequest` for HTTP endpoints and the
+Docker CLI for PostgreSQL and Redis:
+
+```powershell
+Invoke-WebRequest http://localhost:3000/ -UseBasicParsing
+Invoke-RestMethod http://localhost:4000/health
+Invoke-RestMethod http://localhost:4001/health
+Invoke-WebRequest http://localhost:4002/health -UseBasicParsing
+docker compose exec -T postgres pg_isready -U devpulse -d devpulse
+docker compose exec -T redis redis-cli ping
+Invoke-WebRequest http://localhost:9000/minio/health/live -UseBasicParsing
+Invoke-WebRequest http://localhost:9001/ -UseBasicParsing
+```
+
+Run the complete local verification after starting the stack:
+
+```bash
+make verify
+```
+
+On Windows, run `make verify-win` when Make is installed, or invoke the script
+directly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-services.ps1
+```
+
+Both scripts return exit code 1 for failed required checks and 0 when checks
+pass or only optional checks warn. To check just Docker-backed infrastructure,
+skip application endpoint checks with `bash scripts/verify-services.sh
+--infrastructure-only` or append `--infrastructure-only` to the PowerShell
+command. Environment, JWT key, and Prisma Client checks still run.
+
+### Fixing verification failures
+
+| Failure | Fix |
+| ------- | --- |
+| `.env` missing | Run `bash scripts/setup-env.sh` or `powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1`. |
+| Docker stopped | Start Docker Desktop, or start the Docker service on Linux; rerun `make infra`. |
+| PostgreSQL unreachable | Run `docker compose up -d postgres`; check `docker compose logs postgres`. Host connections use port `5433` (container port `5432`). |
+| Redis unreachable | Run `docker compose up -d redis`; check `docker compose logs redis`. |
+| MinIO unreachable | Run `docker compose up -d minio`; check `docker compose logs minio`. |
+| MinIO bucket missing | Run `docker compose run --rm minio-init`, then rerun verification. |
+| API unhealthy | Check `docker compose logs api` or start it with `pnpm dev:api`; ensure migrations are applied with `pnpm migrate`. |
+| Socket or web unavailable | Start the service with `pnpm dev:socket` or `pnpm dev:web`, respectively; inspect its terminal output. |
+| AI unavailable | Start it with `pnpm dev:ai`. If it warns that AI is unconfigured, set `ANTHROPIC_API_KEY` in `.env` only when AI features are needed. |
+| Required configuration missing | Set the reported value in `.env`; OAuth and email credentials are optional for local development. |
+| JWT key missing | Run `bash apps/api/scripts/generate-keys.sh` or `powershell -ExecutionPolicy Bypass -File apps/api/scripts/generate-keys.ps1`. |
+| Prisma Client missing | Run `pnpm generate`. |
+
+### GitHub Actions
+
+Run the verifier after the workflow has installed dependencies, created `.env`,
+generated JWT keys and Prisma Client, applied migrations, and started the
+services. For example, add this step to a job that has already prepared the
+stack:
+
+```yaml
+- name: Verify Devpulse services
+  run: bash scripts/verify-services.sh
+```
+
+For an infrastructure-only CI check, use:
+
+```yaml
+- name: Verify Devpulse infrastructure
+  run: bash scripts/verify-services.sh --infrastructure-only
+```
+
 ## MinIO Object Storage
 
 MinIO provides S3-compatible object storage for uploaded project artifacts.
@@ -582,10 +683,10 @@ pnpm --filter @devpulse/ai start
 
 ## Mobile Development (Expo)
 
-Mobile is excluded from the default `pnpm dev` command and starts separately.
-Start the web, API, Socket.IO, and AI services with `pnpm dev`, then start Expo
-in another terminal with `pnpm dev:mobile`. `pnpm dev:all` starts every
-workspace, including mobile.
+Mobile is intentionally excluded from the default `pnpm dev` command. The
+default command starts web, API, Socket.IO, and AI after checking prerequisites.
+Start Expo separately with `pnpm dev:mobile`, or use `pnpm dev:all` to start
+every workspace, including mobile.
 
 ### Prerequisites
 
@@ -597,8 +698,8 @@ workspace, including mobile.
   app on a physical Android device.
 - For web: a modern browser.
 
-Install Expo Go from the App Store (iOS) or Google Play (Android) for the
-quickest physical-device setup.
+For a physical device, install Expo Go from the App Store (iOS) or Google Play
+(Android). Keep Expo Go updated; this project uses Expo SDK 52.
 
 ### Quick start with Expo Go
 
@@ -613,7 +714,7 @@ quickest physical-device setup.
    ```
 
    On Windows PowerShell, run `ipconfig` and use the IPv4 address of your
-   active Wi-Fi or Ethernet adapter.
+   active Wi-Fi or Ethernet adapter (not a VPN, virtual, or loopback address).
 3. Create `apps/mobile/.env` and replace `<IP>` with the computer's LAN IP:
 
    ```dotenv
@@ -628,9 +729,11 @@ quickest physical-device setup.
    pnpm dev:mobile
    ```
 
-5. On the phone, open `http://<IP>:4000/health` in a browser and confirm the
-   API responds. If it does not load, check the phone and computer are on the
-   same network and allow ports 4000-4002 through the computer's firewall.
+5. Test connectivity from the phone itself: open `http://<IP>:4000/health` in
+   its browser and confirm the API responds with JSON containing
+   `"status":"ok"`. This confirms the phone can reach the local API over Wi-Fi.
+   `apps/mobile` currently displays the Expo shell and does not make API
+   requests itself.
 6. Scan the QR code in the terminal with the iOS Camera app or the Expo Go
    app on Android. Keep the phone and development computer on the same network.
 
@@ -638,6 +741,12 @@ Do not use `localhost` or `127.0.0.1` for a physical phone: those addresses
 refer to the phone itself. The app displays a warning on native platforms when
 its API URL is set to localhost. Android Emulator can reach the development
 computer at `10.0.2.2`; iOS Simulator can usually use `localhost`.
+If you change `apps/mobile/.env`, stop and restart Expo so the `EXPO_PUBLIC_*`
+values are included in the new bundle.
+
+For a quick way to retrieve the LAN address, run
+`bash scripts/get-local-ip.sh` on macOS/Linux/Git Bash. On Windows, run
+`ipconfig` and select the active adapter's IPv4 address.
 
 ### Android emulator
 

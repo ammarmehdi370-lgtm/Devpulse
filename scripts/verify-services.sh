@@ -65,6 +65,15 @@ check_config() {
   fi
 }
 
+published_port_matches() {
+  local service="$1"
+  local container_port="$2"
+  local expected_port="$3"
+  local mapping
+  mapping="$(docker compose port "$service" "$container_port" 2>/dev/null)" || return 1
+  [[ "$(printf '%s\n' "$mapping" | awk -F: 'NF {print $NF}' | tail -n 1)" == "$expected_port" ]]
+}
+
 echo
 printf '%s\n' "╔════════════════════════════════════╗"
 printf '%s\n' "║   Devpulse Service Health Check    ║"
@@ -85,19 +94,21 @@ fi
 
 pg_port="$(setting POSTGRES_PORT)"
 pg_port="${pg_port:-5433}"
-if docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then
+if docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1 &&
+  published_port_matches postgres 5432 "$pg_port"; then
   pass "PostgreSQL (host port $pg_port)"
-elif command -v pg_isready >/dev/null 2>&1 && pg_isready -h localhost -p "$pg_port" >/dev/null 2>&1; then
+elif command -v pg_isready >/dev/null 2>&1 &&
+  pg_isready -h localhost -p "$pg_port" >/dev/null 2>&1; then
   pass "PostgreSQL (host port $pg_port, external)"
 else
-  fail "PostgreSQL is not reachable on port $pg_port — run: docker compose up -d postgres"
+  fail "PostgreSQL is not ready or not reachable on host port $pg_port — run: docker compose up -d postgres"
 fi
 
 redis_reply="$(docker compose exec -T redis redis-cli ping 2>/dev/null | tr -d '\r' || true)"
-if [[ "$redis_reply" == "PONG" ]]; then
+if [[ "$redis_reply" == "PONG" ]] && published_port_matches redis 6379 6379; then
   pass "Redis (port 6379)"
 else
-  fail "Redis is not reachable — run: docker compose up -d redis"
+  fail "Redis is not ready or not reachable on host port 6379 — run: docker compose up -d redis"
 fi
 
 if command -v curl >/dev/null 2>&1 &&
@@ -177,6 +188,7 @@ if [[ -f .env ]]; then
   check_config RESEND_API_KEY optional
   check_config ANTHROPIC_API_KEY optional
   check_config GITHUB_CLIENT_ID optional
+  check_config GOOGLE_CLIENT_ID optional
 else
   fail "Configuration cannot be read without .env"
 fi
@@ -201,6 +213,14 @@ if [[ -f "$public_key" ]]; then
   pass "Public key exists: $public_key"
 else
   fail "Public key is missing: $public_key — run: bash apps/api/scripts/generate-keys.sh"
+fi
+
+section "Prisma Client"
+prisma_client="packages/database/node_modules/.prisma/client/index.js"
+if [[ -f "$prisma_client" ]]; then
+  pass "Prisma client is generated"
+else
+  fail "Prisma client is missing — run: pnpm generate"
 fi
 
 section "Summary"

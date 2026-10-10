@@ -15,6 +15,8 @@ On Windows PowerShell, use `make verify-win` or run
 - Reset infrastructure and delete its local data: `make reset` (**destructive**; removes PostgreSQL, Redis, and MinIO volumes)
 - Clear Turbo's local task cache: `make clean-cache`
 - Reinstall workspace dependencies: `make clean-all`
+- Reset Docker volumes, migrate, reseed demo data, and restart the app stack:
+  `make reset` (**destructive**; deletes local PostgreSQL, Redis, and MinIO data)
 - Force Turbo to rebuild without using cached results: `pnpm exec turbo run build --force`
 
 To confirm the local Turbo cache is gone after `make clean-cache`:
@@ -219,6 +221,47 @@ To bypass the cache for a single Turbo run:
 pnpm exec turbo run build --force
 ```
 
+Confirm the local Turbo cache directory is removed:
+
+```bash
+test ! -d .turbo && echo "Turbo cache cleared"
+```
+
+In PowerShell:
+
+```powershell
+if (-not (Test-Path .turbo)) { "Turbo cache cleared" }
+```
+
+Development tasks have Turbo caching disabled. Clearing the cache is useful
+for stale build outputs from cached build tasks; it does not replace restarting
+a long-running development process after changing configuration.
+
+### Expo Go cannot reach the local API
+
+**Cause:** A physical phone cannot use the computer's `localhost`, the devices
+are on different networks, or the computer firewall blocks the service ports.
+**Symptoms:** The phone browser cannot open the API health URL, or the Expo app
+shows a localhost warning / `Network request failed`.
+
+1. Start the app services on the computer and confirm `http://localhost:4000/health`
+   returns `{"status":"ok"}`.
+2. Get the computer's active LAN IPv4 address with
+   `bash scripts/get-local-ip.sh` (macOS/Linux/Git Bash) or `ipconfig`
+   (PowerShell).
+3. Set `EXPO_PUBLIC_API_URL=http://<LAN-IP>:4000`,
+   `EXPO_PUBLIC_SOCKET_URL=http://<LAN-IP>:4001`, and
+   `EXPO_PUBLIC_AI_URL=http://<LAN-IP>:4002` in `apps/mobile/.env`. Do not use
+   `localhost` for a physical device.
+4. On the phone, open `http://<LAN-IP>:4000/health` in its browser. It should
+   return JSON with `"status":"ok"`. Ensure both devices are on the same
+   non-guest Wi-Fi and allow ports 4000-4002 through the computer firewall.
+5. Restart Expo after editing `.env`, then rescan its QR code in Expo Go.
+
+Android Emulator uses `10.0.2.2` to reach the host; iOS Simulator can generally
+use `localhost`. For platform-specific commands and Expo Go prerequisites, see
+[Mobile Development (Expo)](DEVELOPMENT.md#mobile-development-expo).
+
 ### MinIO bucket does not exist
 
 **Cause:** Bucket initialization did not complete. **Symptom:** Upload requests
@@ -301,13 +344,15 @@ services run directly by pnpm, inspect the terminal where `pnpm dev` is running.
 ## Full Stack Reset
 
 Use this only when other recovery steps fail and all local database, Redis, and
-MinIO data can be discarded:
+MinIO data can be discarded. This removes Docker volumes, runs migrations,
+seeds demo data, and starts the app stack:
 
 ```bash
-docker compose down -v
-make clean-all
-make dev
+make reset
 ```
 
 `docker compose down -v` permanently deletes the local PostgreSQL, Redis, and
-MinIO named volumes. It is not a routine cache or dependency repair command.
+MinIO named volumes. The reset target then invokes
+`scripts/dev-start.sh --seed`. It is not a routine cache or dependency repair
+command. If only dependencies need reinstalling, use `make clean-all`; if only
+Turbo output is stale, use `make clean-cache`.

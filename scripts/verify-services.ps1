@@ -113,17 +113,21 @@ if ($LASTEXITCODE -eq 0) {
 $pgPort = Get-Setting "POSTGRES_PORT"
 if ([string]::IsNullOrWhiteSpace($pgPort)) { $pgPort = "5433" }
 docker compose exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' *> $null
-if ($LASTEXITCODE -eq 0) {
+$pgReady = $LASTEXITCODE -eq 0
+$pgMapping = docker compose port postgres 5432 2>$null
+if ($pgReady -and $LASTEXITCODE -eq 0 -and (($pgMapping | Select-Object -Last 1) -match ":$([regex]::Escape($pgPort))$")) {
     Check-Pass "PostgreSQL (host port $pgPort)"
 } else {
-    Check-Fail "PostgreSQL is not reachable on port $pgPort — run: docker compose up -d postgres"
+    Check-Fail "PostgreSQL is not ready or not reachable on host port $pgPort — run: docker compose up -d postgres"
 }
 
 $redisReply = docker compose exec -T redis redis-cli ping 2>$null
-if ($LASTEXITCODE -eq 0 -and (($redisReply -join "").Trim() -eq "PONG")) {
+$redisReady = $LASTEXITCODE -eq 0 -and (($redisReply -join "").Trim() -eq "PONG")
+$redisMapping = docker compose port redis 6379 2>$null
+if ($redisReady -and $LASTEXITCODE -eq 0 -and (($redisMapping | Select-Object -Last 1) -match ":6379$")) {
     Check-Pass "Redis (port 6379)"
 } else {
-    Check-Fail "Redis is not reachable — run: docker compose up -d redis"
+    Check-Fail "Redis is not ready or not reachable on host port 6379 — run: docker compose up -d redis"
 }
 
 $minioResponse = Test-Http "http://localhost:9000/minio/health/live"
@@ -213,6 +217,7 @@ if (Test-Path ".env") {
     Test-Config "RESEND_API_KEY" $false
     Test-Config "ANTHROPIC_API_KEY" $false
     Test-Config "GITHUB_CLIENT_ID" $false
+    Test-Config "GOOGLE_CLIENT_ID" $false
 } else {
     Check-Fail "Configuration cannot be read without .env"
 }
@@ -238,6 +243,15 @@ if (Test-Path $publicKey) {
     Check-Pass "Public key exists: $publicKey"
 } else {
     Check-Fail "Public key is missing: $publicKey — run: bash apps/api/scripts/generate-keys.sh"
+}
+
+Write-Host ""
+Write-Host "── Prisma Client ──" -ForegroundColor Cyan
+$prismaClient = "packages/database/node_modules/.prisma/client/index.js"
+if (Test-Path $prismaClient) {
+    Check-Pass "Prisma client is generated"
+} else {
+    Check-Fail "Prisma client is missing — run: pnpm generate"
 }
 
 Write-Host ""
