@@ -15,7 +15,9 @@ expo-env.d.ts
 .env.*.local
 .env.*
 !.env.example
+!.env.local.example
 !.env.test
+.dev.vars
 # JWT signing keys must never be committed.
 apps/api/keys/
 *.pem

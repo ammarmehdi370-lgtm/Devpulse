@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const databaseRequire = createRequire(path.join(root, "packages", "database", "package.json"));
 const allWorkspaces = process.argv.includes("--all");
 
 function fail(message) {
@@ -74,16 +76,13 @@ try {
   fail("MinIO is not ready on localhost:9000. Run `make dev` or `powershell -ExecutionPolicy Bypass -File scripts/dev-start.ps1` to start infrastructure and retry.");
 }
 
-const generatedClient = path.join(
-  root,
-  "packages",
-  "database",
-  "node_modules",
-  ".prisma",
-  "client",
-  "index.js",
-);
-if (!existsSync(generatedClient)) {
+let prismaClientReady = false;
+try {
+  prismaClientReady = typeof databaseRequire("@prisma/client").PrismaClient === "function";
+} catch {
+  prismaClientReady = false;
+}
+if (!prismaClientReady) {
   fail("The Prisma client has not been generated. Run `pnpm generate` or the full startup command (`make dev` or the PowerShell startup script) before starting the app.");
 }
 

@@ -1,45 +1,106 @@
 # Devpulse Development Commands
 
-## Requirements
+## Browser app quick start
 
-- Node.js 20.10+
-- pnpm 9.15+
-- Docker Desktop
-- OpenSSL available on `PATH` for generating the session secret and JWT keys
+The browser app uses Next.js for its web development server. PGlite and OPFS
+run in the browser; `pnpm dev` does not start Docker, PostgreSQL, Redis, MinIO,
+Express, Socket.IO, or the AI Worker.
 
-Enable pnpm through Corepack if needed:
+Requirements: Node.js 20.10+ and pnpm 9.15+.
 
 ```bash
+pnpm install
+pnpm setup
+pnpm dev
+```
+
+Open <http://localhost:3000>. In browser DevTools, inspect **Application →
+IndexedDB** for PGlite data and **Storage → Origin private file system** for
+OPFS files. Clearing site data removes local browser data.
+
+The setup command creates `.env` from `.env.example` only if it does not
+already exist, and checks/install dependencies as needed. It never overwrites
+an existing `.env`. It also creates `apps/web/.env.local` from its public-only
+example if missing, which is where Next.js reads browser build variables.
+Browser database migrations execute when PGlite initializes in the browser;
+`pnpm migrate` is the legacy Prisma/PostgreSQL migration command and is not
+needed by the browser database.
+
+### AI proxy
+
+The AI proxy is a separately deployed Cloudflare Worker because static export
+cannot serve a Next.js Route Handler. For normal browser development, set
+`NEXT_PUBLIC_AI_PROXY_URL` in `apps/web/.env.local` to the deployed Worker URL.
+This keeps the web app on its one permitted local port.
+
+If you are actively developing the Worker, you can run Wrangler locally (it
+uses an additional local port, normally `8787`). Create its local secrets file:
+
+```powershell
+Copy-Item apps/ai-worker/.dev.vars.example apps/ai-worker/.dev.vars
+```
+
+On macOS/Linux, use `cp apps/ai-worker/.dev.vars.example apps/ai-worker/.dev.vars`.
+Then run `pnpm --filter @devpulse/ai-worker dev`. Put the Anthropic key and the
+API's RS256 public JWT key in `apps/ai-worker/.dev.vars`. The provider key
+belongs only in the Worker environment, never in a `NEXT_PUBLIC_*` variable or
+the browser bundle. Browser authentication must provide a valid signed token;
+the local demo identity is not accepted as a production credential.
+
+### Static hosting and isolation headers
+
+`pnpm build` exports the web app to `apps/web/out`. The repository includes
+Cloudflare Pages `_headers` and Vercel header configuration for COOP/COEP.
+These headers make `crossOriginIsolated` available to features that require
+`SharedArrayBuffer`; PGlite's current IndexedDB-backed browser setup does not
+itself require `SharedArrayBuffer`. COEP can restrict third-party embedded
+resources, so test external images, scripts, and iframes when adding them.
+
+On Vercel, set `NEXT_PUBLIC_AI_PROXY_URL` to the deployed Worker URL for the
+web build. Set `ANTHROPIC_API_KEY` and `JWT_PUBLIC_KEY` as secrets on the
+Cloudflare Worker, not as Vercel web-app variables. The Worker and its
+authoritative usage enforcement are separate from static hosting.
+
+### Legacy server-backed development
+
+The application UI is not fully migrated; some routes still depend on the
+legacy Express API and Socket.IO services. Use the legacy stack only for those
+flows. It requires Docker Desktop and OpenSSL:
+
+- `pnpm setup:stack` runs the legacy environment/key setup.
+- `pnpm dev:stack` starts the legacy server-backed workspace.
+- `pnpm build:stack` builds all workspace packages.
+- `pnpm dev:api`, `pnpm dev:socket`, and `pnpm dev:ai` start individual services.
+
+The legacy Compose stack keeps the `minio` service name and S3 endpoint for
+backward compatibility, but runs RustFS because the old MinIO Docker Hub image
+is no longer available. RustFS uses a new `devpulse-rustfs` volume; any prior
+`devpulse-minio` volume is left untouched. Export existing object data before
+migrating it to RustFS.
+
+## Legacy requirements
+
+```powershell
 corepack enable
 ```
 
-If PowerShell reports that `pnpm` is not recognized, or Corepack cannot write to
-`C:\Program Files\nodejs`, use the Corepack-prefixed command instead. It does
-not require administrator permissions:
-
-```powershell
-corepack pnpm install
-```
-
-Use `corepack pnpm` in place of `pnpm` for the remaining commands in this file.
-
-## First-time setup
+## Legacy full-stack setup
 
 From the repository root:
 
 ```bash
 pnpm install
-pnpm setup
+pnpm setup:stack
 ```
 
-The setup script creates `.env` from `.env.example` only when `.env` does not
-already exist. It generates a 32-byte `SESSION_SECRET` when the template
+The legacy setup script creates `.env` from `.env.example` only when `.env` does
+not already exist. It generates a 32-byte `SESSION_SECRET` when the template
 placeholder is present and creates the RS256 JWT key pair when absent. It
 does not overwrite an existing `.env` or replace an existing private key; if
 only an orphaned public key exists, it stops and asks you to restore the
 matching private key or move that public key aside.
 
-The `pnpm setup` command selects the Bash setup script on macOS/Linux and the
+The `pnpm setup:stack` command selects the Bash setup script on macOS/Linux and the
 PowerShell setup script on Windows. You can also run the platform-specific
 script directly:
 
@@ -373,9 +434,8 @@ powershell -ExecutionPolicy Bypass -File scripts/dev-start.ps1
 ```
 
 For demo data, use `make dev-seed` or add `--seed` to either startup script.
-Running `pnpm dev` directly is supported only after Docker is running, `.env`
-exists, the database/Redis/MinIO services are healthy, and the Prisma client
-has been generated. Otherwise it exits with a specific setup instruction.
+The legacy workspace launcher is `pnpm dev:stack`; it checks Docker, `.env`,
+database/Redis/MinIO health, and Prisma generation before starting services.
 Mobile/Expo is intentionally separate; use `pnpm dev:mobile`. `pnpm dev:all`
 includes mobile and performs the same prerequisite checks.
 
@@ -683,8 +743,8 @@ pnpm --filter @devpulse/ai start
 
 ## Mobile Development (Expo)
 
-Mobile is intentionally excluded from the default `pnpm dev` command. The
-default command starts web, API, Socket.IO, and AI after checking prerequisites.
+Mobile is intentionally excluded from `pnpm dev:stack`, which starts the
+legacy web, API, Socket.IO, and AI services after checking prerequisites.
 Start Expo separately with `pnpm dev:mobile`, or use `pnpm dev:all` to start
 every workspace, including mobile.
 
@@ -704,7 +764,7 @@ For a physical device, install Expo Go from the App Store (iOS) or Google Play
 ### Quick start with Expo Go
 
 1. Start infrastructure and the web/API/Socket.IO/AI application services with
-   `make dev`. If infrastructure is already running, `pnpm dev` starts just the
+   `make dev`. If infrastructure is already running, `pnpm dev:stack` starts just the
    application services. Wait for the API on port 4000 and Socket.IO on port
    4001.
 2. Find your computer's LAN IP:

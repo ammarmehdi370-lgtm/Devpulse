@@ -54,5 +54,5 @@ if (-not (Test-Path $privateKey) -or -not (Test-Path $publicKey)) {
 
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
-Write-Host "Start infrastructure with: docker compose up -d postgres redis minio"
+Write-Host "Start infrastructure with: docker compose up -d postgres redis minio (RustFS S3-compatible storage)"
 Write-Host "Start the full stack with: make dev"

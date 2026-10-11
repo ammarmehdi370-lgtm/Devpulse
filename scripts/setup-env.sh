@@ -64,5 +64,5 @@ fi
 echo
 echo "=== Setup complete ==="
 echo "Optional credentials can be added to .env for OAuth, email, billing, and AI features."
-echo "Start infrastructure with: docker compose up -d postgres redis minio"
+echo "Start infrastructure with: docker compose up -d postgres redis minio (RustFS S3-compatible storage)"
 echo "Start the full stack with: make dev"
