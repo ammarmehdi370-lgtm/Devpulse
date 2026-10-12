@@ -96,14 +96,16 @@ export class DatabaseService {
   }
 
   async getUser(id: string): Promise<User | undefined> {
-    return (await this.db.select().from(users).where(eq(users.id, id)).limit(1))[0];
+    const [row] = await this.db.select().from(users).where(eq(users.id, id)).limit(1);
+    return row ?? undefined;
   }
 
   async updateUser(id: string, input: Partial<Pick<User, "email" | "name" | "avatarUrl">>): Promise<User | undefined> {
-    return (await this.db.update(users)
+    const [row] = await this.db.update(users)
       .set({ ...input, updatedAt: new Date() })
       .where(eq(users.id, id))
-      .returning())[0];
+      .returning();
+    return row ?? undefined;
   }
 
   async deleteUser(id: string): Promise<void> {
@@ -111,7 +113,9 @@ export class DatabaseService {
   }
 
   async createUser(input: Pick<User, "email"> & Partial<Pick<User, "name" | "avatarUrl">>): Promise<User> {
-    return (await this.db.insert(users).values({ id: createId(), ...input }).returning())[0];
+    const [row] = await this.db.insert(users).values({ id: createId(), ...input }).returning();
+    if (!row) throw new Error("User insert returned no row.");
+    return row;
   }
 
   async listWorkspaces(ownerId: string): Promise<Workspace[]> {
@@ -119,17 +123,22 @@ export class DatabaseService {
   }
 
   async getWorkspace(id: string): Promise<Workspace | undefined> {
-    return (await this.db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1))[0];
+    const [row] = await this.db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    return row ?? undefined;
   }
 
   async createWorkspace(input: Pick<Workspace, "name" | "slug" | "ownerId">): Promise<Workspace> {
-    return (await this.db.insert(workspaces).values({ id: createId(), ...input }).returning())[0];
+    const [row] = await this.db.insert(workspaces).values({ id: createId(), ...input }).returning();
+    if (!row) throw new Error("Workspace insert returned no row.");
+    return row;
   }
 
   async addWorkspaceMember(
     input: Pick<WorkspaceMember, "workspaceId" | "userId"> & Partial<Pick<WorkspaceMember, "role">>,
   ): Promise<WorkspaceMember> {
-    return (await this.db.insert(workspaceMembers).values(input).returning())[0];
+    const [row] = await this.db.insert(workspaceMembers).values(input).returning();
+    if (!row) throw new Error("Workspace member insert returned no row.");
+    return row;
   }
 
   async removeWorkspaceMember(workspaceId: string, userId: string): Promise<void> {
@@ -140,10 +149,11 @@ export class DatabaseService {
   }
 
   async updateWorkspace(id: string, input: Partial<Pick<Workspace, "name" | "slug" | "plan">>): Promise<Workspace | undefined> {
-    return (await this.db.update(workspaces)
+    const [row] = await this.db.update(workspaces)
       .set({ ...input, updatedAt: new Date() })
       .where(eq(workspaces.id, id))
-      .returning())[0];
+      .returning();
+    return row ?? undefined;
   }
 
   async deleteWorkspace(id: string): Promise<void> {
@@ -155,20 +165,24 @@ export class DatabaseService {
   }
 
   async getProject(id: string): Promise<Project | undefined> {
-    return (await this.db.select().from(projects).where(eq(projects.id, id)).limit(1))[0];
+    const [row] = await this.db.select().from(projects).where(eq(projects.id, id)).limit(1);
+    return row ?? undefined;
   }
 
   async createProject(
     input: Pick<Project, "workspaceId" | "name"> & Partial<Pick<Project, "description" | "language" | "template">>,
   ): Promise<Project> {
-    return (await this.db.insert(projects).values({ id: createId(), ...input }).returning())[0];
+    const [row] = await this.db.insert(projects).values({ id: createId(), ...input }).returning();
+    if (!row) throw new Error("Project insert returned no row.");
+    return row;
   }
 
   async updateProject(id: string, input: Partial<Pick<Project, "name" | "description" | "language" | "template" | "defaultBranch" | "isPrivate">>): Promise<Project | undefined> {
-    return (await this.db.update(projects)
+    const [row] = await this.db.update(projects)
       .set({ ...input, updatedAt: new Date() })
       .where(eq(projects.id, id))
-      .returning())[0];
+      .returning();
+    return row ?? undefined;
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -176,11 +190,12 @@ export class DatabaseService {
   }
 
   async getFile(projectId: string, path: string): Promise<ProjectFile | undefined> {
-    return (await this.db
+    const [row] = await this.db
       .select()
       .from(files)
       .where(and(eq(files.projectId, projectId), eq(files.path, path)))
-      .limit(1))[0];
+      .limit(1);
+    return row ?? undefined;
   }
 
   async listFiles(projectId: string): Promise<ProjectFile[]> {
@@ -189,19 +204,21 @@ export class DatabaseService {
 
   async saveFile(input: Pick<ProjectFile, "projectId" | "path" | "content"> & Partial<Pick<ProjectFile, "language" | "lastEditedById" | "sizeBytes">>): Promise<ProjectFile> {
     return this.db.transaction(async (tx) => {
-      const existing = (await tx.select()
+      const [existing] = await tx.select()
         .from(files)
         .where(and(eq(files.projectId, input.projectId), eq(files.path, input.path)))
-        .limit(1))[0];
+        .limit(1);
       const now = new Date();
       const sizeBytes = input.sizeBytes ?? new TextEncoder().encode(input.content).byteLength;
       if (!existing) {
-        return (await tx.insert(files).values({
+        const [row] = await tx.insert(files).values({
           id: createId(),
           ...input,
           sizeBytes,
           lastEditedAt: now,
-        }).returning())[0];
+        }).returning();
+        if (!row) throw new Error("Inserted file row disappeared.");
+        return row;
       }
 
       const [updated] = await tx.update(files)
@@ -227,9 +244,11 @@ export class DatabaseService {
   }
 
   async createRevision(input: Pick<FileRevision, "fileId" | "version" | "content"> & Partial<Pick<FileRevision, "authorId" | "appliedFromAI" | "aiMessageId" | "diffPatch">>): Promise<FileRevision> {
-    return (await this.db.insert(fileRevisions)
+    const [row] = await this.db.insert(fileRevisions)
       .values({ id: createId(), ...input })
-      .returning())[0];
+      .returning();
+    if (!row) throw new Error("File revision insert returned no row.");
+    return row;
   }
 
   async deleteRevision(id: string): Promise<void> {
@@ -245,11 +264,14 @@ export class DatabaseService {
   }
 
   async createChannel(input: Pick<Channel, "workspaceId" | "name"> & Partial<Pick<Channel, "type">>): Promise<Channel> {
-    return (await this.db.insert(channels).values({ id: createId(), ...input }).returning())[0];
+    const [row] = await this.db.insert(channels).values({ id: createId(), ...input }).returning();
+    if (!row) throw new Error("Channel insert returned no row.");
+    return row;
   }
 
   async updateChannel(id: string, input: Partial<Pick<Channel, "name" | "type">>): Promise<Channel | undefined> {
-    return (await this.db.update(channels).set(input).where(eq(channels.id, id)).returning())[0];
+    const [row] = await this.db.update(channels).set(input).where(eq(channels.id, id)).returning();
+    return row ?? undefined;
   }
 
   async deleteChannel(id: string): Promise<void> {
@@ -261,14 +283,17 @@ export class DatabaseService {
   }
 
   async createMessage(input: Pick<Message, "channelId" | "authorId" | "body">): Promise<Message> {
-    return (await this.db.insert(messages).values({ id: createId(), ...input }).returning())[0];
+    const [row] = await this.db.insert(messages).values({ id: createId(), ...input }).returning();
+    if (!row) throw new Error("Message insert returned no row.");
+    return row;
   }
 
   async updateMessage(id: string, body: string): Promise<Message | undefined> {
-    return (await this.db.update(messages)
+    const [row] = await this.db.update(messages)
       .set({ body, editedAt: new Date() })
       .where(eq(messages.id, id))
-      .returning())[0];
+      .returning();
+    return row ?? undefined;
   }
 
   async deleteMessage(id: string): Promise<void> {
@@ -283,7 +308,9 @@ export class DatabaseService {
     input: Pick<AIConversation, "userId"> &
       Partial<Pick<AIConversation, "title" | "projectId" | "fileId" | "model">>,
   ): Promise<AIConversation> {
-    return (await this.db.insert(aiConversations).values({ id: createId(), ...input }).returning())[0];
+    const [row] = await this.db.insert(aiConversations).values({ id: createId(), ...input }).returning();
+    if (!row) throw new Error("AI conversation insert returned no row.");
+    return row;
   }
 
   async listAIMessages(conversationId: string): Promise<AIMessage[]> {
@@ -312,7 +339,7 @@ export class DatabaseService {
     const now = new Date();
     const month = now.getUTCMonth() + 1;
     const year = now.getUTCFullYear();
-    return (await this.db.insert(aiUsage).values({
+    const [row] = await this.db.insert(aiUsage).values({
       id: createId(),
       userId,
       month,
@@ -326,7 +353,9 @@ export class DatabaseService {
         tokenCount: sql`${aiUsage.tokenCount} + ${tokenCount}`,
         updatedAt: now,
       },
-    }).returning())[0];
+    }).returning();
+    if (!row) throw new Error("AI usage record insert returned no row.");
+    return row;
   }
 }
 

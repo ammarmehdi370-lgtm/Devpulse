@@ -113,7 +113,15 @@ export class BrowserFileStorage {
       let directory = this.root;
       for (const segment of segments) directory = await directory.getDirectoryHandle(segment);
       const names: string[] = [];
-      for await (const [name] of directory.entries()) names.push(name);
+      const directoryHandle = directory as FileSystemDirectoryHandle & {
+        entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+        values?: () => AsyncIterableIterator<FileSystemHandle>;
+      };
+      if (typeof directoryHandle.entries === "function") {
+        for await (const [name] of directoryHandle.entries()) names.push(name);
+      } else if (typeof directoryHandle.values === "function") {
+        for await (const entry of directoryHandle.values()) names.push(entry.name);
+      }
       return names.sort();
     }
 
@@ -157,8 +165,18 @@ export class BrowserFileStorage {
       this.fallbackDatabase = null;
       return;
     }
-    for await (const [name] of this.root.entries()) {
-      await this.root.removeEntry(name, { recursive: true });
+    const rootDirectory = this.root as FileSystemDirectoryHandle & {
+      entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>;
+      values?: () => AsyncIterableIterator<FileSystemHandle>;
+    };
+    if (typeof rootDirectory.entries === "function") {
+      for await (const [name] of rootDirectory.entries()) {
+        await this.root.removeEntry(name, { recursive: true });
+      }
+    } else if (typeof rootDirectory.values === "function") {
+      for await (const entry of rootDirectory.values()) {
+        await this.root.removeEntry(entry.name, { recursive: true });
+      }
     }
     this.root = null;
   }

@@ -132,17 +132,18 @@ export class FileService {
     const now = new Date();
     const storagePath = `projects/${file.projectId}/${normalizePath(file.path)}`;
     const previousStoredContent = await this.readOptionalBytes(storagePath);
+    let updated: ProjectFile;
     await this.storage.writeFile(storagePath, content);
     try {
-      const updated = await db.transaction(async (tx) => {
-        const [updated] = await tx.update(files).set({
+      updated = await db.transaction(async (tx) => {
+        const [result] = await tx.update(files).set({
           content,
           version: newVersion,
           sizeBytes: new TextEncoder().encode(content).byteLength,
           lastEditedAt: now,
           updatedAt: now,
         }).where(and(eq(files.id, fileId), eq(files.version, file.version))).returning();
-        if (!updated) throw new Error("File changed in another operation; reload it before saving.");
+        if (!result) throw new Error("File changed in another operation; reload it before saving.");
 
         await tx.insert(fileRevisions).values({
           id: crypto.randomUUID(),
@@ -151,7 +152,7 @@ export class FileService {
           version: file.version,
           diffPatch: message ?? null,
         });
-        return updated;
+        return result;
       });
     } catch (error) {
       try {

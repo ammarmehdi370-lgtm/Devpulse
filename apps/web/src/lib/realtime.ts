@@ -82,7 +82,8 @@ export class RealtimeService {
             payload?: unknown;
           } | null;
           if (data?.type === "presence:update" && isPresenceSnapshot(data.payload)) {
-            this.presenceListeners.forEach((listener) => listener(data.payload));
+            const payload = data.payload as Record<string, string>;
+            this.presenceListeners.forEach((listener) => listener(payload));
           }
         };
         this.worker.port.start();
@@ -161,6 +162,10 @@ export class RealtimeService {
 
   moveCursor(fileId: string, position: { line: number; column: number }): void {
     this.emit("cursor:move", { fileId, userId: this.sourceId, position });
+  }
+
+  close(): void {
+    this.destroy();
   }
 
   destroy(): void {
