@@ -1,10 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useApp, PageType } from "../context/AppContext";
 import {
-  Box,
-  GitFork,
   Code2,
   Rocket,
   Database,
@@ -19,20 +17,82 @@ import {
   Sparkles,
   Monitor,
   CreditCard,
-  Check,
-  Cpu,
   Radio,
-  Activity,
   GitBranch,
   FolderTree,
   Split,
   Columns,
-  Maximize2,
   ArrowLeft,
+  Bell,
+  CheckCircle,
+  X,
+  Menu,
+  Server,
+  Keyboard,
+  Settings2,
+  type LucideIcon,
 } from "lucide-react";
 
-export const AppShell: React.FC<{ children: React.ReactNode }> = ({
+const PLATFORM_PAGES: Array<{
+  id: PageType;
+  label: string;
+  icon: LucideIcon;
+  shortcut?: string;
+}> = [
+  { id: "workspaces", label: "Workspaces", icon: Server, shortcut: "Alt+W" },
+  { id: "repositories", label: "Repositories", icon: GitBranch, shortcut: "Alt+R" },
+  { id: "editor", label: "Editor", icon: Code2, shortcut: "Alt+E" },
+  { id: "deployments", label: "Deployments", icon: Rocket, shortcut: "Alt+D" },
+  { id: "chat", label: "Team Chat", icon: MessageSquare, shortcut: "Alt+C" },
+  { id: "ai-studio", label: "AI Studio", icon: Sparkles, shortcut: "Alt+A" },
+  { id: "remote-control", label: "Remote Control", icon: Monitor },
+  { id: "pricing", label: "Plans", icon: CreditCard, shortcut: "Alt+P" },
+];
+
+function SidebarNavItem({
+  item,
+  isActive,
+  onClick,
+}: {
+  item: (typeof PLATFORM_PAGES)[number];
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  const Icon = item.icon;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`${item.label}${item.shortcut ? ` ${item.shortcut}` : ""}`}
+      aria-current={isActive ? "page" : undefined}
+      className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${
+        isActive
+          ? "bg-[var(--accent)] text-[var(--accent-fg)] shadow-sm"
+          : "text-[var(--text-secondary)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      }`}
+    >
+      <Icon
+        aria-hidden="true"
+        className={`h-4 w-4 shrink-0 ${
+          isActive
+            ? "text-[var(--accent-fg)]"
+            : "text-[var(--muted)] group-hover:text-[var(--text)]"
+        }`}
+      />
+      <span className="truncate font-medium">{item.label}</span>
+      {isActive && (
+        <span
+          aria-hidden="true"
+          className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--accent-fg)] opacity-70"
+        />
+      )}
+    </button>
+  );
+}
+
+export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean }> = ({
   children,
+  minimal = false,
 }) => {
   const {
     page,
@@ -43,31 +103,125 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     setIsCommandPaletteOpen,
     setIsEditorProjectOpen,
     setIsFileTreeOpen,
+    loadedProjectName,
+    workspaces,
   } = useApp();
 
-  const [isRepoMenuOpen, setIsRepoMenuOpen] = useState(false);
-  const [selectedRepoBranch, setSelectedRepoBranch] = useState(
-    "devpulse-core / staging",
-  );
+  if (minimal) {
+    return (
+      <div className="flex h-screen flex-col bg-[var(--workbench-bg)] text-[var(--text)]">
+        <header className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--topbar-bg)] px-3">
+          <button
+            type="button"
+            onClick={() => setPage("repositories")}
+            className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+          >
+            <span className="font-mono text-sm font-bold text-[var(--accent)]">⚡ Devpulse</span>
+          </button>
+
+          <span className="text-xs text-[var(--muted)]">
+            {page === "editor" ? loadedProjectName || "Editor" : "AI Studio"}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => setPage("repositories")}
+            className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Exit to platform
+          </button>
+        </header>
+
+        {children}
+      </div>
+    );
+  }
+
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const accountRef = useRef<HTMLDivElement>(null);
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  const navigate = (target: PageType) => {
+    if (target === "editor") setIsEditorProjectOpen(false);
+    setPage(target);
+    setMobileNavOpen(false);
+    setAccountMenuOpen(false);
+    setNotifOpen(false);
+  };
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!accountRef.current?.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+      if (!notificationRef.current?.contains(event.target as Node)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setAccountMenuOpen(false);
+      setNotifOpen(false);
+      setMobileNavOpen(false);
+      setIsShortcutsOpen(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
+
+  useEffect(() => {
+    const showShortcuts = () => setIsShortcutsOpen(true);
+    window.addEventListener("devpulse:show-shortcuts", showShortcuts);
+    return () => window.removeEventListener("devpulse:show-shortcuts", showShortcuts);
+  }, []);
+
+  useEffect(() => {
+    const shortcuts: Record<string, PageType> = {
+      w: "workspaces",
+      r: "repositories",
+      e: "editor",
+      d: "deployments",
+      c: "chat",
+      a: "ai-studio",
+      p: "pricing",
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (event.altKey && !event.ctrlKey && !event.metaKey) {
+        const pageTarget = shortcuts[event.key.toLowerCase()];
+        if (pageTarget) {
+          event.preventDefault();
+          if (pageTarget === "editor") setIsEditorProjectOpen(false);
+          setPage(pageTarget);
+          setMobileNavOpen(false);
+          setAccountMenuOpen(false);
+          setNotifOpen(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setIsEditorProjectOpen, setPage]);
 
   // Check if current view is Workbench mode (Screenshots 1 & 3)
   const isWorkbenchMode = page === "editor" || page === "ai-studio";
-
-  // Standard platform items
-  const platformNavItems: {
-    id: PageType;
-    label: string;
-    icon: React.ComponentType<{ className?: string }>;
-  }[] = [
-    { id: "workspaces", label: "Workspaces", icon: Box },
-    { id: "repositories", label: "Repositories", icon: GitFork },
-    { id: "editor", label: "Editor", icon: Code2 },
-    { id: "deployments", label: "Deployments", icon: Rocket },
-    { id: "remote-control", label: "Remote Control", icon: Monitor },
-    { id: "ai-studio", label: "AI Studio", icon: Sparkles },
-    { id: "pricing", label: "Pricing & Plans", icon: CreditCard },
-    { id: "chat", label: "Messaging / Chat", icon: MessageSquare },
-  ];
 
   // Workbench items (Matches Screenshot 1 & 3 exactly)
   const workbenchNavItems = [
@@ -129,9 +283,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       <header className="h-14 border-b border-[#1f1f2e] bg-[#0c0c13] px-4 flex items-center justify-between z-30 sticky top-0 font-sans">
         {/* Left: Brand + Info String matching screenshots */}
         <div className="flex items-center gap-3">
-          <div
-            onClick={() => setPage("workspaces")}
-            className="flex items-center gap-2 cursor-pointer group"
+          <button
+            type="button"
+            onClick={() => navigate("workspaces")}
+            aria-label="Open workspaces"
+            className="group flex items-center gap-2"
           >
             <div
               className="w-7 h-7 rounded-lg flex items-center justify-center shadow-md transition-transform group-hover:scale-105 text-[#09090e]"
@@ -142,7 +298,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             <span className="font-bold text-white text-sm tracking-tight hidden sm:inline">
               Devpulse
             </span>
-          </div>
+          </button>
 
           {/* Token String displayed in header (Screenshots 3 & 4) */}
           <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#13131e] border border-[#222234] text-[11px] font-mono text-[#8b8ba8]">
@@ -166,83 +322,74 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </span>
           </div>
 
-          {/* Quick Header Nav Links */}
-          <div className="hidden md:flex items-center gap-1 text-xs font-mono pl-2">
-            {[
-              { id: "workspaces", label: "Workspaces" },
-              { id: "editor", label: "Editor" },
-              { id: "ai-studio", label: "AI" },
-              { id: "pricing", label: "Pricing" },
-            ].map((link) => (
+          {/* Active workspace or editor repository context */}
+          <div className="hidden lg:flex items-center gap-2 border-l border-[var(--border-subtle)] pl-3">
+            {page === "editor" && loadedProjectName ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate("repositories")}
+                  className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+                  title="Open repositories"
+                >
+                  <GitBranch aria-hidden="true" className="h-3.5 w-3.5" />
+                  <span className="max-w-36 truncate font-mono text-xs">
+                    {loadedProjectName}
+                  </span>
+                </button>
+                <span aria-hidden="true" className="text-[var(--subtle)]">/</span>
+                <span className="text-xs font-mono text-[var(--muted)]">
+                  main
+                </span>
+              </>
+            ) : (
               <button
-                key={link.id}
-                onClick={() => setPage(link.id as PageType)}
-                className={`px-2.5 py-1 rounded-lg transition-colors ${
-                  page === link.id
-                    ? "bg-white/10 text-white font-semibold"
-                    : "text-[#85859e] hover:text-white"
-                }`}
+                type="button"
+                onClick={() => navigate("workspaces")}
+                className="flex items-center gap-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
+                title="Open workspaces"
               >
-                {link.label}
+                <Server aria-hidden="true" className="h-3.5 w-3.5" />
+                <span className="max-w-40 truncate">
+                  {workspaces[0]?.name ?? "No workspace"}
+                </span>
               </button>
-            ))}
-          </div>
-
-          {/* Repo / Branch Selector Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setIsRepoMenuOpen(!isRepoMenuOpen)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#141420] hover:bg-[#1b1b2a] border border-[#242436] text-xs font-mono text-[#c6c6dc] transition-colors"
-            >
-              <span>{selectedRepoBranch}</span>
-              <ChevronDown className="w-3 h-3 text-[#7b7b96]" />
-            </button>
-
-            {isRepoMenuOpen && (
-              <div className="absolute left-0 mt-1.5 w-56 bg-[#12121c] border border-[#26263a] rounded-xl shadow-2xl py-1 z-50 text-xs font-mono">
-                <div className="px-3 py-1.5 text-[10px] text-[#6b6b88] uppercase tracking-wider">
-                  Switch Context
-                </div>
-                <button
-                  onClick={() => {
-                    setSelectedRepoBranch("devpulse-core / staging");
-                    setIsRepoMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
-                >
-                  <span>devpulse-core / staging</span>
-                  {selectedRepoBranch.includes("staging") && (
-                    <Check className="w-3 h-3 text-[#0DF5C4]" />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedRepoBranch("devpulse-core / main");
-                    setIsRepoMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
-                >
-                  <span>devpulse-core / main</span>
-                  {selectedRepoBranch.includes("main") && (
-                    <Check className="w-3 h-3 text-[#0DF5C4]" />
-                  )}
-                </button>
-                <button
-                  onClick={() => {
-                    setSelectedRepoBranch("neural-agent / cuda");
-                    setIsRepoMenuOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-1.5 hover:bg-[#1a1a29] flex items-center justify-between text-[#c4c4dc]"
-                >
-                  <span>neural-agent / cuda</span>
-                </button>
-              </div>
             )}
           </div>
+
+          {/* Header action shortcuts */}
+          <nav aria-label="Quick navigation" className="hidden xl:flex items-center gap-1 pl-1">
+            {[
+              { id: "editor" as const, label: "Editor", icon: Code2 },
+              { id: "ai-studio" as const, label: "AI Studio", icon: Sparkles },
+              { id: "pricing" as const, label: "Plans", icon: CreditCard },
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => navigate(id)}
+                aria-current={page === id ? "page" : undefined}
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]"
+              >
+                <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
+          </nav>
         </div>
 
         {/* Right: Quick Jump, Status, Profile */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open navigation menu"
+            aria-expanded={mobileNavOpen}
+            className="rounded p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)] md:hidden"
+          >
+            <Menu aria-hidden="true" className="h-4 w-4" />
+          </button>
+
           {/* Quick jump to palette */}
           <button
             onClick={() => setPage("theme")}
@@ -265,30 +412,137 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </kbd>
           </button>
 
-          {/* Cluster Status Badge */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0DF5C4]/10 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[11px] font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
-            <span className="hidden sm:inline">prod-us-east · 99.99%</span>
-            <span className="sm:hidden">99.99%</span>
+          {/* Notifications */}
+          <div ref={notificationRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setNotifOpen((open) => !open)}
+              aria-label="Notifications"
+              aria-expanded={notifOpen}
+              className="relative rounded p-1.5 text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            >
+              <Bell aria-hidden="true" className="h-4 w-4" />
+            </button>
+            {notifOpen && (
+              <section
+                aria-label="Notifications"
+                className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-[var(--border)] bg-[var(--panel)] shadow-xl"
+              >
+                <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2.5">
+                  <span className="text-sm font-medium text-[var(--text)]">Notifications</span>
+                  <button
+                    type="button"
+                    onClick={() => setNotifOpen(false)}
+                    aria-label="Close notifications"
+                    className="text-[var(--muted)] hover:text-[var(--text)]"
+                  >
+                    <X aria-hidden="true" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="px-3 py-8 text-center">
+                  <CheckCircle aria-hidden="true" className="mx-auto mb-2 h-8 w-8 text-[var(--muted)]" />
+                  <p className="text-sm text-[var(--muted)]">No new notifications.</p>
+                  <p className="mt-1 text-xs text-[var(--subtle)]">Workspace status is clear.</p>
+                </div>
+              </section>
+            )}
           </div>
 
-          {/* User Profile avatar */}
-          <div className="flex items-center gap-2 pl-2 border-l border-[#202030]">
-            <div
-              className="relative cursor-pointer group"
-              onClick={() => logout()}
-              title="Click to logout"
+          {/* Account menu */}
+          <div ref={accountRef} className="relative border-l border-[var(--border-subtle)] pl-2">
+            <button
+              type="button"
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              aria-label={`Account menu for ${user.name}`}
+              aria-expanded={accountMenuOpen}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-[var(--hover)]"
             >
-              <img
-                src={user.avatar}
-                alt={user.name}
-                className="w-7 h-7 rounded-full object-cover ring-1 ring-[#3a3a50] group-hover:ring-[#6C63FF] transition-all"
-              />
-              <span className="absolute bottom-0 right-0 w-2 h-2 rounded-full bg-[#0DF5C4] ring-2 ring-[#09090e]" />
-            </div>
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--accent)] text-xs font-bold text-[var(--accent-fg)]">
+                {user.name.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="hidden min-w-0 flex-col items-start text-left sm:flex">
+                <span className="max-w-[120px] truncate text-xs font-semibold text-[var(--text)]">{user.name}</span>
+                <span className="max-w-[120px] truncate text-[10px] text-[var(--muted)]">{user.email}</span>
+              </span>
+              <ChevronDown aria-hidden="true" className="ml-1 h-3.5 w-3.5 text-[var(--muted)]" />
+            </button>
+            {accountMenuOpen && (
+              <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded-lg border border-[var(--border)] bg-[var(--panel)] py-1 shadow-xl">
+                <div className="border-b border-[var(--border-subtle)] px-3 py-2">
+                  <p className="text-xs font-medium text-[var(--text)]">{user.name}</p>
+                  <p className="text-[10px] text-[var(--muted)]">{user.role}</p>
+                </div>
+                {[
+                  { label: "Settings", icon: Settings2, action: () => navigate("theme") },
+                  { label: "Theme", icon: Palette, action: () => navigate("theme") },
+                  {
+                    label: "Keyboard shortcuts",
+                    icon: Keyboard,
+                    action: () => {
+                      setIsShortcutsOpen(true);
+                      setAccountMenuOpen(false);
+                    },
+                  },
+                ].map(({ label, icon: Icon, action }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={action}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                  >
+                    <Icon aria-hidden="true" className="h-3.5 w-3.5 text-[var(--muted)]" />
+                    {label}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-[var(--border-subtle)]" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    logout();
+                  }}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-[var(--danger)] transition-colors hover:bg-[var(--hover)]"
+                >
+                  <LogOut aria-hidden="true" className="h-3.5 w-3.5" />
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
+
+      {isShortcutsOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--overlay)] p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsShortcutsOpen(false);
+          }}
+        >
+          <section
+            aria-labelledby="keyboard-shortcuts-title"
+            aria-modal="true"
+            role="dialog"
+            className="w-full max-w-sm rounded-xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-2xl"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 id="keyboard-shortcuts-title" className="text-sm font-semibold text-[var(--text)]">Keyboard shortcuts</h2>
+              <button type="button" onClick={() => setIsShortcutsOpen(false)} aria-label="Close keyboard shortcuts">
+                <X aria-hidden="true" className="h-4 w-4 text-[var(--muted)]" />
+              </button>
+            </div>
+            <ul className="space-y-2 text-xs text-[var(--text-secondary)]">
+              {PLATFORM_PAGES.filter((item) => item.shortcut).map((item) => (
+                <li key={item.id} className="flex justify-between">
+                  <span>{item.label}</span><kbd className="font-mono">{item.shortcut}</kbd>
+                </li>
+              ))}
+              <li className="flex justify-between"><span>Command palette</span><kbd className="font-mono">Ctrl/⌘+K</kbd></li>
+            </ul>
+          </section>
+        </div>
+      )}
 
       {/* Body with Sidebar and Main Content */}
       <div className="flex flex-1 overflow-hidden">
@@ -401,6 +655,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                 </div>
               </div>
             </div>
+            <div className="border-t border-[var(--border-subtle)] px-3 py-2">
+              <div className="flex items-center gap-1.5">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--success)]" />
+                <span className="text-xs text-[var(--muted)]">Browser mode — all services local</span>
+              </div>
+            </div>
           </aside>
         ) : (
           /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
@@ -412,37 +672,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                   PLATFORM
                 </div>
                 <nav className="space-y-1">
-                  {platformNavItems.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = page === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          if (item.id === "editor") {
-                            setIsEditorProjectOpen(false);
-                          }
-                          setPage(item.id);
-                        }}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                          isActive
-                            ? "text-white font-semibold shadow-sm"
-                            : "text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420]"
-                        }`}
-                        style={
-                          isActive
-                            ? {
-                                backgroundColor: theme.primary,
-                                color: "#0b0b12",
-                              }
-                            : {}
-                        }
-                      >
-                        <Icon className="w-4 h-4" />
-                        <span>{item.label}</span>
-                      </button>
-                    );
-                  })}
+                  {PLATFORM_PAGES.map((item) => (
+                    <SidebarNavItem
+                      key={item.id}
+                      item={item}
+                      isActive={page === item.id}
+                      onClick={() => navigate(item.id)}
+                    />
+                  ))}
                 </nav>
               </div>
 
@@ -474,19 +711,62 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               </div>
             </div>
 
-            {/* Footer Version Tag */}
-            <div className="p-3 border-t border-[#1a1a28] flex items-center justify-between text-[11px] font-mono text-[#5b5b75]">
-              <span>v2.4.18-edge</span>
-              <button
-                onClick={() => logout()}
-                title="Sign out"
-                className="hover:text-[#e0e0f0] transition-colors flex items-center gap-1 text-[10px]"
-              >
-                <LogOut className="w-3 h-3" />
-                <span>Logout</span>
-              </button>
+            <div className="border-t border-[var(--border-subtle)] px-3 py-2">
+              <div className="flex items-center gap-1.5">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--success)]" />
+                <span className="text-xs text-[var(--muted)]">Browser mode — all services local</span>
+              </div>
             </div>
           </aside>
+        )}
+
+        {mobileNavOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-[var(--overlay)] md:hidden"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setMobileNavOpen(false);
+            }}
+          >
+            <aside
+              aria-label="Platform navigation"
+              className="flex h-full w-72 max-w-[85vw] flex-col border-r border-[var(--border)] bg-[var(--sidebar-bg)] shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
+                <span className="text-sm font-semibold text-[var(--text)]">Navigation</span>
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen(false)}
+                  aria-label="Close navigation menu"
+                  className="rounded p-1.5 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                >
+                  <X aria-hidden="true" className="h-4 w-4" />
+                </button>
+              </div>
+              <nav aria-label="Platform" className="flex-1 space-y-1 overflow-y-auto p-3">
+                {PLATFORM_PAGES.map((item) => (
+                  <SidebarNavItem
+                    key={item.id}
+                    item={item}
+                    isActive={page === item.id}
+                    onClick={() => navigate(item.id)}
+                  />
+                ))}
+                <button
+                  type="button"
+                  onClick={() => navigate("theme")}
+                  className="group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                >
+                  <Settings aria-hidden="true" className="h-4 w-4 text-[var(--muted)]" />
+                  Settings &amp; Theme
+                </button>
+              </nav>
+              <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-3">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--success)]" />
+                <span className="text-xs text-[var(--muted)]">Browser mode — all services local</span>
+              </div>
+            </aside>
+          </div>
         )}
 
         {/* Main Content Pane */}

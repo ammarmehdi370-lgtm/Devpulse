@@ -1,7 +1,12 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { asc, eq } from "drizzle-orm";
 import { authenticatedFetch, setAccessToken } from "../lib/apiClient";
+import { getDB } from "../../src/lib/db";
+import * as schema from "../../src/lib/db/schema";
+import { getServices, type BrowserServices } from "../../src/lib/services";
+import { THEME_PRESETS, type ThemeConfig } from "./themeLibrary";
 
 export type PageType =
   | "login"
@@ -15,17 +20,7 @@ export type PageType =
   | "ai-studio"
   | "pricing";
 
-export interface ThemeConfig {
-  id: string;
-  name: string;
-  primary: string;
-  secondary: string;
-  tertiary: string;
-  neutral: string;
-  font: string;
-  mode: string;
-  roundness: string;
-}
+export type { ThemeConfig } from "./themeLibrary";
 export interface UserProfile {
   name: string;
   email: string;
@@ -124,7 +119,9 @@ interface AppContextType {
   page: PageType;
   setPage: (page: PageType) => void;
   user: UserProfile;
-  login: (email?: string, name?: string) => void;
+  login: (email?: string, name?: string) => Promise<void>;
+  loginAndLoad: (email?: string, name?: string) => Promise<void>;
+  isDataLoading: boolean;
   logout: () => void;
   theme: ThemeConfig;
   setTheme: (theme: ThemeConfig) => void;
@@ -216,19 +213,6 @@ interface AppContextType {
   setBillingCycle: React.Dispatch<React.SetStateAction<"monthly" | "annual">>;
 }
 
-const THEME_PRESETS: ThemeConfig[] = [
-  {
-    id: "default",
-    name: "Default",
-    primary: "#0DF5C4",
-    secondary: "#6C63FF",
-    tertiary: "#FFAE33",
-    neutral: "#0D1518",
-    font: "Inter",
-    mode: "dark",
-    roundness: "rounded-sm",
-  },
-];
 const EMPTY_REPOSITORIES: Repository[] = [];
 const EMPTY_WORKSPACES: WorkspaceDevbox[] = [];
 const EMPTY_DEPLOYMENTS: Deployment[] = [];
@@ -236,6 +220,19 @@ const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const LARGE_FILE_LIMIT_BYTES = 500 * 1024;
+
+const getLanguageColor = (language?: string | null) => {
+  const normalized = (language ?? "TypeScript").toLowerCase();
+  if (normalized.includes("typescript") || normalized.includes("ts")) return "#3178c6";
+  if (normalized.includes("javascript") || normalized.includes("js")) return "#f1e05a";
+  if (normalized.includes("python")) return "#3572A5";
+  if (normalized.includes("go")) return "#00ADD8";
+  if (normalized.includes("rust")) return "#dea584";
+  if (normalized.includes("css")) return "#563d7c";
+  if (normalized.includes("html")) return "#e34c26";
+  if (normalized.includes("sql")) return "#dad8d8";
+  return "#8b5cf6";
+};
 
 const isLargeEditorContent = (content: string) => new TextEncoder().encode(content).length > LARGE_FILE_LIMIT_BYTES;
 
@@ -514,10 +511,16 @@ export async function handleConnection(req, res) {
 
 const AppContext = createContext<AppContextType | null>(null);
 
+const getCurrentUserId = () =>
+  sessionStorage.getItem("auth:current-user-id") ??
+  sessionStorage.getItem("dp_user_id");
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
+  const [services, setServices] = useState<BrowserServices | null>(null);
   const [page, setPage] = useState<PageType>("login");
+  const [isDataLoading, setIsDataLoading] = useState(false);
   const [theme, setThemeState] = useState<ThemeConfig>(THEME_PRESETS[0]!);
   const [user, setUser] = useState<UserProfile>({
     name: "Alex",
@@ -570,6 +573,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">(
     "monthly",
   );
+  const initializedUserIdRef = React.useRef<string | null>(null);
 
   // Sync theme to DOM
   const setTheme = (newTheme: ThemeConfig) => {
@@ -593,6 +597,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
+    let active = true;
+    void getServices().then((nextServices) => {
+      if (!active) return;
+      setServices(nextServices);
+      const userId = getCurrentUserId();
+      if (userId) {
+        void getDB()
+          .then((db) =>
+            db
+              .select()
+              .from(schema.users)
+              .where(eq(schema.users.id, userId))
+              .limit(1),
+          )
+          .then((rows) => {
+            const currentUser = rows[0];
+            if (!currentUser || !active) return;
+            setUser({
+              name: currentUser.name ?? "Devpulse User",
+              email: currentUser.email,
+              handle: currentUser.name?.toLowerCase().replace(/\s+/g, "") ?? "devpulse",
+              role: "Staff Platform Engineer",
+              avatar: currentUser.avatarUrl ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.id}`,
+              isAuthenticated: true,
+            });
+          })
+          .catch((error: unknown) => {
+            console.error("[AppContext] Could not restore the local user.", error);
+          });
+      }
+    }).catch((error: unknown) => {
+      console.error("[AppContext] Could not initialize browser services.", error);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!services) return;
     void authenticatedFetch(`${API_BASE}/v1/me`, { credentials: "include" })
       .then(async (response) =>
         response.ok
@@ -603,50 +647,186 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             }>)
           : null,
       )
-      .then((currentUser) => {
-        if (!currentUser) return;
-        setUser((previous) => ({
-          ...previous,
-          email: currentUser.email,
-          name: currentUser.name || "Devpulse User",
-          avatar: currentUser.avatarUrl || previous.avatar,
-          isAuthenticated: true,
-        }));
-        setPage("theme");
-      })
-      .catch(() => undefined);
-  }, []);
+      .then((currentUser) =>
+        currentUser
+          ? loginAndLoad(currentUser.email, currentUser.name || "Devpulse User")
+          : undefined,
+      )
+      .catch((error: unknown) => {
+        console.error("[AppContext] Could not restore the authenticated session.", error);
+      });
+  }, [services]);
+
+  useEffect(() => {
+    if (!services || !user.isAuthenticated) return;
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    services.realtime.emit("presence:update", {
+      userId,
+      status: "online",
+      name: user.name,
+      at: Date.now(),
+    });
+
+    const handleUnload = () => {
+      services.realtime.emit("presence:update", {
+        userId,
+        status: "offline",
+        at: Date.now(),
+      });
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+  }, [services, user.isAuthenticated, user.name]);
 
   // Listen for keyboard shortcut Ctrl+K
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setIsCommandPaletteOpen((prev) => !prev);
+        setIsCommandPaletteOpen(true);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const login = (email?: string, name?: string) => {
-    setUser((prev) => ({
-      ...prev,
-      email: email || "alex@devpulse.dev",
-      name: name || "Alex",
+  const login = async (email?: string, name?: string) => {
+    if (!services) throw new Error("Browser services are still initializing.");
+    const db = await getDB();
+    const targetEmail = email ?? "demo@devpulse.local";
+    const existingRows = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.email, targetEmail))
+      .limit(1);
+
+    let dbUser = existingRows[0];
+    if (!dbUser) {
+      const [created] = await db.insert(schema.users).values({
+        id: crypto.randomUUID(),
+        email: targetEmail,
+        name: name ?? "Demo User",
+        avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${crypto.randomUUID()}`,
+      }).returning();
+      dbUser = created;
+    }
+
+    if (!dbUser) throw new Error("Could not create or load the local user.");
+
+    const memberships = await db
+      .select()
+      .from(schema.workspaceMembers)
+      .where(eq(schema.workspaceMembers.userId, dbUser.id))
+      .limit(1);
+    if (memberships.length === 0) {
+      const workspaceId = crypto.randomUUID();
+      const slugBase = dbUser.name?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
+      const [workspace] = await db.insert(schema.workspaces).values({
+        id: workspaceId,
+        name: `${dbUser.name ?? "Devpulse"}'s Workspace`,
+        slug: `${slugBase}-${workspaceId.slice(0, 8)}`,
+        ownerId: dbUser.id,
+      }).returning();
+      if (!workspace) throw new Error("Could not create the user's local workspace.");
+      await db.insert(schema.workspaceMembers).values({
+        workspaceId,
+        userId: dbUser.id,
+        role: "OWNER",
+      });
+      await db.insert(schema.channels).values({
+        id: crypto.randomUUID(),
+        workspaceId,
+        name: "general",
+        type: "PUBLIC",
+      });
+    }
+
+    const profile: UserProfile = {
+      name: dbUser.name ?? (name ?? "Demo User"),
+      email: dbUser.email,
+      handle: (name ?? dbUser.name ?? "demo").toLowerCase().replace(/\s+/g, "") || "demo",
+      role: "Staff Platform Engineer",
+      avatar: dbUser.avatarUrl ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${dbUser.id}`,
       isAuthenticated: true,
-    }));
-    setPage("theme");
+    };
+
+    setUser(profile);
+    initializedUserIdRef.current = dbUser.id;
+    sessionStorage.setItem("auth:current-user-id", dbUser.id);
+    sessionStorage.setItem("dp_user_id", dbUser.id);
+    services.realtime.setUserId(dbUser.id);
+    localStorage.setItem("devpulse_user_session", JSON.stringify(profile));
+    localStorage.removeItem("devpulse_logged_out");
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const userId = getCurrentUserId();
+    if (services && userId) {
+      services.realtime.emit("presence:update", {
+        userId,
+        status: "offline",
+        at: Date.now(),
+      });
+    }
+    services?.realtime.setUserId(null);
     setAccessToken(null);
     void authenticatedFetch(`${API_BASE}/v1/auth/logout`, {
       method: "POST",
       credentials: "include",
     });
-    setUser((prev) => ({ ...prev, isAuthenticated: false }));
+    setUser({
+      name: "Alex",
+      email: "alex@devpulse.dev",
+      handle: "alex",
+      role: "Staff Platform Engineer",
+      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces",
+      isAuthenticated: false,
+    });
+    sessionStorage.removeItem("auth:current-user-id");
+    sessionStorage.removeItem("dp_user_id");
+    sessionStorage.removeItem("dp_access_token");
+    localStorage.setItem("devpulse_logged_out", "true");
     setPage("login");
+  };
+
+  const loadRepositories = async () => {
+    if (!services) return;
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    const db = await getDB();
+    const workspaceMemberships = await db
+      .select()
+      .from(schema.workspaceMembers)
+      .where(eq(schema.workspaceMembers.userId, userId))
+      .limit(1);
+
+    if (workspaceMemberships.length === 0) return;
+
+    const rows = await db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.workspaceId, workspaceMemberships[0]!.workspaceId));
+
+    const repos: Repository[] = rows.map((project) => ({
+      id: project.id,
+      name: project.name,
+      description: project.description || "Browser-local project",
+      language: project.language ?? "TypeScript",
+      languageColor: getLanguageColor(project.language),
+      stars: project.stars ?? 0,
+      forks: project.forks ?? 0,
+      branch: project.defaultBranch ?? "main",
+      lastCommit: "Initial commit",
+      updatedAt: project.updatedAt?.toISOString() ?? new Date().toISOString(),
+      isStarred: project.isStarred ?? false,
+      deployStatus: (project.deployStatus as Repository["deployStatus"]) ?? "none",
+      devboxReady: project.devboxReady ?? true,
+    }));
+
+    setRepositories(repos);
   };
 
   const addRepository = async (
@@ -655,6 +835,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       "id" | "stars" | "forks" | "updatedAt" | "isStarred"
     >,
   ) => {
+    if (services) {
+      const userId = getCurrentUserId();
+      if (!userId) return;
+      const db = await getDB();
+      const memberships = await db
+        .select()
+        .from(schema.workspaceMembers)
+        .where(eq(schema.workspaceMembers.userId, userId));
+      if (memberships.length === 0) return;
+      const workspaceId = memberships[0]!.workspaceId;
+      const [created] = await db.insert(schema.projects).values({
+        id: crypto.randomUUID(),
+        name: repoData.name,
+        workspaceId,
+        language: repoData.language ?? "TypeScript",
+        defaultBranch: repoData.branch || "main",
+        description: repoData.description ?? "",
+      }).returning();
+      if (!created) return;
+      const newRepo: Repository = {
+        id: created.id,
+        name: created.name,
+        description: created.description || repoData.description,
+        language: created.language ?? "TypeScript",
+        languageColor: getLanguageColor(created.language),
+        stars: created.stars ?? 0,
+        forks: created.forks ?? 0,
+        branch: created.defaultBranch ?? "main",
+        lastCommit: "Initial commit",
+        updatedAt: created.updatedAt?.toISOString() ?? new Date().toISOString(),
+        isStarred: created.isStarred ?? false,
+        deployStatus: (created.deployStatus as Repository["deployStatus"]) ?? "none",
+        devboxReady: created.devboxReady ?? true,
+      };
+      setRepositories((previous) => [newRepo, ...previous]);
+      return;
+    }
+
     try {
       const repository = await apiJson<{
         id: string;
@@ -708,6 +926,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const deleteRepository = async (id: string) => {
+    if (services) {
+      const db = await getDB();
+      await db.delete(schema.projects).where(eq(schema.projects.id, id));
+      setRepositories((prev) => prev.filter((r) => r.id !== id));
+      return;
+    }
     try {
       await apiJson(`/v1/repositories/${id}`, { method: "DELETE" });
     } catch {
@@ -718,6 +942,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const toggleStarRepo = async (id: string) => {
     const current = repositories.find((repository) => repository.id === id);
+    if (services) {
+      const db = await getDB();
+      const nextValue = !(current?.isStarred ?? false);
+      await db
+        .update(schema.projects)
+        .set({
+          isStarred: nextValue,
+          stars: (current?.stars ?? 0) + (nextValue ? 1 : -1),
+        })
+        .where(eq(schema.projects.id, id));
+      setRepositories((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? {
+                ...r,
+                isStarred: nextValue,
+                stars: r.stars + (nextValue ? 1 : -1),
+              }
+            : r,
+        ),
+      );
+      return;
+    }
     try {
       await apiJson(`/v1/repositories/${id}`, {
         method: "PATCH",
@@ -1017,63 +1264,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     return response.status === 204 ? (undefined as T) : response.json();
   };
 
+  const loadInitialAppData = async () => {
+    if (!services) throw new Error("Browser services are still initializing.");
+    const userId = getCurrentUserId();
+    if (!userId) throw new Error("Cannot load application data without a user.");
+
+    const loadWorkspaces = async () => {
+      const response = await apiJson<{ devboxes: WorkspaceDevbox[] }>("/v1/devboxes");
+      setWorkspaces(response.devboxes);
+    };
+    const loadDeployments = async () => {
+      const response = await apiJson<{ deployments: Deployment[] }>("/v1/deployments");
+      setDeployments(response.deployments);
+    };
+    const loadEnvironmentVariables = async () => {
+      const response = await apiJson<{ variables: EnvVariable[] }>("/v1/environment-variables");
+      setEnvVars(response.variables);
+    };
+    const loadChannels = async () => {
+      const db = await getDB();
+      const memberships = await db
+        .select()
+        .from(schema.workspaceMembers)
+        .where(eq(schema.workspaceMembers.userId, userId));
+      if (memberships.length === 0) return;
+      await db
+        .select()
+        .from(schema.channels)
+        .where(eq(schema.channels.workspaceId, memberships[0]!.workspaceId));
+    };
+
+    const results = await Promise.allSettled([
+      loadRepositories(),
+      loadWorkspaces(),
+      loadDeployments(),
+      loadEnvironmentVariables(),
+      loadChannels(),
+    ]);
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failures.length > 0) {
+      console.warn(
+        "[AppContext] Some initial application data failed to load.",
+        failures.map((failure) => failure.reason),
+      );
+    }
+  };
+
+  const getPostLoginPage = (): PageType =>
+    localStorage.getItem("devpulse_theme_selected") === "true"
+      ? "repositories"
+      : "theme";
+
+  const loginAndLoad = async (email?: string, name?: string) => {
+    setIsDataLoading(true);
+    try {
+      await login(email, name);
+      initializedUserIdRef.current = getCurrentUserId() ?? null;
+      await loadInitialAppData();
+      setPage(getPostLoginPage());
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void Promise.all([
-      apiJson<{
-        repositories: Array<{
-          id: string;
-          name: string;
-          description: string;
-          language: string;
-          stars: number;
-          forks: number;
-          isStarred: boolean;
-          defaultBranch: string;
-          deployStatus: string;
-          devboxReady: boolean;
-          updatedAt: string;
-        }>;
-      }>("/v1/repositories"),
-      apiJson<{ devboxes: WorkspaceDevbox[] }>("/v1/devboxes"),
-      apiJson<{ deployments: Deployment[] }>("/v1/deployments"),
-      apiJson<{ variables: EnvVariable[] }>("/v1/environment-variables"),
-    ])
-      .then(
-        ([
-          repositoryResponse,
-          devboxResponse,
-          deploymentResponse,
-          variableResponse,
-        ]) => {
-          if (repositoryResponse.repositories.length > 0)
-            setRepositories(
-              repositoryResponse.repositories.map((repository) => ({
-                id: repository.id,
-                name: repository.name,
-                description: repository.description,
-                language: repository.language,
-                languageColor: "#3178c6",
-                stars: repository.stars,
-                forks: repository.forks,
-                branch: repository.defaultBranch,
-                lastCommit: "Persisted project",
-                updatedAt: new Date(repository.updatedAt).toLocaleString(),
-                isStarred: repository.isStarred,
-                deployStatus:
-                  repository.deployStatus as Repository["deployStatus"],
-                devboxReady: repository.devboxReady,
-              })),
-            );
-          if (devboxResponse.devboxes.length > 0)
-            setWorkspaces(devboxResponse.devboxes);
-          if (deploymentResponse.deployments.length > 0)
-            setDeployments(deploymentResponse.deployments);
-          if (variableResponse.variables.length > 0)
-            setEnvVars(variableResponse.variables);
-        },
-      )
-      .catch(() => undefined);
-  }, []);
+    if (!services || !user.isAuthenticated) return;
+    const userId = getCurrentUserId();
+    if (!userId || initializedUserIdRef.current === userId) return;
+
+    initializedUserIdRef.current = userId;
+    setIsDataLoading(true);
+    void loadInitialAppData()
+      .then(() => {
+        if (page === "login") setPage(getPostLoginPage());
+      })
+      .catch((error: unknown) => {
+        console.error("[AppContext] Could not initialize application data.", error);
+        if (page === "login") setPage(getPostLoginPage());
+      })
+      .finally(() => setIsDataLoading(false));
+  }, [services, user.isAuthenticated, page]);
 
   const editorFileFromApi = (file: {
     id: string;
@@ -1081,11 +1353,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     language?: string | null;
     version?: number;
     sizeBytes?: number | null;
+    content?: string;
   }): EditorFile => ({
     id: file.id,
     name: file.path.split("/").pop() || file.path,
     path: file.path,
-    content: "",
+    content: file.content ?? "",
     language: file.language || "plaintext",
     version: file.version ?? 1,
     apiVersion: file.version ?? 1,
@@ -1093,15 +1366,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     origin: "api",
     apiFileId: file.id,
     sizeBytes: file.sizeBytes ?? undefined,
-    isLargeFile: (file.sizeBytes ?? 0) > LARGE_FILE_LIMIT_BYTES,
+    isLargeFile: (file.sizeBytes ?? 0) > LARGE_FILE_LIMIT_BYTES || isLargeEditorContent(file.content ?? ""),
     openedAnyway: false,
     modified: false,
   });
+
+  const getLocalProjectContext = async (requestedProjectId?: string) => {
+    if (!services) return null;
+
+    const db = await getDB();
+    let projectId = requestedProjectId;
+    let projectName = "Local project";
+
+    if (!projectId) {
+      const userId = getCurrentUserId();
+      if (userId) {
+        const memberships = await db
+          .select()
+          .from(schema.workspaceMembers)
+          .where(eq(schema.workspaceMembers.userId, userId));
+
+        if (memberships.length > 0) {
+          const projectRow = await db
+            .select()
+            .from(schema.projects)
+            .where(eq(schema.projects.workspaceId, memberships[0]!.workspaceId))
+            .limit(1);
+          if (projectRow[0]) {
+            projectId = projectRow[0].id;
+            projectName = projectRow[0].name;
+          }
+        }
+      }
+    }
+
+    if (!projectId) {
+      const projectRow = await db.select().from(schema.projects).limit(1);
+      if (projectRow[0]) {
+        projectId = projectRow[0].id;
+        projectName = projectRow[0].name;
+      }
+    }
+
+    if (!projectId) return null;
+
+    const projectRow = await db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, projectId))
+      .limit(1);
+
+    if (!projectRow[0]) return null;
+
+    const fileRows = await db
+      .select()
+      .from(schema.files)
+      .where(eq(schema.files.projectId, projectId))
+      .orderBy(asc(schema.files.path));
+
+    return {
+      projectId,
+      projectName: projectRow[0].name,
+      files: fileRows.map((file) => ({
+        ...editorFileFromApi({
+          id: file.id,
+          path: file.path,
+          language: file.language,
+          version: file.version,
+          sizeBytes: file.sizeBytes,
+          content: file.content,
+        }),
+      })),
+    };
+  };
 
   const loadEditorProject = async (requestedProjectId?: string) => {
     setIsEditorLoading(true);
     setEditorError("");
     try {
+      const localProject = await getLocalProjectContext(requestedProjectId);
+      if (localProject) {
+        const nextFiles = localProject.files;
+        const nextContents = Object.fromEntries(
+          nextFiles.map((file) => [file.id, file.content]),
+        );
+        setEditorProjectId(localProject.projectId);
+        setLoadedProjectName(localProject.projectName);
+        setTreeFiles(nextFiles);
+        setFileContents(nextContents);
+        const openFileList = nextFiles.slice(0, 1);
+        setOpenFiles(openFileList);
+        setActiveFileId(openFileList[0]?.id ?? "");
+        setIsEditorProjectOpen(true);
+        return;
+      }
+
       const projectResponse = requestedProjectId
         ? null
         : await apiJson<{ projects: { id: string; name: string }[] }>(
@@ -1125,7 +1484,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           const detail = await apiJson<{ content: string }>(
             `/v1/projects/${project.id}/files/${file.id}`,
           );
-            return { file: { ...editorFileFromApi(file), content: detail.content, isLargeFile: isLargeEditorContent(detail.content) || (file.sizeBytes ?? 0) > LARGE_FILE_LIMIT_BYTES }, content: detail.content };
+          return {
+            file: {
+              ...editorFileFromApi(file),
+              content: detail.content,
+              isLargeFile: isLargeEditorContent(detail.content) || (file.sizeBytes ?? 0) > LARGE_FILE_LIMIT_BYTES,
+            },
+            content: detail.content,
+          };
         }),
       );
       const nextFiles = filesWithContent.map(({ file }) => file);
@@ -1180,11 +1546,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const saveFileContent = async (fileId: string, contentOverride?: string, forceOverride = false) => {
     const content = contentOverride ?? fileContents[fileId] ?? "";
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
+    const savedAt = new Date();
+
+    if (services && currentFile && currentFile.origin !== "new") {
+      try {
+        const targetId = currentFile.apiFileId || currentFile.id;
+        const saved = await services.files.saveFile(targetId, content, "Autosave");
+        setOpenFiles((prev) =>
+          prev.map((file) =>
+            file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.id, lastSavedAt: savedAt } : file,
+          ),
+        );
+        setTreeFiles((prev) =>
+          prev.map((file) =>
+            file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.id, lastSavedAt: savedAt } : file,
+          ),
+        );
+        return;
+      } catch {
+        // Fall back to the REST-compatible path if a local file is not yet persisted.
+      }
+    }
+
     const saved = await apiJson<{ id: string; version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || fileId}`, {
       method: "PATCH",
       body: JSON.stringify({ content, expectedVersion: currentFile?.apiVersion ?? currentFile?.version, forceOverride }),
     });
-    const savedAt = new Date();
     setOpenFiles((prev) =>
       prev.map((file) =>
         file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.revisionId, lastSavedAt: savedAt } : file,
@@ -1200,14 +1587,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const saveLocalFileToProject = async (fileId: string, path?: string) => {
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
     if (!currentFile) throw new Error("File is no longer open");
+
+    const promotedPath = path || currentFile.path;
+    const content = fileContents[fileId] ?? currentFile.content;
+
+    if (services) {
+      let projectId = editorProjectId;
+      if (!projectId) {
+        const db = await getDB();
+        const firstProject = await db.select().from(schema.projects).limit(1);
+        projectId = firstProject[0]?.id ?? "";
+      }
+      if (!projectId) throw new Error("No editor project is available");
+
+      const created = await services.files.createFile({
+        projectId,
+        path: promotedPath,
+        content,
+        language: currentFile.language,
+      });
+
+      const promoted = {
+        ...currentFile,
+        id: created.id,
+        name: promotedPath.split("/").pop() || currentFile.name,
+        path: promotedPath,
+        apiFileId: created.id,
+        origin: "api" as const,
+        version: created.version,
+        revisionId: created.id,
+        lastSavedAt: new Date(),
+        content,
+        modified: false,
+        isDirty: false,
+      };
+
+      setFileContents((prev) => {
+        const next: Record<string, string> = { ...prev, [created.id]: content };
+        delete next[fileId];
+        return next;
+      });
+      setOpenFiles((prev) => prev.map((file) => file.id === fileId ? promoted : file));
+      setTreeFiles((prev) => prev.map((file) => file.id === fileId ? promoted : file));
+      if (activeFileId === fileId) setActiveFileId(created.id);
+      return;
+    }
+
     const projectId = editorProjectId || (await apiJson<{ projects: { id: string }[] }>("/v1/projects")).projects[0]?.id;
     if (!projectId) throw new Error("No editor project is available");
-    const created = await apiJson<{ id: string; version?: number }>(`/v1/projects/${projectId}/files`, { method: "POST", body: JSON.stringify({ path: path || currentFile.path, content: "", language: currentFile.language }) });
-    const content = fileContents[fileId] ?? currentFile.content;
+    const created = await apiJson<{ id: string; version?: number }>(`/v1/projects/${projectId}/files`, { method: "POST", body: JSON.stringify({ path: promotedPath, content: "", language: currentFile.language }) });
     const saved = await apiJson<{ version: number; revisionId?: string }>(`/v1/files/${created.id}`, { method: "PATCH", body: JSON.stringify({ content, expectedVersion: created.version ?? 1 }) });
-    const promotedPath = path || currentFile.path;
     const promoted = { ...currentFile, id: created.id, name: promotedPath.split("/").pop() || currentFile.name, path: promotedPath, apiFileId: created.id, origin: "api" as const, version: saved.version, revisionId: saved.revisionId, lastSavedAt: new Date(), content, modified: false, isDirty: false };
-    setFileContents((prev) => { const next = { ...prev, [created.id]: content }; delete next[fileId]; return next; });
+    setFileContents((prev) => { const next: Record<string, string> = { ...prev, [created.id]: content }; delete next[fileId]; return next; });
     setOpenFiles((prev) => prev.map((file) => file.id === fileId ? promoted : file));
     setTreeFiles((prev) => prev.map((file) => file.id === fileId ? promoted : file));
     if (activeFileId === fileId) setActiveFileId(created.id);
@@ -1234,7 +1665,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     path?: string,
     initialContent?: string,
   ) => {
-    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: path || name, content: initialContent || "", language: name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript", version: 1, apiVersion: 1, iconType: getIconType(name), origin: "new", isLargeFile: isLargeEditorContent(initialContent || ""), openedAnyway: false, modified: true, isDirty: true };
+    const normalizedPath = path || name;
+    const fileLanguage = name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript";
+
+    if (services && editorProjectId) {
+      try {
+        const created = await services.files.createFile({
+          projectId: editorProjectId,
+          path: normalizedPath,
+          content: initialContent || "",
+          language: fileLanguage,
+        });
+        const newFile: EditorFile = {
+          id: created.id,
+          name,
+          path: normalizedPath,
+          content: created.content,
+          language: fileLanguage,
+          version: created.version,
+          apiVersion: created.version,
+          iconType: getIconType(name),
+          origin: "api",
+          apiFileId: created.id,
+          revisionId: created.id,
+          isLargeFile: isLargeEditorContent(created.content),
+          openedAnyway: false,
+          modified: false,
+          isDirty: false,
+        };
+        setTreeFiles((prev) => [...prev, newFile]);
+        setFileContents((prev) => ({ ...prev, [newFile.id]: created.content }));
+        openFileInEditor(newFile);
+        return;
+      } catch {
+        // Fall back to the in-memory/editor-only file if the browser DB is not ready yet.
+      }
+    }
+
+    const newFile: EditorFile = { id: crypto.randomUUID(), name, path: normalizedPath, content: initialContent || "", language: fileLanguage, version: 1, apiVersion: 1, iconType: getIconType(name), origin: "new", isLargeFile: isLargeEditorContent(initialContent || ""), openedAnyway: false, modified: true, isDirty: true };
     setTreeFiles((prev) => [...prev, newFile]);
     setFileContents((prev) => ({
       ...prev,
@@ -1244,7 +1712,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const deleteFile = async (fileId: string) => {
-    await apiJson<void>(`/v1/files/${fileId}`, { method: "DELETE" });
+    const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
+    if (services && currentFile) {
+      try {
+        const targetId = currentFile.apiFileId || fileId;
+        await services.files.deleteFile(targetId);
+      } catch {
+        // Keep the UI working even if a file was never persisted.
+      }
+    } else {
+      await apiJson<void>(`/v1/files/${fileId}`, { method: "DELETE" }).catch(() => undefined);
+    }
     setTreeFiles((prev) => prev.filter((f) => f.id !== fileId));
     closeFileFromEditor(fileId);
     setFileContents((prev) => {
@@ -1290,6 +1768,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       : current;
     setFileContents((prev) => ({ ...prev, [activeFileId]: nextContent }));
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === activeFileId);
+
+    if (services && currentFile && currentFile.origin !== "new") {
+      try {
+        const saved = await services.files.saveFile(currentFile.apiFileId || currentFile.id, nextContent, "AI assistant update");
+        setOpenFiles((prev) =>
+          prev.map((file) =>
+            file.id === activeFileId ? { ...file, content: nextContent, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.id } : file,
+          ),
+        );
+        setTreeFiles((prev) =>
+          prev.map((file) =>
+            file.id === activeFileId ? { ...file, content: nextContent, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.id } : file,
+          ),
+        );
+        return;
+      } catch {
+        // Fall back to the REST-compatible path if the file is not yet persisted locally.
+      }
+    }
+
     const saved = await apiJson<{ version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || activeFileId}`, {
       method: "PATCH",
       body: JSON.stringify({ content: nextContent, expectedVersion: currentFile?.apiVersion ?? currentFile?.version }),
@@ -1317,6 +1815,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         setPage,
         user,
         login,
+        loginAndLoad,
+        isDataLoading,
         logout,
         theme,
         setTheme,

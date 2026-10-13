@@ -1,7 +1,31 @@
 import type { Message } from "./db/schema";
 
+export type DPEventType =
+  | "message:new"
+  | "message:deleted"
+  | "user:typing:start"
+  | "user:typing:stop"
+  | "cursor:move"
+  | "file:changed"
+  | "editor:operation"
+  | "presence:update"
+  | "session:sync"
+  | "devbox:status"
+  | "deployment:status"
+  | "deployment:log"
+  | "huddle:join"
+  | "huddle:leave"
+  | "huddle:mute"
+  | "huddle:camera";
+
 export type DevpulseEventMap = {
-  "message:new": { channelId: string; message: Message };
+  "message:new": {
+    channelId: string;
+    content: string;
+    authorId: string;
+    authorName?: string;
+    message?: Message;
+  };
   "message:deleted": { channelId: string; messageId: string };
   "user:typing:start": { channelId: string; userId: string };
   "user:typing:stop": { channelId: string; userId: string };
@@ -11,42 +35,70 @@ export type DevpulseEventMap = {
     position: { line: number; column: number };
   };
   "file:changed": { fileId: string; projectId: string };
+  "editor:operation": {
+    fileId: string;
+    userId: string;
+    operation: Record<string, unknown>;
+  };
   "presence:update": {
     userId: string;
     status: "online" | "away" | "offline";
-    at: number;
+    at?: number;
+    name?: string;
   };
-  "session:sync": { userId: string; updatedAt: number };
+  "session:sync": {
+    userId: string;
+    updatedAt: number;
+    projectId?: string;
+    startedAt?: number;
+  };
+  "devbox:status": { devboxId: string; status: string };
+  "deployment:status": { deploymentId: string; status: string };
+  "deployment:log": { deploymentId: string; line: string };
+  "huddle:join": { userId: string; roomId?: string };
+  "huddle:leave": { userId: string; roomId?: string };
+  "huddle:mute": { userId: string; muted: boolean; roomId?: string };
+  "huddle:camera": { userId: string; enabled: boolean; roomId?: string };
 };
 
-export type DevpulseEventType = keyof DevpulseEventMap;
+export type DevpulseEventType = DPEventType;
 
 interface BroadcastEnvelope {
-  type: DevpulseEventType;
-  payload: DevpulseEventMap[DevpulseEventType];
+  type: DPEventType;
+  payload: DevpulseEventMap[DPEventType];
   senderId: string;
   senderTabId: string;
   timestamp: number;
 }
 
-type EventHandler<Type extends DevpulseEventType> = (
+type EventHandler<Type extends DPEventType> = (
   payload: DevpulseEventMap[Type],
 ) => void;
+
+const EVENT_TYPES = new Set<DPEventType>([
+  "message:new",
+  "message:deleted",
+  "user:typing:start",
+  "user:typing:stop",
+  "cursor:move",
+  "file:changed",
+  "editor:operation",
+  "presence:update",
+  "session:sync",
+  "devbox:status",
+  "deployment:status",
+  "deployment:log",
+  "huddle:join",
+  "huddle:leave",
+  "huddle:mute",
+  "huddle:camera",
+]);
 
 function isEventEnvelope(value: unknown): value is BroadcastEnvelope {
   if (typeof value !== "object" || value === null) return false;
   const event = value as Partial<BroadcastEnvelope>;
   return typeof event.type === "string"
-    && Object.hasOwn({
-      "message:new": true,
-      "message:deleted": true,
-      "user:typing:start": true,
-      "user:typing:stop": true,
-      "cursor:move": true,
-      "file:changed": true,
-      "presence:update": true,
-      "session:sync": true,
-    }, event.type)
+    && EVENT_TYPES.has(event.type as DPEventType)
     && "payload" in event
     && typeof event.senderTabId === "string";
 }
@@ -56,7 +108,7 @@ export class RealtimeService {
   private readonly channel: BroadcastChannel;
   private readonly worker: SharedWorker | null;
   private sourceId: string;
-  private readonly handlers = new Map<DevpulseEventType, Set<(payload: never) => void>>();
+  private readonly handlers = new Map<DPEventType, Set<(payload: never) => void>>();
   private readonly presenceListeners = new Set<(users: Record<string, string>) => void>();
   private closed = false;
 
@@ -82,8 +134,7 @@ export class RealtimeService {
             payload?: unknown;
           } | null;
           if (data?.type === "presence:update" && isPresenceSnapshot(data.payload)) {
-            const payload = data.payload as Record<string, string>;
-            this.presenceListeners.forEach((listener) => listener(payload));
+            this.presenceListeners.forEach((listener) => listener(data.payload as Record<string, string>));
           }
         };
         this.worker.port.start();
@@ -96,7 +147,7 @@ export class RealtimeService {
     }
   }
 
-  on<Type extends DevpulseEventType>(
+  on<Type extends DPEventType>(
     type: Type,
     handler: EventHandler<Type>,
   ): () => void {
@@ -111,7 +162,7 @@ export class RealtimeService {
     return () => listeners?.delete(listener);
   }
 
-  emit<Type extends DevpulseEventType>(
+  emit<Type extends DPEventType>(
     type: Type,
     payload: DevpulseEventMap[Type],
   ): void {
@@ -122,11 +173,15 @@ export class RealtimeService {
       senderId: this.sourceId,
       senderTabId: RealtimeService.tabId,
       timestamp: Date.now(),
-    } as BroadcastEnvelope;
+    };
     this.dispatch(type, payload);
     this.channel.postMessage(event);
     if (type === "presence:update") {
-      this.worker?.port.postMessage({ type: "presence:set", payload });
+      const presence = payload as DevpulseEventMap["presence:update"];
+      this.worker?.port.postMessage({
+        type: "presence:set",
+        payload: { ...presence, at: presence.at ?? Date.now() },
+      });
     }
   }
 
@@ -144,8 +199,14 @@ export class RealtimeService {
     if (userId) this.updatePresence("online");
   }
 
-  sendMessage(channelId: string, message: Message): void {
-    this.emit("message:new", { channelId, message });
+  sendMessage(channelId: string, message: Message, authorName?: string): void {
+    this.emit("message:new", {
+      channelId,
+      content: message.body,
+      authorId: message.authorId,
+      authorName,
+      message,
+    });
   }
 
   sendTypingStart(channelId: string): void {
@@ -156,8 +217,13 @@ export class RealtimeService {
     this.emit("user:typing:stop", { channelId, userId: this.sourceId });
   }
 
-  updatePresence(status: "online" | "away" | "offline"): void {
-    this.emit("presence:update", { userId: this.sourceId, status, at: Date.now() });
+  updatePresence(status: "online" | "away" | "offline", name?: string): void {
+    this.emit("presence:update", {
+      userId: this.sourceId,
+      status,
+      at: Date.now(),
+      name,
+    });
   }
 
   moveCursor(fileId: string, position: { line: number; column: number }): void {
@@ -170,18 +236,21 @@ export class RealtimeService {
 
   destroy(): void {
     if (this.closed) return;
+    if (this.sourceId !== "anonymous") {
+      this.emit("presence:update", {
+        userId: this.sourceId,
+        status: "offline",
+        at: Date.now(),
+      });
+    }
     this.closed = true;
-    this.worker?.port.postMessage({
-      type: "presence:set",
-      payload: { userId: this.sourceId, status: "offline", at: Date.now() },
-    });
     this.channel.close();
     this.worker?.port.close();
     this.handlers.clear();
     this.presenceListeners.clear();
   }
 
-  private dispatch<Type extends DevpulseEventType>(
+  private dispatch<Type extends DPEventType>(
     type: Type,
     payload: DevpulseEventMap[Type],
   ): void {

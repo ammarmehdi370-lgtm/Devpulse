@@ -1,6 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { desc, eq } from "drizzle-orm";
+import { getDB } from "../../src/lib/db";
+import * as schema from "../../src/lib/db/schema";
+import { getServices, type DevpulseServices } from "../../src/lib/services";
 import { useApp } from "../context/AppContext";
 import {
   Hash,
@@ -40,8 +44,11 @@ interface ChatMessage {
 
 export const TeamChatPage: React.FC = () => {
   const { theme, user } = useApp();
-  const [activeChannel, setActiveChannel] = useState("frontend");
+  const [services, setServices] = useState<DevpulseServices | null>(null);
+  const [activeChannel, setActiveChannel] = useState("general");
+  const [activeChannelId, setActiveChannelId] = useState("");
   const [messageInput, setMessageInput] = useState("");
+  const sentMessageIds = useRef(new Set<string>());
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -91,9 +98,160 @@ export const TeamChatPage: React.FC = () => {
     },
   ]);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  useEffect(() => {
+    let active = true;
+    void getServices().then(
+      (nextServices) => {
+        if (active) setServices(nextServices);
+      },
+      (error: unknown) => {
+        console.error("Could not initialize chat realtime services.", error);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    setActiveChannelId("");
+    const loadMessages = async () => {
+      const db = await getDB();
+      const userId = sessionStorage.getItem("dp_user_id");
+      if (!userId) return;
+
+      const memberships = await db
+        .select()
+        .from(schema.workspaceMembers)
+        .where(eq(schema.workspaceMembers.userId, userId));
+
+      if (memberships.length === 0) return;
+
+      const workspaceId = memberships[0]!.workspaceId;
+      const channelRows = await db
+        .select()
+        .from(schema.channels)
+        .where(eq(schema.channels.workspaceId, workspaceId))
+        .limit(1);
+
+      const channel = channelRows.find((row) => row.name === activeChannel) ?? channelRows[0];
+      if (!channel || !active) return;
+      setActiveChannelId(channel.id);
+
+      const rows = await db
+        .select()
+        .from(schema.messages)
+        .where(eq(schema.messages.channelId, channel.id))
+        .orderBy(desc(schema.messages.createdAt))
+        .limit(25);
+
+      if (!active) return;
+      setMessages(
+        rows
+          .reverse()
+          .map((row, index) => ({
+            id: index + 1,
+            sender: row.authorId,
+            role: "Member",
+            roleColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
+            avatar: row.authorId.slice(0, 1).toUpperCase(),
+            time: new Date(row.createdAt ?? Date.now()).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            }),
+            text: row.body,
+            reactions: [],
+          })),
+      );
+    };
+
+    void loadMessages();
+    return () => {
+      active = false;
+    };
+  }, [activeChannel]);
+
+  useEffect(() => {
+    if (!services || !activeChannelId) return;
+
+    return services.realtime.on("message:new", (payload) => {
+      if (payload.channelId !== activeChannelId) return;
+      if (payload.message && sentMessageIds.current.delete(payload.message.id)) return;
+
+      const authorName = payload.authorName ?? payload.message?.authorId ?? payload.authorId ?? "Team Member";
+      setMessages((previous) => [...previous, {
+        id: Date.now(),
+        sender: authorName,
+        role: "Member",
+        roleColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
+        avatar: authorName.slice(0, 1).toUpperCase(),
+        time: new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        text: payload.content,
+        reactions: [],
+      }]);
+    });
+  }, [services, activeChannelId]);
+
+  const handleTyping = (value: string) => {
+    setMessageInput(value);
+    const userId = sessionStorage.getItem("dp_user_id") ?? "anonymous";
+    if (value.trim() && activeChannelId) {
+      services?.realtime.emit("user:typing:start", { channelId: activeChannelId, userId });
+    } else if (activeChannelId) {
+      services?.realtime.emit("user:typing:stop", { channelId: activeChannelId, userId });
+    }
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!messageInput.trim()) return;
+    const content = messageInput.trim();
+    if (!content) return;
+
+    const db = await getDB();
+    const userId = sessionStorage.getItem("dp_user_id");
+    if (!userId) return;
+
+    const memberships = await db
+      .select()
+      .from(schema.workspaceMembers)
+      .where(eq(schema.workspaceMembers.userId, userId));
+
+    if (memberships.length > 0) {
+      const workspaceId = memberships[0]!.workspaceId;
+      const channelRows = await db
+        .select()
+        .from(schema.channels)
+        .where(eq(schema.channels.workspaceId, workspaceId));
+
+      let channel = channelRows.find((row) => row.name === activeChannel);
+      if (!channel) {
+        const [created] = await db
+          .insert(schema.channels)
+          .values({
+            id: crypto.randomUUID(),
+            workspaceId,
+            name: activeChannel,
+            type: "PUBLIC",
+          })
+          .returning();
+        channel = created;
+      }
+
+      if (channel) {
+        const [storedMessage] = await db.insert(schema.messages).values({
+          id: crypto.randomUUID(),
+          channelId: channel.id,
+          authorId: userId,
+          body: content,
+        }).returning();
+        if (!storedMessage) throw new Error("Message insert returned no row.");
+        if (services) {
+          sentMessageIds.current.add(storedMessage.id);
+          services.realtime.sendMessage(channel.id, storedMessage, user.name);
+        }
+      }
+    }
 
     const newMsg = {
       id: Date.now(),
@@ -102,11 +260,17 @@ export const TeamChatPage: React.FC = () => {
       roleColor: "bg-indigo-500/20 text-indigo-300 border-indigo-500/30",
       avatar: user.avatar,
       time: "Just now",
-      text: messageInput.trim(),
+      text: content,
       reactions: [],
     };
 
-    setMessages([...messages, newMsg]);
+    setMessages((previous) => [...previous, newMsg]);
+    if (activeChannelId) {
+      services?.realtime.emit("user:typing:stop", {
+        channelId: activeChannelId,
+        userId: sessionStorage.getItem("dp_user_id") ?? "anonymous",
+      });
+    }
     setMessageInput("");
   };
 
@@ -301,7 +465,7 @@ export const TeamChatPage: React.FC = () => {
             <input
               type="text"
               value={messageInput}
-              onChange={(e) => setMessageInput(e.target.value)}
+              onChange={(e) => handleTyping(e.target.value)}
               placeholder={`Message #${activeChannel} (Type @ to mention, / for commands, ESC for actions...)`}
               className="w-full pl-4 pr-24 py-3 bg-[#13131e] border border-[#242436] rounded-xl text-xs text-white placeholder-[#585874] focus:outline-none focus:border-[#6C63FF]"
             />

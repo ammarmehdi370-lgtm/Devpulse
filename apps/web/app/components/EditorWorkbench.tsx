@@ -10,9 +10,10 @@ import {
   AlertCircle, LoaderCircle,
 } from "lucide-react";
 import { ApiRequestError, EditorFile, useApp } from "../context/AppContext";
-import { io, Socket } from "socket.io-client";
 import ContributorGraph from "./ContributorGraph";
 import { authenticatedFetch as fetch } from "../lib/apiClient";
+import { getServices } from "../../src/lib/services";
+import type { RealtimeService } from "../../src/lib/realtime";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 const DiffEditor = dynamic(() => import("@monaco-editor/react").then((module) => module.DiffEditor), { ssr: false });
@@ -331,6 +332,36 @@ const debounce = <T extends (...args: never[]) => void>(callback: T, delay: numb
   return debounced;
 };
 
+const localEditorSessionKey = (projectId: string) => `dp-editor-session-${projectId}`;
+
+const readStoredEditorSession = (projectId: string): SessionState | null => {
+  if (typeof window === "undefined" || !projectId) return null;
+  try {
+    const rawValue = window.localStorage.getItem(localEditorSessionKey(projectId));
+    if (!rawValue) return null;
+    const parsed = JSON.parse(rawValue) as Partial<SessionState>;
+    if (!parsed || !Array.isArray(parsed.openFiles)) return null;
+    return {
+      openFiles: parsed.openFiles,
+      activeFile: parsed.activeFile ?? parsed.openFiles[0],
+      scrollPositions: parsed.scrollPositions ?? {},
+      cursorPositions: parsed.cursorPositions ?? {},
+    };
+  } catch {
+    return null;
+  }
+};
+
+const persistStoredEditorSession = (projectId: string, state: SessionState) => {
+  if (typeof window === "undefined" || !projectId) return;
+  window.localStorage.setItem(localEditorSessionKey(projectId), JSON.stringify({
+    openFiles: state.openFiles,
+    activeFile: state.activeFile,
+    scrollPositions: state.scrollPositions,
+    cursorPositions: state.cursorPositions,
+  }));
+};
+
 const FileTypeIcon: React.FC<{ file: EditorFile; className?: string }> = ({ file, className = "h-4 w-4" }) => {
   const extension = file.name.split(".").pop()?.toLowerCase();
   if (["tsx", "jsx", "ts", "js"].includes(extension || "")) return <FileCode className={`${className} text-cyan-400`} />;
@@ -577,10 +608,10 @@ const ConflictModal: React.FC<{ file: EditorFile; projectId: string; mine: strin
 export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ projectId }) => {
   const { user, isEditorProjectOpen, setIsEditorProjectOpen, editorProjectId, isEditorLoading, editorError, loadEditorProject, loadedProjectName, treeFiles, openFiles, activeFileId, setActiveFileId, fileContents, updateFileContent, updateOpenFileMetadata, saveFileContent, saveLocalFileToProject, openFileInEditor, closeFileFromEditor, createNewFile, deleteFile, loadUserLocalFiles, loadSingleLocalFile, isAiDrawerOpen, setIsAiDrawerOpen, applyDiffToActiveFile: applyDiffToActiveFileRemote, setIsCommandPaletteOpen } = useApp();
   const editorRef = useRef<EditorHandle | null>(null);
+  const realtimeRef = useRef<RealtimeService | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const aiAbortRef = useRef<AbortController | null>(null);
-  const socketRef = useRef<Socket | null>(null);
   const [isOutputOpen, setIsOutputOpen] = useState(true);
   const [isRevisionPanelOpen, setIsRevisionPanelOpen] = useState(false);
   const [isContributorPanelOpen, setIsContributorPanelOpen] = useState(false);
@@ -632,6 +663,7 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const scrollPositionsRef = useRef<Record<string, number>>({});
   const cursorPositionsRef = useRef<Record<string, SessionCursorPosition>>({});
+  const lastEmittedCursorRef = useRef<Record<string, string>>({});
   const latestSessionRef = useRef<SessionState>({ openFiles: [], scrollPositions: {}, cursorPositions: {} });
   const restoredProjectRef = useRef<string | null>(null);
   const sessionReadyRef = useRef(false);
@@ -677,7 +709,14 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
   const saveSession = useMemo(() => debounce((state: SessionState) => {
     if (!editorProjectId) return;
     const apiFiles = state.openFiles.filter((file) => file.origin === FileOrigin.API);
-    if (apiFiles.length === 0) return;
+    if (apiFiles.length === 0) {
+      persistStoredEditorSession(editorProjectId, state);
+      return;
+    }
+    if (typeof window !== "undefined") {
+      persistStoredEditorSession(editorProjectId, state);
+      return;
+    }
     void fetch(`${API_BASE}/v1/editor/session`, {
       method: "PUT",
       credentials: "include",
@@ -691,9 +730,47 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       }),
     }).catch(() => undefined);
   }, 3000), [editorProjectId]);
-  const queueSessionSave = useCallback(() => { if (sessionReadyRef.current) saveSession(latestSessionRef.current); }, [saveSession]);
+  const emitCurrentCursor = useCallback(() => {
+    const file = latestSessionRef.current.activeFile;
+    if (!file) return;
+    const fileId = file.apiFileId || file.id;
+    const position = cursorPositionsRef.current[fileId];
+    if (!position) return;
+    const realtime = realtimeRef.current;
+    if (!realtime) return;
+    const cursorKey = `${position.line}:${position.col}`;
+    if (lastEmittedCursorRef.current[fileId] === cursorKey) return;
+    realtime.emit("cursor:move", {
+      fileId,
+      userId: sessionStorage.getItem("dp_user_id") ?? "anonymous",
+      position: { line: position.line, column: position.col },
+    });
+    lastEmittedCursorRef.current[fileId] = cursorKey;
+  }, []);
+  const queueSessionSave = useCallback(() => {
+    if (sessionReadyRef.current) saveSession(latestSessionRef.current);
+    emitCurrentCursor();
+  }, [emitCurrentCursor, saveSession]);
 
   latestSessionRef.current = { openFiles, activeFile, scrollPositions: scrollPositionsRef.current, cursorPositions: cursorPositionsRef.current };
+
+  useEffect(() => {
+    let active = true;
+    void getServices().then(
+      (services) => {
+        if (!active) return;
+        realtimeRef.current = services.realtime;
+        emitCurrentCursor();
+      },
+      (error: unknown) => {
+        console.error("Could not initialize editor realtime services.", error);
+      },
+    );
+    return () => {
+      active = false;
+      realtimeRef.current = null;
+    };
+  }, [emitCurrentCursor]);
 
   useEffect(() => () => saveSession.cancel(), [saveSession]);
 
@@ -703,6 +780,25 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     let cancelled = false;
     const restoreSession = async () => {
       try {
+        const storedSession = readStoredEditorSession(editorProjectId);
+        if (storedSession && storedSession.openFiles.length > 0) {
+          const restoreMatches = storedSession.openFiles
+            .map((file) => treeFiles.find((candidate) => candidate.id === file.id || (candidate.apiFileId && candidate.apiFileId === file.apiFileId) || candidate.path === file.path))
+            .filter((file): file is EditorFile => Boolean(file));
+          if (cancelled) return;
+          openFiles.forEach((file) => closeFileFromEditor(file.id));
+          restoreMatches.forEach((file) => openFileInEditor(file));
+          const active = restoreMatches.find((file) => file.id === storedSession.activeFile?.id || file.path === storedSession.activeFile?.path) || restoreMatches[0];
+          if (active) setActiveFileId(active.id);
+          scrollPositionsRef.current = storedSession.scrollPositions || {};
+          cursorPositionsRef.current = storedSession.cursorPositions || {};
+          sessionReadyRef.current = true;
+          if (restoreMatches.length > 0) {
+            setSessionNotice(`Restored your last browser session (${restoreMatches.length} files, ${active?.name || "file"} active)`);
+            window.setTimeout(() => setSessionNotice(null), 3000);
+          }
+          return;
+        }
         const response = await fetch(`${API_BASE}/v1/editor/session/${editorProjectId}`, { credentials: "include" });
         if (!response.ok) throw new Error("Session could not be loaded");
         const { session } = await response.json() as SessionResponse;
@@ -743,14 +839,47 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
 
   useEffect(() => { if (isEditorLoading || isOfflineMode) return; if (projectId && editorProjectId !== projectId) void loadEditorProject(projectId); else if (!projectId && !editorProjectId) void loadEditorProject(); }, [projectId, editorProjectId, isEditorLoading, isOfflineMode, loadEditorProject]);
   useEffect(() => {
-    if (!editorProjectId) return;
-    const client = io(process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4001", { transports: ["websocket"] });
-    socketRef.current = client;
-    client.emit("workspace:join", editorProjectId);
-    client.on("file:editing", (payload: { fileId: string; userId: string; userName?: string }) => { if (payload.userId !== user.email) setPresenceByFile((previous) => ({ ...previous, [payload.fileId]: { userId: payload.userId, name: payload.userName || "A collaborator" } })); });
-    return () => { client.emit("workspace:leave", editorProjectId); client.disconnect(); socketRef.current = null; setPresenceByFile({}); };
+    if (!editorProjectId) {
+      setPresenceByFile({});
+      return;
+    }
+
+    let active = true;
+    let unsubscribeCursor: (() => void) | undefined;
+    let unsubscribePresence: (() => void) | undefined;
+    void getServices().then(
+      ({ realtime }) => {
+        if (!active) return;
+        realtimeRef.current = realtime;
+        const currentUserId = sessionStorage.getItem("dp_user_id") ?? user.email;
+        unsubscribeCursor = realtime.on("cursor:move", (payload) => {
+          if (payload.userId === currentUserId) return;
+          setPresenceByFile((previous) => {
+            const next = Object.fromEntries(
+              Object.entries(previous).filter(([, presence]) => presence.userId !== payload.userId),
+            );
+            next[payload.fileId] = { userId: payload.userId, name: payload.userId || "A collaborator" };
+            return next;
+          });
+        });
+        unsubscribePresence = realtime.on("presence:update", (payload) => {
+          if (payload.status !== "offline") return;
+          setPresenceByFile((previous) => Object.fromEntries(
+            Object.entries(previous).filter(([, presence]) => presence.userId !== payload.userId),
+          ));
+        });
+      },
+      (error: unknown) => {
+        console.error("Could not subscribe to editor realtime events.", error);
+      },
+    );
+    return () => {
+      active = false;
+      unsubscribeCursor?.();
+      unsubscribePresence?.();
+      setPresenceByFile({});
+    };
   }, [editorProjectId, user.email]);
-  useEffect(() => { if (!activeFile || !editorProjectId) return; socketRef.current?.emit("file:editing", { workspaceId: editorProjectId, fileId: activeFile.apiFileId || activeFile.id, userId: user.email, userName: user.name || user.email }); }, [activeFile?.id, activeFile?.apiFileId, editorProjectId, user.email, user.name]);
   useEffect(() => { if (!isEditorLoading && isEditorProjectOpen) announceProject(`Project loaded. ${treeFiles.length} files available.`); }, [isEditorLoading, isEditorProjectOpen, treeFiles.length, announceProject]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   const cacheAiMessages = (fileId: string, nextMessages: AiMessage[]) => { localStorage.setItem(`dp-ai-history-${fileId}`, JSON.stringify(nextMessages.slice(-20))); };
@@ -808,6 +937,9 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     closeFileFromEditor(fileId);
     if (closingLastTab && editorProjectId) {
       saveSession.cancel();
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(localEditorSessionKey(editorProjectId));
+      }
       void fetch(`${API_BASE}/v1/editor/session/${editorProjectId}`, { method: "DELETE", credentials: "include" }).catch(() => undefined);
       sessionReadyRef.current = false;
     }
@@ -990,7 +1122,22 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     if (action === "new") setIsCreatingFile(true);
     else if (action === "copy") await navigator.clipboard.writeText(file.path);
     else if (action === "delete") { if (window.confirm(`Delete ${file.path}?`)) await deleteFile(file.id); }
-    else { const nextPath = window.prompt("Rename file", file.path); if (nextPath && nextPath !== file.path) { await fetch(`${API_BASE}/v1/files/${file.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: nextPath, expectedVersion: file.apiVersion ?? file.version }) }); await loadEditorProject(); } }
+    else {
+      const nextPath = window.prompt("Rename file", file.path);
+      if (nextPath && nextPath !== file.path) {
+        try {
+          const browserServices = await getServices().catch(() => null);
+          if (browserServices && file.origin !== "new") {
+            await browserServices.files.renameFile(file.apiFileId || file.id, nextPath);
+          } else {
+            await fetch(`${API_BASE}/v1/files/${file.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: nextPath, expectedVersion: file.apiVersion ?? file.version }) });
+          }
+          await loadEditorProject();
+        } catch {
+          setRunOutput("Rename could not be completed in the browser-local project.");
+        }
+      }
+    }
   };
   const createFile = async (event: React.FormEvent) => { event.preventDefault(); if (!newFileName.trim()) return; await createNewFile(newFileName.trim(), newFileName.trim(), ""); setNewFileName(""); setIsCreatingFile(false); };
   const fileTree = useMemo(() => {

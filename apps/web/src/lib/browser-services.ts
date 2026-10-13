@@ -72,3 +72,5 @@ export class BrowserServices {
     this.initialized = true;
   }
 }
+
+export const getServices = (): Promise<BrowserServices> => BrowserServices.getInstance();

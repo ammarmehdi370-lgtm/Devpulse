@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
-import { io, Socket } from "socket.io-client";
+import { getServices, type DevpulseServices } from "../../src/lib/services";
 import {
   Layers,
   Mic,
@@ -42,35 +42,77 @@ export const RemoteControlPage: React.FC = () => {
   const [seconds, setSeconds] = useState(0);
   const [latency, setLatency] = useState(18);
   const [ahmedTyping, setAhmedTyping] = useState(true);
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [services, setServices] = useState<DevpulseServices | null>(null);
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [remoteSelection, setRemoteSelection] = useState({ start: 0, end: 0 });
+  const typingTimeoutRef = useRef<number | null>(null);
   const workspaceId = "demo";
 
   useEffect(() => {
-    const client = io(
-      process.env.NEXT_PUBLIC_SOCKET_URL ?? "http://localhost:4001",
-      { transports: ["websocket"] },
-    );
-    setSocket(client);
-    client.emit("workspace:join", workspaceId);
-    client.emit("presence:update", { workspaceId, status: "controlling" });
-    client.on("session:state", (payload: { startedAt: number }) =>
-      setSessionStartedAt(payload.startedAt),
-    );
-    client.on("code:changed", (payload: { code: string }) =>
-      updateRemoteCode(payload.code),
-    );
-    client.on("cursor:changed", (payload: { start: number; end: number }) =>
-      setRemoteSelection({ start: payload.start, end: payload.end }),
-    );
-    client.on("typing:changed", (payload: { typing: boolean }) =>
-      setAhmedTyping(payload.typing),
+    let active = true;
+    let unsubscribeSession: (() => void) | undefined;
+    let unsubscribeOperations: (() => void) | undefined;
+    let unsubscribeTypingStart: (() => void) | undefined;
+    let unsubscribeTypingStop: (() => void) | undefined;
+    void getServices().then(
+      (nextServices) => {
+        if (!active) return;
+        setServices(nextServices);
+        const channel = nextServices.realtime;
+        const userId = sessionStorage.getItem("dp_user_id") ?? "anonymous";
+        const sessionKey = `devpulse-session-started-${workspaceId}`;
+        const startedAt = Number(localStorage.getItem(sessionKey)) || Date.now();
+        localStorage.setItem(sessionKey, String(startedAt));
+        setSessionStartedAt(startedAt);
+
+        unsubscribeSession = channel.on("session:sync", (payload) => {
+          if (payload.projectId === workspaceId) {
+            setSessionStartedAt(payload.startedAt ?? payload.updatedAt);
+          }
+        });
+        unsubscribeOperations = channel.on("editor:operation", (payload) => {
+          if (payload.fileId !== workspaceId) return;
+          if (payload.operation.type === "code" && typeof payload.operation.code === "string") {
+            updateRemoteCode(payload.operation.code);
+          } else if (
+            payload.operation.type === "selection"
+            && typeof payload.operation.start === "number"
+            && typeof payload.operation.end === "number"
+          ) {
+            setRemoteSelection({
+              start: payload.operation.start,
+              end: payload.operation.end,
+            });
+          }
+        });
+        unsubscribeTypingStart = channel.on("user:typing:start", (payload) => {
+          if (payload.channelId === workspaceId) {
+            setAhmedTyping(true);
+          }
+        });
+        unsubscribeTypingStop = channel.on("user:typing:stop", (payload) => {
+          if (payload.channelId === workspaceId) {
+            setAhmedTyping(false);
+          }
+        });
+        channel.emit("session:sync", {
+          userId,
+          projectId: workspaceId,
+          updatedAt: Date.now(),
+          startedAt,
+        });
+      },
+      (error: unknown) => {
+        console.error("Could not initialize remote-control realtime services.", error);
+      },
     );
     return () => {
-      client.emit("workspace:leave", workspaceId);
-      client.disconnect();
-      setSocket(null);
+      active = false;
+      unsubscribeSession?.();
+      unsubscribeOperations?.();
+      unsubscribeTypingStart?.();
+      unsubscribeTypingStop?.();
+      if (typingTimeoutRef.current !== null) window.clearTimeout(typingTimeoutRef.current);
     };
   }, []);
 
@@ -94,9 +136,22 @@ export const RemoteControlPage: React.FC = () => {
 
   const handleRemoteCodeChange = (code: string, start: number, end: number) => {
     updateRemoteCode(code);
-    socket?.emit("code:change", { workspaceId, code, revision: Date.now() });
-    socket?.emit("cursor:update", { workspaceId, start, end });
-    socket?.emit("typing:update", { workspaceId, typing: true });
+    const userId = sessionStorage.getItem("dp_user_id") ?? "anonymous";
+    services?.realtime.emit("editor:operation", {
+      fileId: workspaceId,
+      userId,
+      operation: { type: "code", code, revision: Date.now() },
+    });
+    services?.realtime.emit("editor:operation", {
+      fileId: workspaceId,
+      userId,
+      operation: { type: "selection", start, end },
+    });
+    services?.realtime.emit("user:typing:start", { channelId: workspaceId, userId });
+    if (typingTimeoutRef.current !== null) window.clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = window.setTimeout(() => {
+      services?.realtime.emit("user:typing:stop", { channelId: workspaceId, userId });
+    }, 1000);
   };
 
   const formatTime = (totalSeconds: number) => {

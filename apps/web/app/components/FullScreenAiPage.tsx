@@ -86,22 +86,28 @@ export const FullScreenAiPage: React.FC = () => {
     setInputQuery("");
     setIsGenerating(true);
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/ai/chat`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-          body: JSON.stringify({
-            messages: [
-              {
-                role: "user",
-                content: `Project: auth-service\nActive file: src/auth/login.js\nBranch: fix/jwt-expiry\nModel preference: ${selectedModel}\nTemperature: ${temperature}\nTop-p: ${topP}\nRequest: ${userMsg.text}`,
-              },
-            ],
-          }),
+      const response = await fetch("/api/ai/chat", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${sessionStorage.getItem("dp_access_token") ?? "dev-bypass"}`,
         },
-      );
+        body: JSON.stringify({
+          messages: [
+            {
+              role: "user",
+              content: `Project: auth-service\nActive file: src/auth/login.js\nBranch: fix/jwt-expiry\nModel preference: ${selectedModel}\nTemperature: ${temperature}\nTop-p: ${topP}\nRequest: ${userMsg.text}`,
+            },
+          ],
+          model: selectedModel,
+          context: {
+            temperature,
+            topP,
+          },
+        }),
+      });
       if (!response.ok) {
         const result = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(result.error || "AI request failed");

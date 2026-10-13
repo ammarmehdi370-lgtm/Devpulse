@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useApp, ThemeConfig } from '../context/AppContext';
 import { 
   Check, 
@@ -37,11 +37,13 @@ function generateTonalRamp(hex: string): string[] {
 
 export const ThemePalettePage: React.FC = () => {
   const { theme, setTheme, availableThemes, setPage } = useApp();
+  const themeFileInputRef = useRef<HTMLInputElement>(null);
   const [selectedThemeId, setSelectedThemeId] = useState(theme.id);
   const [customPrimary, setCustomPrimary] = useState(theme.primary);
   const [customSecondary, setCustomSecondary] = useState(theme.secondary);
   const [customTertiary, setCustomTertiary] = useState(theme.tertiary);
   const [previewSearchText, setPreviewSearchText] = useState('');
+  const [themeImportError, setThemeImportError] = useState('');
 
   const handleSelectPreset = (t: ThemeConfig) => {
     setSelectedThemeId(t.id);
@@ -52,8 +54,47 @@ export const ThemePalettePage: React.FC = () => {
   };
 
   const handleApplyAndContinue = () => {
-    // Navigate to repositories page as requested by user
+    localStorage.setItem('devpulse_theme_selected', 'true');
+    setTheme(theme);
     setPage('repositories');
+  };
+
+  const handleImportVSCodeTheme = async (file: File | undefined) => {
+    if (!file) return;
+    setThemeImportError('');
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (typeof parsed !== 'object' || parsed === null || !('colors' in parsed)) {
+        throw new Error('Choose a VS Code theme JSON file with a colors object.');
+      }
+      const candidate = parsed as { name?: unknown; type?: unknown; colors?: unknown };
+      if (typeof candidate.colors !== 'object' || candidate.colors === null || Array.isArray(candidate.colors)) {
+        throw new Error('The VS Code theme JSON must include a colors object.');
+      }
+      const colors = candidate.colors as Record<string, unknown>;
+      const findColor = (...keys: string[]) =>
+        keys.map((key) => colors[key]).find(
+          (value): value is string => typeof value === 'string' && /^#[\da-f]{6}$/i.test(value),
+        );
+      const importedTheme: ThemeConfig = {
+        ...theme,
+        id: `imported-${Date.now()}`,
+        name: typeof candidate.name === 'string' ? candidate.name : file.name.replace(/\.json$/i, ''),
+        primary: findColor('button.background', 'focusBorder', 'activityBarBadge.background') ?? theme.primary,
+        secondary: findColor('terminal.ansiGreen', 'terminal.ansiCyan', 'gitDecoration.addedResourceForeground') ?? theme.secondary,
+        tertiary: findColor('terminal.ansiBlue', 'statusBarItem.remoteBackground', 'editorInfo.foreground') ?? theme.tertiary,
+        neutral: findColor('editor.foreground') ?? theme.neutral,
+        mode: candidate.type === 'light' ? 'light' : 'dark',
+        type: candidate.type === 'light' ? 'light' : 'dark',
+      };
+      setSelectedThemeId(importedTheme.id);
+      setCustomPrimary(importedTheme.primary);
+      setCustomSecondary(importedTheme.secondary);
+      setCustomTertiary(importedTheme.tertiary);
+      setTheme(importedTheme);
+    } catch (error) {
+      setThemeImportError(error instanceof Error ? error.message : 'Could not import the VS Code theme.');
+    }
   };
 
   // 10-shade tonal swatches
@@ -109,6 +150,23 @@ export const ThemePalettePage: React.FC = () => {
 
           {/* Theme Presets */}
           <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={themeFileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(event) => {
+                void handleImportVSCodeTheme(event.target.files?.[0]);
+                event.currentTarget.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => themeFileInputRef.current?.click()}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium border bg-[#151520] text-[#8e8ea6] border-[#252535] hover:border-white/20"
+            >
+              Import VS Code JSON
+            </button>
             {availableThemes.map((t) => (
               <button
                 key={t.id}
@@ -135,6 +193,9 @@ export const ThemePalettePage: React.FC = () => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
+          {themeImportError && (
+            <p role="alert" className="text-xs text-red-300">{themeImportError}</p>
+          )}
         </div>
 
         {/* Main 3-Column Token Grid (Pixel-Perfect to Screenshot 2) */}

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { setAccessToken } from "../lib/apiClient";
 import {
   Terminal,
   Zap,
@@ -21,7 +22,7 @@ type OAuthProviders = {
   magicLink: boolean;
 };
 
-type EmailLoginErrorCode = "EMAIL_NOT_CONFIGURED" | "EMAIL_FAILED" | "UNKNOWN";
+type EmailLoginErrorCode = string;
 
 interface DevMagicLinkResponse {
   mode: "development";
@@ -72,7 +73,7 @@ function isMagicLinkResponse(value: unknown): value is MagicLinkResponse {
 }
 
 export const LoginPage: React.FC = () => {
-  const { login } = useApp();
+  const { loginAndLoad, isDataLoading } = useApp();
   const [email, setEmail] = useState("");
   const [latency, setLatency] = useState(14);
   const [instances, setInstances] = useState(1482);
@@ -92,6 +93,7 @@ export const LoginPage: React.FC = () => {
         github_auth_failed: "GitHub sign in failed. Please try again.",
         google_failed: "Google sign in failed. Please try again.",
         google_auth_failed: "Google sign in failed. Please try again.",
+        gitlab_auth_failed: "GitLab sign in failed. Please try again.",
         github_not_configured: "GitHub sign in is not configured yet.",
         google_not_configured: "Google sign in is not configured yet.",
         oauth_state_mismatch: "Session expired during sign in. Please try again.",
@@ -120,7 +122,7 @@ export const LoginPage: React.FC = () => {
     return () => controller.abort();
   }, []);
 
-  const handleEmailLogin = async () => {
+  const handleEmailSubmit = async () => {
     const requestedEmail = email.trim();
     if (!requestedEmail) {
       setEmailLoginState({ status: "error", code: "UNKNOWN", message: "Enter your email address to continue." });
@@ -130,7 +132,7 @@ export const LoginPage: React.FC = () => {
     setEmailLoginState({ status: "submitting" });
     setAuthError("");
     try {
-      const response = await fetch(`${apiUrl}/api/auth/magic-link/send`, {
+      const response = await fetch(`${apiUrl}/api/auth/magic-link`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -175,6 +177,38 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  const handleTokenVerify = async (token: string) => {
+    setIsLoading(true);
+    setLoginMethod("email");
+    setEmailLoginState({ status: "submitting" });
+    try {
+      const response = await fetch(`${apiUrl}/api/auth/magic-link/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ token }),
+      });
+      const result = await response.json() as {
+        accessToken?: string;
+        user?: { email?: string; name?: string };
+        message?: string;
+      };
+      if (!response.ok || !result.accessToken || !result.user?.email) {
+        throw new Error(result.message ?? "Unable to verify magic link.");
+      }
+      setAccessToken(result.accessToken);
+      await loginAndLoad(result.user.email, result.user.name);
+    } catch (error) {
+      setEmailLoginState({
+        status: "error",
+        code: "VERIFY_FAILED",
+        message: error instanceof Error ? error.message : "Unable to verify magic link.",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Live telemetry pulse
   useEffect(() => {
     const interval = setInterval(() => {
@@ -189,31 +223,25 @@ export const LoginPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = async (provider: string) => {
-    setIsLoading(true);
-    setLoginMethod(provider);
+  const handleDevBypass = async (provider: "github" | "gitlab" | "sso") => {
     setAuthError("");
 
-    if (provider === "gitlab" || provider === "sso") {
-      // ── DEV BYPASS ────────────────────────────────────────────────────────
-      // In development, skip the real OAuth redirect and log in immediately
-      // with a mock dev user so you can test the full app flow locally.
-      if (process.env.NODE_ENV === "development") {
-        const providerLabels: Record<string, string> = {
-          gitlab: "GitLab Dev",
-          sso: "SSO Dev",
-        };
-        const devName = providerLabels[provider] ?? "Dev User";
-        const devEmail = `dev-${provider}@localhost.dev`;
-        login(devEmail, devName);
-        return;
-      }
-      // ── END DEV BYPASS ────────────────────────────────────────────────────
-      window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/v1/auth/${provider}/start`;
+    if (process.env.NODE_ENV !== "development") {
+      const startUrl = provider === "github"
+        ? `${apiUrl}/api/auth/github`
+        : `${apiUrl}/api/auth/${provider}/start`;
+      window.location.assign(startUrl);
       return;
     }
 
-    login(email || "alex@devpulse.dev", "Alex");
+    setIsLoading(true);
+    setLoginMethod(provider);
+    try {
+      await loginAndLoad("demo@devpulse.local", "Demo User");
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Unable to sign in. Please try again.");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -260,8 +288,8 @@ export const LoginPage: React.FC = () => {
             {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
             <button
               type="button"
-              onClick={() => { window.location.href = `${apiUrl}/api/auth/github`; }}
-              disabled={!oauthProviders?.github}
+              onClick={() => void handleDevBypass("github")}
+              disabled={isLoading || isDataLoading || (process.env.NODE_ENV !== "development" && !oauthProviders?.github)}
               title={oauthProviders?.github ? undefined : oauthProviders ? "GitHub login is not available" : oauthProviderError ? "Unable to check GitHub login availability" : "Checking GitHub login availability"}
               className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#c4c0ff]"
             >
@@ -288,8 +316,8 @@ export const LoginPage: React.FC = () => {
 
             {/* Continue with GitLab */}
             <button
-              onClick={() => handleLogin("gitlab")}
-              disabled={isLoading}
+              onClick={() => void handleDevBypass("gitlab")}
+              disabled={isLoading || isDataLoading}
               className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
               <svg
@@ -308,8 +336,8 @@ export const LoginPage: React.FC = () => {
 
             {/* Single Sign-On (SSO / SAML) */}
             <button
-              onClick={() => handleLogin("sso")}
-              disabled={isLoading}
+              onClick={() => void handleDevBypass("sso")}
+              disabled={isLoading || isDataLoading}
               className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
               <KeyRound className="w-4 h-4 text-[#8c8ca5]" />
@@ -355,6 +383,10 @@ export const LoginPage: React.FC = () => {
                 <p className="mt-3 text-[#c4c0ff]">Click the link to sign in:</p>
                 <a
                   href={emailLoginState.url}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handleTokenVerify(emailLoginState.token);
+                  }}
                   className="mt-3 inline-flex items-center gap-2 font-medium text-[#b5afff] hover:text-white"
                 >
                   Sign in now <ArrowRight className="h-4 w-4" />
@@ -391,7 +423,7 @@ export const LoginPage: React.FC = () => {
                         setEmailLoginState({ status: "idle" });
                       }
                     }}
-                    onKeyDown={(event) => event.key === "Enter" && void handleEmailLogin()}
+                    onKeyDown={(event) => event.key === "Enter" && void handleEmailSubmit()}
                     placeholder="dev@company.com"
                     autoComplete="email"
                     className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#0b0b10] border border-[#27273a] text-white placeholder-[#585870] text-sm focus:outline-none focus:border-[#6C63FF] focus:ring-1 focus:ring-[#6C63FF] transition-all font-mono"
@@ -399,7 +431,7 @@ export const LoginPage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => void handleEmailLogin()}
+                  onClick={() => void handleEmailSubmit()}
                   disabled={emailLoginState.status === "submitting"}
                   className="w-full py-3 px-4 rounded-xl bg-[#1c1c28] hover:bg-[#252538] border border-[#31314a] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all group disabled:cursor-wait disabled:opacity-60"
                 >
@@ -501,21 +533,21 @@ export const LoginPage: React.FC = () => {
             <span>© Devpulse Cloud Inc.</span>
             <div className="flex gap-4">
               <button
-                onClick={() => login("alex@devpulse.dev", "Alex")}
+                onClick={() => void handleDevBypass("github")}
                 className="hover:text-[#a0a0c0] transition-colors"
               >
                 Privacy
               </button>
               <span>/</span>
               <button
-                onClick={() => login("alex@devpulse.dev", "Alex")}
+                onClick={() => void handleDevBypass("github")}
                 className="hover:text-[#a0a0c0] transition-colors"
               >
                 Terms
               </button>
               <span>/</span>
               <button
-                onClick={() => login("alex@devpulse.dev", "Alex")}
+                onClick={() => void handleDevBypass("github")}
                 className="hover:text-[#a0a0c0] transition-colors"
               >
                 System
