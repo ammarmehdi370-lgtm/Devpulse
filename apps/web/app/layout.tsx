@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description:
     "Build at the speed of thought. Isolated containerized environments, zero-latency clusters, and neural coding agents.",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/favicon.svg",
   },
 };
 

@@ -26,7 +26,7 @@ const PLATFORM_PAGES: Record<string, React.ReactNode> = {
   pricing: <PricingPage />,
 };
 
-export function AppContent() {
+function AppContent() {
   const { page, isDataLoading } = useApp();
   const pageOwnsLoadingState =
     page === "repositories" ||
