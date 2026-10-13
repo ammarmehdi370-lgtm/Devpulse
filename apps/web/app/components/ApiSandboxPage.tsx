@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useApp } from "../context/AppContext";
 import {
   ShieldCheck,
@@ -25,6 +26,13 @@ import {
   Key,
 } from "lucide-react";
 import { LOGO_COLORS } from "../logoColors";
+import type { SandboxSnapshot } from "./ApiSnapshotDrawer";
+
+const ApiSnapshotDrawer = dynamic(
+  () =>
+    import("./ApiSnapshotDrawer").then((module) => module.ApiSnapshotDrawer),
+  { ssr: false },
+);
 
 interface LedgerRecord {
   id: string;
@@ -95,15 +103,6 @@ const INITIAL_RECORDS: LedgerRecord[] = [
 type HttpMethod = "POST" | "GET" | "PUT" | "DELETE" | "PATCH";
 type RequestTab = "body" | "auth" | "params" | "rules" | "schema";
 type ResponseTab = "body" | "headers" | "ebpf" | "sdk";
-type SandboxSnapshot = {
-  id: string;
-  createdAt: string;
-  records: LedgerRecord[];
-  transactionCount: number;
-  customerCount: number;
-  sessionCount: number;
-};
-
 const LATENCY_OPTIONS = [
   { label: "24ms (Realistic Edge)", milliseconds: 24 },
   { label: "5ms (In-Memory MicroVM)", milliseconds: 5 },
@@ -876,55 +875,19 @@ export const ApiSandboxPage: React.FC = () => {
         </div>
       )}
       {isSnapshotPanelOpen && (
-        <div className="fixed right-4 top-16 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-ide-modal-border bg-ide-surface p-3 shadow-2xl">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-xs font-bold text-ide-text-strong">Sandbox snapshots</h2>
-            <button
-              type="button"
-              onClick={() => setIsSnapshotPanelOpen(false)}
-              className="text-xs text-ide-info hover:text-ide-text-strong"
-            >
-              Close
-            </button>
-          </div>
-          {snapshots.length === 0 ? (
-            <p className="text-xs text-ide-info">No snapshots yet.</p>
-          ) : (
-            <div className="max-h-64 space-y-2 overflow-y-auto">
-              {snapshots.map((snapshot) => (
-                <div
-                  key={snapshot.id}
-                  className="flex items-center justify-between gap-3 rounded border border-ide-modal-border bg-ide-panel p-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate font-mono text-[10px] text-ide-info">
-                      {snapshot.id}
-                    </div>
-                    <div className="text-[10px] text-ide-muted">
-                      {new Date(snapshot.createdAt).toLocaleString()} ·{" "}
-                      {snapshot.records.length} visible records
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRecords(snapshot.records.map((record) => ({ ...record })));
-                      setMockCustomersCount(snapshot.customerCount);
-                      setSimulatedTxCount(snapshot.transactionCount);
-                      setMockSessionsCount(snapshot.sessionCount);
-                      setCurrentPage(1);
-                      setIsSnapshotPanelOpen(false);
-                      setNotice(`Restored ${snapshot.id}.`);
-                    }}
-                    className="shrink-0 rounded border border-ide-info px-2 py-1 text-[10px] text-ide-text-strong hover:bg-ide-surface-raised"
-                  >
-                    Restore
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <ApiSnapshotDrawer
+          snapshots={snapshots}
+          onClose={() => setIsSnapshotPanelOpen(false)}
+          onRestore={(snapshot) => {
+            setRecords(snapshot.records.map((record) => ({ ...record })));
+            setMockCustomersCount(snapshot.customerCount);
+            setSimulatedTxCount(snapshot.transactionCount);
+            setMockSessionsCount(snapshot.sessionCount);
+            setCurrentPage(1);
+            setIsSnapshotPanelOpen(false);
+            setNotice(`Restored ${snapshot.id}.`);
+          }}
+        />
       )}
       <div className="min-h-[220px] rounded-xl border border-ide-border-strong bg-ide-panel p-[15px] space-y-3">
       <div className="grid grid-cols-1 min-[900px]:grid-cols-[minmax(0,1fr)_250px] items-start gap-3">

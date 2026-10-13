@@ -268,7 +268,7 @@ interface AppContextType {
     name: string,
     path?: string,
     initialContent?: string,
-  ) => Promise<void>;
+  ) => Promise<EditorFile>;
   deleteFile: (fileId: string) => Promise<void>;
   loadUserLocalFiles: (
     folderName: string,
@@ -667,6 +667,7 @@ const readStoredPage = (): PageType => {
       "payment-methods",
     ];
     const savedPage = validPages.find((page) => page === stored);
+    if (savedPage === "remote-control") return "chat";
     if (savedPage) return savedPage;
   } catch (error) {
     console.error("Unable to restore the selected page.", error);
@@ -1031,9 +1032,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [isClientStorageHydrated, setIsClientStorageHydrated] = useState(false);
 
   const setPage = (newPage: PageType) => {
-    setPageState(newPage);
+    const resolvedPage = newPage === "remote-control" ? "chat" : newPage;
+    setPageState(resolvedPage);
     try {
-      window.localStorage.setItem(PAGE_STORAGE_KEY, newPage);
+      window.localStorage.setItem(PAGE_STORAGE_KEY, resolvedPage);
     } catch {}
   };
 
@@ -1366,22 +1368,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       })
       .catch(() => undefined);
-  }, []);
-
-  // Listen for keyboard shortcut Ctrl+K
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        (e.ctrlKey || e.metaKey) &&
-        (e.key.toLowerCase() === "k" ||
-          (e.shiftKey && e.key.toLowerCase() === "p"))
-      ) {
-        e.preventDefault();
-        setIsCommandPaletteOpen((prev) => !prev);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   const login = (email?: string, name?: string) => {
@@ -2172,6 +2158,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       detail: `Created ${newFile.path}.`,
       project: loadedProjectName || "Editor",
     });
+    return newFile;
   };
 
   const createNewFolder = (path: string) => {

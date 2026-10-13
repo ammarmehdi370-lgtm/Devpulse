@@ -7,6 +7,7 @@ import { Terminal } from "@xterm/xterm";
 import { Maximize2, Minimize2, Plus, RefreshCw, X } from "lucide-react";
 import { reconnectTerminalPreview } from "../services/editorMocks";
 import type { ThemeTerminalTokens } from "../context/themeModel";
+import { formatShortcut, getShortcut } from "../editor/shortcuts";
 
 interface TerminalPanelProps {
   isOpen: boolean;
@@ -517,7 +518,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
             type="button"
             className="terminal-toolbar-button"
             aria-label="Close terminal panel"
-            title="Close panel (Ctrl+`)"
+            title={`Close panel (${formatShortcut(getShortcut("toggle-terminal")?.keys ?? [])})`}
             onClick={onClose}
           >
             <X className="h-4 w-4" aria-hidden="true" />

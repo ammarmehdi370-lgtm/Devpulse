@@ -1334,7 +1334,7 @@ html[data-theme-mode="light"] [class*="border-[#26"] {
   position: relative;
   display: flex;
   flex: 0 0 auto;
-  min-width: 280px;
+  min-width: 275px;
   height: 100%;
   transition: width 180ms ease;
 }
@@ -1708,6 +1708,27 @@ html[data-theme-mode="light"] [class*="border-[#26"] {
   width: 100%;
   height: 100%;
   min-width: 0;
+}
+
+.page-fade-in {
+  width: 100%;
+  min-height: 100%;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.page-fade-in.is-visible {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-fade-in {
+    transition: none;
+  }
+}
+
+html[data-reduce-motion="true"] .page-fade-in {
+  transition: none;
 }
 
 .editor-ai-resize-handle {
@@ -2117,7 +2138,7 @@ html[data-theme-mode="light"] [class*="border-[#26"] {
 
   .editor-ai-drawer-shell {
     flex-shrink: 1;
-    max-width: max(280px, calc(100% - 400px));
+    max-width: max(275px, calc(100% - 400px));
   }
 
   .terminal-panel-actions {
@@ -2252,7 +2273,7 @@ html[data-theme-mode="light"] .terminal-panel-status {
   }
 
   .editor-ai-drawer-shell {
-    min-width: 280px;
+    min-width: 275px;
   }
 }
 
@@ -2263,7 +2284,7 @@ html[data-theme-mode="light"] .terminal-panel-status {
   }
 
   .editor-ai-drawer-shell {
-    min-width: 260px;
+    min-width: 275px;
   }
 
   .editor-toolbar-row {

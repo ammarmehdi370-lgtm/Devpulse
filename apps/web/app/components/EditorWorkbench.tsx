@@ -62,11 +62,91 @@ import { TerminalPanel } from "./TerminalPanel";
 import { getAIInlineCompletion } from "../services/aiCompletion";
 import { runEditorPreview, sendAssistantPreview } from "../services/editorMocks";
 import { getLanguageServerCompletions } from "../services/languageServer";
+import { useHuddle } from "../context/HuddleContext";
+import {
+  formatShortcut,
+  getShortcut,
+  isTypingTarget,
+  matchesShortcut,
+  SHORTCUTS,
+} from "../editor/shortcuts";
 import { Button, Dropdown, IconButton, Kbd, Modal, Switch } from "./ide/Primitives";
 
 type NativeEditorHandle =
   | { kind: "directory"; handle: FileSystemDirectoryHandle }
   | { kind: "file"; handle: FileSystemFileHandle };
+
+type PendingNativeOperation =
+  | { kind: "file"; fileId: string }
+  | { kind: "folder"; path: string }
+  | { kind: "rename"; fileId: string; oldPath: string; newPath: string }
+  | { kind: "delete"; fileId: string; path: string };
+
+type WritablePermissionHandle = FileSystemHandle & {
+  queryPermission?: (descriptor: { mode: "readwrite" }) => Promise<PermissionState>;
+  requestPermission?: (descriptor: { mode: "readwrite" }) => Promise<PermissionState>;
+};
+
+const ensureWritePermission = async (
+  handle: FileSystemHandle,
+): Promise<boolean> => {
+  const writableHandle = handle as WritablePermissionHandle;
+  let permission = await writableHandle.queryPermission?.({
+    mode: "readwrite",
+  });
+  if (permission !== "granted") {
+    permission = await writableHandle.requestPermission?.({
+      mode: "readwrite",
+    });
+  }
+  return permission === "granted";
+};
+
+const INVALID_ENTRY_NAME = /[/\\:*?"<>|]/;
+const validateEntryName = (
+  value: string,
+  siblings: string[],
+  currentName?: string,
+) => {
+  const name = value.trim();
+  if (!name) return "Enter a name.";
+  if (INVALID_ENTRY_NAME.test(name)) {
+    return 'Names cannot contain / \\ : * ? " < > |.';
+  }
+  if (
+    siblings.some(
+      (sibling) =>
+        sibling.toLocaleLowerCase() !== currentName?.toLocaleLowerCase() &&
+        sibling.toLocaleLowerCase() === name.toLocaleLowerCase(),
+    )
+  ) {
+    return "An item with that name already exists in this folder.";
+  }
+  return "";
+};
+
+const SAFE_LOCAL_FILE_MESSAGE =
+  "Browser access to this folder was denied or blocked. Your work is safe as a draft.";
+
+const sameNativeOperation = (
+  left: PendingNativeOperation,
+  right: PendingNativeOperation,
+) => {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "file" && right.kind === "file") {
+    return left.fileId === right.fileId;
+  }
+  if (left.kind === "folder" && right.kind === "folder") {
+    return left.path === right.path;
+  }
+  if (left.kind === "rename" && right.kind === "rename") {
+    return left.fileId === right.fileId;
+  }
+  if (left.kind === "delete" && right.kind === "delete") {
+    return left.fileId === right.fileId;
+  }
+  return false;
+};
 
 interface FilePickerWindow extends Window {
   showDirectoryPicker?: (options?: {
@@ -381,6 +461,51 @@ const getDirectoryForPath = async (
   return current;
 };
 
+const writeFileToDirectory = async (
+  root: FileSystemDirectoryHandle,
+  filePath: string,
+  content: string,
+) => {
+  if (!(await ensureWritePermission(root))) return false;
+  const parts = filePath.split("/").filter(Boolean);
+  const parent = await getDirectoryForPath(
+    root,
+    parts.slice(0, -1).join("/"),
+    true,
+  );
+  const fileHandle = await parent.getFileHandle(parts[parts.length - 1]!, {
+    create: true,
+  });
+  const writer = await fileHandle.createWritable();
+  await writer.write(content);
+  await writer.close();
+  return true;
+};
+
+const createDirectoryPath = async (
+  root: FileSystemDirectoryHandle,
+  directoryPath: string,
+) => {
+  if (!(await ensureWritePermission(root))) return false;
+  await getDirectoryForPath(root, directoryPath, true);
+  return true;
+};
+
+const removeFileFromDirectory = async (
+  root: FileSystemDirectoryHandle,
+  filePath: string,
+) => {
+  if (!(await ensureWritePermission(root))) return false;
+  const parts = filePath.split("/").filter(Boolean);
+  const parent = await getDirectoryForPath(
+    root,
+    parts.slice(0, -1).join("/"),
+    false,
+  );
+  await parent.removeEntry(parts[parts.length - 1]!);
+  return true;
+};
+
 export const EditorWorkbench: React.FC = () => {
   const {
     theme,
@@ -430,7 +555,14 @@ export const EditorWorkbench: React.FC = () => {
     toasts,
     removeToast,
   } = useApp();
+  const huddle = useHuddle();
   const monacoThemeName = getMonacoThemeName(theme);
+  const shortcutHint = (id: string) =>
+    formatShortcut(getShortcut(id)?.keys ?? []);
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent("devpulse:editor-ready"));
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -442,9 +574,11 @@ export const EditorWorkbench: React.FC = () => {
   >([]);
   const [isCreatingFile, setIsCreatingFile] = useState(false);
   const [newFileNameInput, setNewFileNameInput] = useState("");
+  const [newFileNameError, setNewFileNameError] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderNameInput, setNewFolderNameInput] = useState("");
-  const [aiPanelWidth, setAiPanelWidth] = useState(360);
+  const [newFolderNameError, setNewFolderNameError] = useState("");
+  const [aiPanelWidth, setAiPanelWidth] = useState(280);
   const [explorerWidth, setExplorerWidth] = useState(256);
   const [isResizingAiPanel, setIsResizingAiPanel] = useState(false);
   const [isResizingExplorer, setIsResizingExplorer] = useState(false);
@@ -460,7 +594,6 @@ export const EditorWorkbench: React.FC = () => {
   const [isSplitEditor, setIsSplitEditor] = useState(false);
   const [isZenMode, setIsZenMode] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [isBreadcrumbMenuOpen, setIsBreadcrumbMenuOpen] = useState(false);
   const [editorCursor, setEditorCursor] = useState({ line: 1, column: 1 });
@@ -487,6 +620,14 @@ export const EditorWorkbench: React.FC = () => {
   const [isRunningCode, setIsRunningCode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [fsNotice, setFsNotice] = useState<string | null>(null);
+  const [pendingNativeOperations, setPendingNativeOperations] = useState<
+    PendingNativeOperation[]
+  >([]);
+  const [draftFileIds, setDraftFileIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [renameError, setRenameError] = useState("");
   const [copied, setCopied] = useState(false);
   const [nativeHandle, setNativeHandle] = useState<NativeEditorHandle | null>(
     null,
@@ -535,8 +676,6 @@ export const EditorWorkbench: React.FC = () => {
   const statusLanguageSearchRef = useRef<HTMLInputElement>(null);
   const statusLanguageOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const firstLanguageOptionRef = useRef<HTMLButtonElement>(null);
-  const pendingEditorChordRef = useRef(false);
-  const editorChordTimerRef = useRef<number | null>(null);
   const aiPanelResizeStartRef = useRef<{ pointerX: number; width: number } | null>(
     null,
   );
@@ -549,6 +688,8 @@ export const EditorWorkbench: React.FC = () => {
   const focusCreatedFileRef = useRef(false);
   const monacoFindDecorationsRef = useRef<string[]>([]);
   const saveFileRef = useRef<() => void>(() => undefined);
+  const runCodeRef = useRef<() => void>(() => undefined);
+  const openFolderRef = useRef<() => void>(() => undefined);
   const findControllerRef = useRef<FindController | null>(null);
   const replaceUndoRef = useRef<{
     fileId: string;
@@ -576,12 +717,17 @@ export const EditorWorkbench: React.FC = () => {
       if (!stored) return;
       const layout = JSON.parse(stored) as {
         aiPanelWidth?: number;
+        aiPanelWidthVersion?: number;
         explorerWidth?: number;
         editorSettings?: typeof editorSettings;
         pinnedTabs?: string[];
       };
       if (typeof layout.aiPanelWidth === "number") {
-        setAiPanelWidth(Math.max(280, Math.min(520, layout.aiPanelWidth)));
+        setAiPanelWidth(
+          layout.aiPanelWidthVersion !== 1 && layout.aiPanelWidth > 420
+            ? 280
+            : Math.max(275, Math.min(520, layout.aiPanelWidth)),
+        );
       }
       if (typeof layout.explorerWidth === "number") {
         setExplorerWidth(Math.max(180, Math.min(360, layout.explorerWidth)));
@@ -600,7 +746,13 @@ export const EditorWorkbench: React.FC = () => {
     try {
       window.localStorage.setItem(
         "devpulse-ide-layout",
-        JSON.stringify({ aiPanelWidth, explorerWidth, editorSettings, pinnedTabs }),
+        JSON.stringify({
+          aiPanelWidth,
+          aiPanelWidthVersion: 1,
+          explorerWidth,
+          editorSettings,
+          pinnedTabs,
+        }),
       );
     } catch (error) {
       console.error("Unable to save IDE layout preferences.", error);
@@ -618,34 +770,34 @@ export const EditorWorkbench: React.FC = () => {
       } else if (action === "settings") {
         setIsSettingsOpen(true);
       } else if (action === "shortcuts") {
-        setIsShortcutsOpen(true);
+        window.dispatchEvent(new CustomEvent("devpulse:open-shortcuts"));
       } else if (action === "zen") {
         setIsZenMode((current) => !current);
       } else if (action === "terminal") {
         setIsTerminalOpen((current) => !current);
+      } else if (action === "run") {
+        runCodeRef.current();
       }
+    };
+    const closeTopmost = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== "editor") return;
+      if (isLanguagePickerOpen) setIsLanguagePickerOpen(false);
+      else if (isStatusLanguagePickerOpen) setIsStatusLanguagePickerOpen(false);
+      else if (tabMenu) setTabMenu(null);
+      else if (isClosePromptOpen) setIsClosePromptOpen(false);
+      else if (isChangesOpen) setIsChangesOpen(false);
+      else if (isSettingsOpen) setIsSettingsOpen(false);
+      else if (isNotificationCenterOpen) setIsNotificationCenterOpen(false);
+      else if (isBreadcrumbMenuOpen) setIsBreadcrumbMenuOpen(false);
+      else if (searchMode !== null) setSearchMode(null);
     };
     window.addEventListener("devpulse:editor-action", handleEditorAction);
-    return () => window.removeEventListener("devpulse:editor-action", handleEditorAction);
-  });
-
-  useEffect(() => {
-    const handleIDEKeys = (event: KeyboardEvent) => {
-      if (event.key === "?" || ((event.ctrlKey || event.metaKey) && event.key === "/")) {
-        if (event.target instanceof HTMLElement && /INPUT|TEXTAREA/.test(event.target.tagName)) return;
-        event.preventDefault();
-        setIsShortcutsOpen((open) => !open);
-      } else if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z") {
-        event.preventDefault();
-        setIsZenMode((mode) => !mode);
-      } else if ((event.ctrlKey || event.metaKey) && event.key === ",") {
-        event.preventDefault();
-        setIsSettingsOpen(true);
-      }
+    window.addEventListener("devpulse:close-topmost", closeTopmost);
+    return () => {
+      window.removeEventListener("devpulse:editor-action", handleEditorAction);
+      window.removeEventListener("devpulse:close-topmost", closeTopmost);
     };
-    window.addEventListener("keydown", handleIDEKeys);
-    return () => window.removeEventListener("keydown", handleIDEKeys);
-  }, []);
+  });
 
   const dismissEditorHint = (permanently = false) => {
     if (permanently) {
@@ -666,7 +818,7 @@ export const EditorWorkbench: React.FC = () => {
       if (!start) return;
       setAiPanelWidth(
         Math.max(
-          280,
+          275,
           Math.min(
             Math.min(520, window.innerWidth * 0.5),
             start.width + start.pointerX - event.clientX,
@@ -871,7 +1023,9 @@ export const EditorWorkbench: React.FC = () => {
   const activeFileChanges = activeFile
     ? getLineChanges(savedFileContents[activeFile.id] || "", currentCode)
     : { changedLines: new Map<number, ChangedLineKind>(), removedAtLine: null };
-  const dirtyFiles = treeFiles.filter((file) => file.isDirty);
+  const dirtyFiles = treeFiles.filter(
+    (file) => file.isDirty || draftFileIds.has(file.id),
+  );
   const activeFileMatches = findResult.matches;
   const activeFileMatchIndex = findResult.index;
   const activeFileMatch = activeFileMatches[activeFileMatchIndex] ?? null;
@@ -1197,10 +1351,12 @@ export const EditorWorkbench: React.FC = () => {
       await storeNativeHandle(storedHandle);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      await friendlyAlert(
-        error instanceof Error ? error.message : "Unable to open this folder.",
-      );
+      console.error("Unable to open the selected local folder.", error);
+      setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
     }
+  };
+  openFolderRef.current = () => {
+    void openNativeFolder();
   };
 
   const openNativeFile = async () => {
@@ -1226,9 +1382,8 @@ export const EditorWorkbench: React.FC = () => {
       await storeNativeHandle(storedHandle);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      await friendlyAlert(
-        error instanceof Error ? error.message : "Unable to open this file.",
-      );
+      console.error("Unable to open the selected local file.", error);
+      setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
     }
   };
 
@@ -1240,11 +1395,10 @@ export const EditorWorkbench: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = (event.target?.result as string) || "";
-      void loadSingleLocalFile(file.name, content).catch((error: unknown) =>
-        friendlyAlert(
-          error instanceof Error ? error.message : "Unable to open this file.",
-        ),
-      );
+      void loadSingleLocalFile(file.name, content).catch((error: unknown) => {
+        console.error("Unable to load the selected local file.", error);
+        setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+      });
       setNativeHandle(null);
       void clearNativeHandle().catch((error: unknown) =>
         console.error("Unable to clear old file access.", error),
@@ -1280,69 +1434,124 @@ export const EditorWorkbench: React.FC = () => {
           console.error("Unable to clear old folder access.", error),
         );
       })
-      .catch((error: unknown) =>
-        friendlyAlert(
-          error instanceof Error
-            ? error.message
-            : "Unable to open this folder.",
-        ),
+      .catch((error: unknown) => {
+        console.error("Unable to read the selected local folder.", error);
+        setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+      });
+  };
+
+  const siblingNames = (parentPath: string) => [
+    ...treeFiles
+      .filter((file) => file.path.split("/").slice(0, -1).join("/") === parentPath)
+      .map((file) => file.name),
+    ...treeFolders
+      .filter((folder) => folder.split("/").slice(0, -1).join("/") === parentPath)
+      .map((folder) => folder.split("/").pop() ?? folder),
+  ];
+
+  const queueNativeOperation = (operation: PendingNativeOperation) => {
+    setPendingNativeOperations((pending) => {
+      const existingIndex = pending.findIndex((item) =>
+        sameNativeOperation(item, operation),
       );
+      if (existingIndex < 0) return [...pending, operation];
+      const next = [...pending];
+      next[existingIndex] = operation;
+      return next;
+    });
+    setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+  };
+
+  const markFileAsDraft = (fileId: string) => {
+    setDraftFileIds((current) => new Set(current).add(fileId));
   };
 
   const handleCreateNewFile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFileNameInput.trim()) return;
-    const filePath = [selectedFolder, newFileNameInput.trim()]
+    const name = newFileNameInput.trim();
+    const validationError = validateEntryName(name, siblingNames(selectedFolder));
+    if (validationError) {
+      setNewFileNameError(validationError);
+      return;
+    }
+    const filePath = [selectedFolder, name]
       .filter(Boolean)
       .join("/");
     focusCreatedFileRef.current = true;
     void (async () => {
-      if (nativeHandle?.kind === "directory") {
-        const parent = await getDirectoryForPath(
-          nativeHandle.handle,
-          filePath.split("/").slice(0, -1).join("/"),
-          true,
-        );
-        const fileHandle = await parent.getFileHandle(
-          filePath.split("/").pop()!,
-          { create: true },
-        );
-        const writer = await fileHandle.createWritable();
-        await writer.write("");
-        await writer.close();
+      const file = await createNewFile(filePath, filePath, "");
+      setNewFileNameInput("");
+      setNewFileNameError("");
+      setIsCreatingFile(false);
+      if (!nativeHandle) {
+        if (
+          editorProjectId === "local-folder" ||
+          editorProjectId === "local-file"
+        ) {
+          markFileAsDraft(file.id);
+          queueNativeOperation({ kind: "file", fileId: file.id });
+        }
+        return;
       }
-      await createNewFile(filePath, filePath, "");
-    })()
-      .then(() => {
-        setNewFileNameInput("");
-        setIsCreatingFile(false);
-      })
-      .catch((error: unknown) => {
-        focusCreatedFileRef.current = false;
-        setSaveError(
-          error instanceof Error ? error.message : "Unable to create file",
-        );
-      });
+      if (nativeHandle.kind !== "directory") {
+        markFileAsDraft(file.id);
+        queueNativeOperation({ kind: "file", fileId: file.id });
+        return;
+      }
+      try {
+        if (!(await writeFileToDirectory(nativeHandle.handle, filePath, ""))) {
+          markFileAsDraft(file.id);
+          queueNativeOperation({ kind: "file", fileId: file.id });
+        }
+      } catch (error) {
+        console.error("Unable to create the local file.", error);
+        markFileAsDraft(file.id);
+        queueNativeOperation({ kind: "file", fileId: file.id });
+      }
+    })().catch((error: unknown) => {
+      focusCreatedFileRef.current = false;
+      console.error("Unable to create the editor file.", error);
+      setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+    });
   };
 
   const handleCreateNewFolder = (e: React.FormEvent) => {
     e.preventDefault();
     const folderName = newFolderNameInput.trim();
-    if (!folderName) return;
+    const validationError = validateEntryName(
+      folderName,
+      siblingNames(selectedFolder),
+    );
+    if (validationError) {
+      setNewFolderNameError(validationError);
+      return;
+    }
     const folderPath = [selectedFolder, folderName].filter(Boolean).join("/");
     if (nativeHandle?.kind === "directory") {
-      void getDirectoryForPath(nativeHandle.handle, folderPath, true)
-        .then(() => {
-          createNewFolder(folderPath);
-          setSelectedFolder(folderPath);
-          setNewFolderNameInput("");
-          setIsCreatingFolder(false);
-        })
-        .catch((error: unknown) =>
-          setSaveError(
-            error instanceof Error ? error.message : "Unable to create folder",
-          ),
-        );
+      void (async () => {
+        createNewFolder(folderPath);
+        setSelectedFolder(folderPath);
+        setNewFolderNameInput("");
+        setNewFolderNameError("");
+        setIsCreatingFolder(false);
+        try {
+          if (!(await createDirectoryPath(nativeHandle.handle, folderPath))) {
+            queueNativeOperation({ kind: "folder", path: folderPath });
+          }
+        } catch (error) {
+          console.error("Unable to create the local folder.", error);
+          queueNativeOperation({ kind: "folder", path: folderPath });
+        }
+      })();
+      return;
+    }
+    if (nativeHandle?.kind === "file") {
+      createNewFolder(folderPath);
+      setSelectedFolder(folderPath);
+      setNewFolderNameInput("");
+      setNewFolderNameError("");
+      setIsCreatingFolder(false);
+      queueNativeOperation({ kind: "folder", path: folderPath });
       return;
     }
     createNewFolder(folderPath);
@@ -1353,7 +1562,102 @@ export const EditorWorkbench: React.FC = () => {
       setIsFileTreeOpen(true);
     }
     setNewFolderNameInput("");
+    setNewFolderNameError("");
     setIsCreatingFolder(false);
+    if (
+      editorProjectId === "local-folder" ||
+      editorProjectId === "local-file"
+    ) {
+      queueNativeOperation({ kind: "folder", path: folderPath });
+    }
+  };
+
+  const commitRename = async (file: EditorFile, requestedName: string) => {
+    const name = requestedName.trim();
+    const parentPath = file.path.split("/").slice(0, -1).join("/");
+    const validationError = validateEntryName(
+      name,
+      siblingNames(parentPath),
+      file.name,
+    );
+    if (validationError) {
+      setRenameError(validationError);
+      return;
+    }
+    setRenameError("");
+    if (name === file.name) {
+      setRenamingFileId(null);
+      return;
+    }
+    const newPath = [parentPath, name].filter(Boolean).join("/");
+    renameEditorFile(file.id, name);
+    setRenamingFileId(null);
+    if (!nativeHandle) {
+      if (
+        editorProjectId === "local-folder" ||
+        editorProjectId === "local-file"
+      ) {
+        markFileAsDraft(file.id);
+        queueNativeOperation({
+          kind: "rename",
+          fileId: file.id,
+          oldPath: file.path,
+          newPath,
+        });
+      }
+      return;
+    }
+    if (nativeHandle.kind !== "directory") {
+      markFileAsDraft(file.id);
+      queueNativeOperation({
+        kind: "rename",
+        fileId: file.id,
+        oldPath: file.path,
+        newPath,
+      });
+      return;
+    }
+    try {
+      if (!(await ensureWritePermission(nativeHandle.handle))) {
+        markFileAsDraft(file.id);
+        queueNativeOperation({
+          kind: "rename",
+          fileId: file.id,
+          oldPath: file.path,
+          newPath,
+        });
+        return;
+      }
+      const parts = file.path.split("/").filter(Boolean);
+      const oldParent = await getDirectoryForPath(
+        nativeHandle.handle,
+        parts.slice(0, -1).join("/"),
+        false,
+      );
+      const oldHandle = await oldParent.getFileHandle(parts[parts.length - 1]!);
+      const original = await oldHandle.getFile();
+      const moved = await writeFileToDirectory(
+        nativeHandle.handle,
+        newPath,
+        await original.text(),
+      );
+      if (!moved) throw new Error("Folder write access is unavailable.");
+      await oldParent.removeEntry(parts[parts.length - 1]!);
+      addToast({
+        type: "success",
+        title: "File renamed",
+        description: name,
+      });
+    } catch (error) {
+      console.error("Unable to rename the local file.", error);
+      markFileAsDraft(file.id);
+      queueNativeOperation({
+        kind: "rename",
+        fileId: file.id,
+        oldPath: file.path,
+        newPath,
+      });
+    }
   };
 
   const renderExplorerContents = (parentPath = "", depth = 0) => {
@@ -1432,30 +1736,34 @@ export const EditorWorkbench: React.FC = () => {
                 {file.iconType}
               </span>
               {renamingFileId === file.id ? (
-                <input
-                  autoFocus
-                  aria-label={`Rename ${file.name}`}
-                  className="ide-input min-w-0 flex-1 py-0"
-                  value={renameValue}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) => setRenameValue(event.target.value)}
-                  onBlur={() => {
-                    const nextName = renameValue.trim();
-                    if (nextName && nextName !== file.name) {
-                      renameEditorFile(file.id, nextName);
-                      addToast({ type: "success", title: "File renamed", description: nextName });
-                    }
-                    setRenamingFileId(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setRenameValue(file.name);
-                      setRenamingFileId(null);
-                    }
-                  }}
-                />
+                <div className="min-w-0 flex-1">
+                  <input
+                    autoFocus
+                    aria-label={`Rename ${file.name}`}
+                    className="ide-input min-w-0 w-full py-0"
+                    value={renameValue}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={(event) => {
+                      setRenameValue(event.target.value);
+                      setRenameError("");
+                    }}
+                    onBlur={() => void commitRename(file, renameValue)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setRenameValue(file.name);
+                        setRenameError("");
+                        setRenamingFileId(null);
+                      }
+                    }}
+                  />
+                  {renameError && (
+                    <span className="block text-[9px] text-ide-danger">
+                      {renameError}
+                    </span>
+                  )}
+                </div>
               ) : (
                 <span className="truncate" title={file.name}>{file.name}</span>
               )}
@@ -1465,6 +1773,11 @@ export const EditorWorkbench: React.FC = () => {
                   aria-label="Unsaved changes"
                   className="h-1.5 w-1.5 shrink-0 rounded-full bg-ide-success"
                 />
+              )}
+              {draftFileIds.has(file.id) && (
+                <span className="shrink-0 rounded border border-ide-warning/30 bg-ide-warning/10 px-1 text-[8px] text-ide-warning">
+                  Draft
+                </span>
               )}
             </div>
             <button
@@ -1480,22 +1793,43 @@ export const EditorWorkbench: React.FC = () => {
                   ) {
                     try {
                       if (nativeHandle?.kind === "directory") {
-                        const parts = file.path.split("/");
-                        const parent = await getDirectoryForPath(
-                          nativeHandle.handle,
-                          parts.slice(0, -1).join("/"),
-                          false,
-                        );
-                        await parent.removeEntry(parts[parts.length - 1]!);
+                        if (!(await removeFileFromDirectory(nativeHandle.handle, file.path))) {
+                          queueNativeOperation({
+                            kind: "delete",
+                            fileId: file.id,
+                            path: file.path,
+                          });
+                        }
+                      } else if (nativeHandle?.kind === "file") {
+                        queueNativeOperation({
+                          kind: "delete",
+                          fileId: file.id,
+                          path: file.path,
+                        });
+                      } else if (
+                        editorProjectId === "local-folder" ||
+                        editorProjectId === "local-file"
+                      ) {
+                        queueNativeOperation({
+                          kind: "delete",
+                          fileId: file.id,
+                          path: file.path,
+                        });
                       }
-                      await deleteFile(file.id);
                     } catch (error) {
-                      await friendlyAlert(
-                        error instanceof Error
-                          ? error.message
-                          : "Could not delete the file.",
-                      );
+                      console.error("Unable to delete the local file.", error);
+                      queueNativeOperation({
+                        kind: "delete",
+                        fileId: file.id,
+                        path: file.path,
+                      });
                     }
+                    await deleteFile(file.id);
+                    setDraftFileIds((current) => {
+                      const next = new Set(current);
+                      next.delete(file.id);
+                      return next;
+                    });
                   }
                 })();
               }}
@@ -1533,18 +1867,37 @@ export const EditorWorkbench: React.FC = () => {
       setIsRunningCode(false);
     }
   };
+  runCodeRef.current = () => {
+    void handleRunCode();
+  };
 
   const handleSaveFile = async () => {
-    if (!activeFile || !activeFile.isDirty) return;
+    if (
+      !activeFile ||
+      (!activeFile.isDirty && !draftFileIds.has(activeFile.id))
+    )
+      return;
     setIsSaving(true);
     setSaveError(null);
     try {
       await writeFileToDisk(activeFile, currentCode);
       await saveFileContent(activeFile.id);
-    } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "Unable to save file",
+      setDraftFileIds((current) => {
+        const next = new Set(current);
+        next.delete(activeFile.id);
+        return next;
+      });
+      setPendingNativeOperations((pending) =>
+        pending.filter(
+          (operation) =>
+            !(operation.kind === "file" && operation.fileId === activeFile.id),
+        ),
       );
+      setFsNotice(null);
+    } catch (error) {
+      console.error("Unable to save the local editor file.", error);
+      markFileAsDraft(activeFile.id);
+      queueNativeOperation({ kind: "file", fileId: activeFile.id });
     } finally {
       setIsSaving(false);
     }
@@ -1840,55 +2193,137 @@ export const EditorWorkbench: React.FC = () => {
       editorProjectId === "local-file" || editorProjectId === "local-folder";
     if (!isLocalFile) return;
     if (!nativeHandle) {
-      throw new Error(
-        "This file was opened without disk write access. Reopen it using Open File or Open Folder in a browser that supports local file access.",
-      );
+      throw new Error("Local file access is unavailable.");
     }
-    const permissionHandle =
-      nativeHandle.handle as typeof nativeHandle.handle & {
-        queryPermission?: (descriptor: {
-          mode: "readwrite";
-        }) => Promise<PermissionState>;
-        requestPermission?: (descriptor: {
-          mode: "readwrite";
-        }) => Promise<PermissionState>;
-      };
-    let permission = await permissionHandle.queryPermission?.({
-      mode: "readwrite",
-    });
-    if (permission !== "granted") {
-      permission = await permissionHandle.requestPermission?.({
-        mode: "readwrite",
-      });
-    }
-    if (permission !== "granted") {
-      throw new Error("Permission to save to the original file was denied.");
+    if (!(await ensureWritePermission(nativeHandle.handle))) {
+      throw new Error("Local file access is unavailable.");
     }
 
     if (nativeHandle.kind === "file") {
       if (file.path !== nativeHandle.handle.name) {
-        throw new Error(
-          "This new file is not the selected disk file. Open a folder to save multiple files.",
-        );
+        throw new Error("This file is not part of the selected local file.");
       }
       const writer = await nativeHandle.handle.createWritable();
       await writer.write(content);
       await writer.close();
       return;
     }
+    if (!(await writeFileToDirectory(nativeHandle.handle, file.path, content))) {
+      throw new Error("Local folder access is unavailable.");
+    }
+  };
 
-    const parts = file.path.split("/");
-    const parent = await getDirectoryForPath(
-      nativeHandle.handle,
-      parts.slice(0, -1).join("/"),
-      true,
-    );
-    const fileHandle = await parent.getFileHandle(parts[parts.length - 1]!, {
-      create: true,
-    });
-    const writer = await fileHandle.createWritable();
-    await writer.write(content);
-    await writer.close();
+  const handleGrantFolderAccess = async () => {
+    try {
+      let directoryHandle =
+        nativeHandle?.kind === "directory" ? nativeHandle.handle : null;
+      if (!directoryHandle) {
+        const pickerWindow = window as FilePickerWindow;
+        if (!pickerWindow.showDirectoryPicker) {
+          setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+          return;
+        }
+        directoryHandle = await pickerWindow.showDirectoryPicker({
+          mode: "readwrite",
+        });
+        const storedHandle: NativeEditorHandle = {
+          kind: "directory",
+          handle: directoryHandle,
+        };
+        setNativeHandle(storedHandle);
+        await storeNativeHandle(storedHandle);
+      }
+      const grantedDirectory = directoryHandle;
+      if (!(await ensureWritePermission(grantedDirectory))) {
+        setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+        return;
+      }
+
+      const remaining: PendingNativeOperation[] = [];
+      for (const operation of pendingNativeOperations) {
+        try {
+          if (operation.kind === "file") {
+            const file = treeFiles.find((item) => item.id === operation.fileId);
+            if (!file) continue;
+            const content = fileContents[file.id] ?? "";
+            if (!(await writeFileToDirectory(grantedDirectory, file.path, content))) {
+              remaining.push(operation);
+              continue;
+            }
+            setDraftFileIds((current) => {
+              const next = new Set(current);
+              next.delete(file.id);
+              return next;
+            });
+            await saveFileContent(file.id);
+          } else if (operation.kind === "folder") {
+            if (!(await createDirectoryPath(grantedDirectory, operation.path))) {
+              remaining.push(operation);
+            }
+          } else if (operation.kind === "delete") {
+            if (!(await removeFileFromDirectory(grantedDirectory, operation.path))) {
+              remaining.push(operation);
+            }
+          } else {
+            const file = treeFiles.find((item) => item.id === operation.fileId);
+            if (!file) continue;
+            const content = fileContents[file.id] ?? "";
+            if (
+              !(await writeFileToDirectory(
+                grantedDirectory,
+                operation.newPath,
+                content,
+              ))
+            ) {
+              remaining.push(operation);
+              continue;
+            }
+            const parts = operation.oldPath.split("/").filter(Boolean);
+            const oldParent = await getDirectoryForPath(
+              grantedDirectory,
+              parts.slice(0, -1).join("/"),
+              false,
+            );
+            await oldParent.removeEntry(parts[parts.length - 1]!);
+            setDraftFileIds((current) => {
+              const next = new Set(current);
+              next.delete(file.id);
+              return next;
+            });
+          }
+        } catch (error) {
+          console.error("Unable to finish a pending local file operation.", error);
+          remaining.push(operation);
+        }
+      }
+      setPendingNativeOperations(remaining);
+      setFsNotice(remaining.length ? SAFE_LOCAL_FILE_MESSAGE : null);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      console.error("Unable to grant local folder access.", error);
+      setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
+    }
+  };
+
+  const handleSaveCopy = () => {
+    const file =
+      activeFile ??
+      treeFiles.find((item) => draftFileIds.has(item.id));
+    if (!file) return;
+    try {
+      const blob = new Blob([fileContents[file.id] ?? ""], {
+        type: "text/plain;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Unable to download a copy of the draft file.", error);
+      setFsNotice("Your draft is safe in the editor. The browser could not download a copy.");
+    }
   };
 
   const closeProjectNow = async (discardChanges: boolean) => {
@@ -1901,9 +2336,9 @@ export const EditorWorkbench: React.FC = () => {
           await saveFileContent(file.id);
         }
       } catch (error) {
-        setSaveError(
-          error instanceof Error ? error.message : "Unable to save project",
-        );
+        console.error("Unable to save the local editor project.", error);
+        setSaveError(SAFE_LOCAL_FILE_MESSAGE);
+        setFsNotice(SAFE_LOCAL_FILE_MESSAGE);
         setIsSaving(false);
         return;
       }
@@ -1931,10 +2366,12 @@ export const EditorWorkbench: React.FC = () => {
 
   useEffect(() => {
     const handleEditorShortcut = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && searchMode !== null) {
-        event.preventDefault();
-        if (searchMode === "file") closeFileFind();
-        else setSearchMode(null);
+      if (event.key === "Escape") {
+        if (searchMode !== null) {
+          event.preventDefault();
+          if (searchMode === "file") closeFileFind();
+          else setSearchMode(null);
+        }
         return;
       }
       if (searchMode === "file" && event.key === "F3") {
@@ -1951,43 +2388,11 @@ export const EditorWorkbench: React.FC = () => {
         event.preventDefault();
         return;
       }
+      if (isTypingTarget(event.target)) return;
       const key = event.key.toLowerCase();
-      if (pendingEditorChordRef.current && !event.ctrlKey && !event.metaKey) {
-        pendingEditorChordRef.current = false;
-        if (editorChordTimerRef.current !== null) {
-          window.clearTimeout(editorChordTimerRef.current);
-          editorChordTimerRef.current = null;
-        }
-        if (key === "m") {
-          event.preventDefault();
-          setIsLanguagePickerOpen(true);
-          window.requestAnimationFrame(() =>
-            firstLanguageOptionRef.current?.focus(),
-          );
-          return;
-        }
-      }
-      if (
-        (event.ctrlKey || event.metaKey) &&
-        key === "k" &&
-        !event.shiftKey &&
-        isEditorProjectOpen
-      ) {
-        event.preventDefault();
-        pendingEditorChordRef.current = true;
-        if (editorChordTimerRef.current !== null) {
-          window.clearTimeout(editorChordTimerRef.current);
-        }
-        editorChordTimerRef.current = window.setTimeout(() => {
-          pendingEditorChordRef.current = false;
-          editorChordTimerRef.current = null;
-        }, 1200);
-        return;
-      }
-      if (!(event.ctrlKey || event.metaKey) || !isEditorProjectOpen) return;
-
       if (
         key === "z" &&
+        (event.ctrlKey || event.metaKey) &&
         replaceUndoRef.current &&
         replaceUndoRef.current.fileId === activeFile?.id &&
         currentCode === replaceUndoRef.current.after
@@ -1998,57 +2403,163 @@ export const EditorWorkbench: React.FC = () => {
           replaceUndoRef.current.before,
         );
         replaceUndoRef.current = null;
-      } else if (key === "enter" && event.altKey) {
-        if (searchMode === "file") {
-          event.preventDefault();
-          replaceAllFindMatches();
-        }
-      } else if (key === "h") {
-        event.preventDefault();
-        if (searchMode !== "file") openFileFind();
-        setIsReplaceOpen((open) => !open);
-      } else if (key === "f" && !event.shiftKey) {
-        event.preventDefault();
-        openFileFind();
-      } else if (key === "s") {
-        event.preventDefault();
-        void handleSaveFile();
-      } else if (key === "f" && event.shiftKey) {
-        event.preventDefault();
-        setSearchQuery("");
-        setSearchMode("workspace");
-        setIsFileTreeOpen(true);
-      } else if (key === "p" && !event.shiftKey) {
-        event.preventDefault();
-        setSearchQuery("");
-        setQuickOpenSelection(0);
-        setSearchMode("quick-open");
-      } else if (key === "i") {
-        event.preventDefault();
-        setIsAiDrawerOpen(true);
-        window.requestAnimationFrame(() => aiQueryInputRef.current?.focus());
+        return;
       }
+
+      const shortcut = SHORTCUTS.find(
+        (candidate) =>
+          !candidate.global &&
+          !candidate.monaco &&
+          matchesShortcut(event, candidate),
+      );
+      if (!shortcut || isTypingTarget(event.target)) return;
+      if (shortcut.action.startsWith("tab-")) {
+        const tabNumber = Number(shortcut.action.slice(4));
+        const target =
+          tabNumber === 9
+            ? sortedOpenFiles[sortedOpenFiles.length - 1]
+            : sortedOpenFiles[tabNumber - 1];
+        if (target) setActiveFileId(target.id);
+        event.preventDefault();
+        return;
+      }
+
+      switch (shortcut.action) {
+        case "quick-open":
+          setSearchQuery("");
+          setQuickOpenSelection(0);
+          setSearchMode("quick-open");
+          break;
+        case "find-file":
+          openFileFind();
+          break;
+        case "search-files":
+          setSearchQuery("");
+          setSearchMode("workspace");
+          setIsFileTreeOpen(true);
+          break;
+        case "save-file":
+          saveFileRef.current();
+          break;
+        case "open-ai":
+        case "toggle-ai-drawer":
+          setIsAiDrawerOpen(shortcut.action === "open-ai" ? true : (open) => !open);
+          if (shortcut.action === "open-ai") {
+            window.requestAnimationFrame(() => aiQueryInputRef.current?.focus());
+          }
+          break;
+        case "toggle-explorer":
+          setIsFileTreeOpen((open) => !open);
+          break;
+        case "toggle-terminal":
+          setIsTerminalOpen((open) => !open);
+          break;
+        case "focus-explorer":
+          setIsFileTreeOpen(true);
+          window.requestAnimationFrame(() =>
+            document.querySelector<HTMLButtonElement>(".editor-explorer-pane button")?.focus(),
+          );
+          break;
+        case "source-control":
+          setPage("repositories");
+          break;
+        case "split-editor":
+          setIsSplitEditor((split) => !split);
+          break;
+        case "open-folder":
+          openFolderRef.current();
+          break;
+        case "new-file":
+          setIsCreatingFile(true);
+          setIsFileTreeOpen(true);
+          break;
+        case "new-folder":
+          setIsCreatingFolder(true);
+          setIsFileTreeOpen(true);
+          break;
+        case "close-tab":
+          if (activeFile) closeFileFromEditor(activeFile.id);
+          break;
+        case "previous-tab":
+        case "next-tab": {
+          if (sortedOpenFiles.length === 0) break;
+          const activeIndex = sortedOpenFiles.findIndex(
+            (file) => file.id === activeFile?.id,
+          );
+          const direction = shortcut.action === "next-tab" ? 1 : -1;
+          const nextIndex =
+            (activeIndex + direction + sortedOpenFiles.length) %
+            sortedOpenFiles.length;
+          setActiveFileId(sortedOpenFiles[nextIndex]!.id);
+          break;
+        }
+        case "go-to-symbol":
+          if (!monacoEditorRef.current) return;
+          monacoEditorRef.current.trigger("keyboard", "editor.action.quickOutline", null);
+          break;
+        case "go-to-line":
+          if (!monacoEditorRef.current) return;
+          monacoEditorRef.current.trigger("keyboard", "editor.action.gotoLine", null);
+          break;
+        case "toggle-word-wrap":
+          setEditorSettings((settings) => ({
+            ...settings,
+            wordWrap: !settings.wordWrap,
+          }));
+          break;
+        case "font-size-up":
+          setEditorSettings((settings) => ({
+            ...settings,
+            fontSize: Math.min(20, settings.fontSize + 1),
+          }));
+          break;
+        case "font-size-down":
+          setEditorSettings((settings) => ({
+            ...settings,
+            fontSize: Math.max(10, settings.fontSize - 1),
+          }));
+          break;
+        case "font-size-reset":
+          setEditorSettings((settings) => ({ ...settings, fontSize: 12 }));
+          break;
+        case "focus-mode":
+          setIsZenMode((mode) => !mode);
+          break;
+        case "settings":
+          setIsSettingsOpen(true);
+          break;
+        case "replace-file":
+          if (searchMode !== "file") openFileFind();
+          setIsReplaceOpen((open) => !open);
+          break;
+        case "replace-all":
+          if (searchMode !== "file") return;
+          replaceAllFindMatches();
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
     };
     window.addEventListener("keydown", handleEditorShortcut);
     return () => {
       window.removeEventListener("keydown", handleEditorShortcut);
-      if (editorChordTimerRef.current !== null) {
-        window.clearTimeout(editorChordTimerRef.current);
-        editorChordTimerRef.current = null;
-      }
     };
   }, [
     closeFileFind,
     currentCode,
-    handleSaveFile,
-    isEditorProjectOpen,
-    activeFile?.id,
+    activeFile,
     navigateFileSearch,
+    closeFileFromEditor,
     openFileFind,
     replaceAllFindMatches,
     searchMode,
+    setPage,
+    setIsTerminalOpen,
     setIsAiDrawerOpen,
     setIsFileTreeOpen,
+    sortedOpenFiles,
+    setActiveFileId,
     toggleFindOption,
     updateFileContent,
   ]);
@@ -2294,6 +2805,7 @@ export const EditorWorkbench: React.FC = () => {
                 <div className="editor-welcome-actions-stack space-y-1.5 lg:space-y-2.5">
                   <button
                     onClick={() => void openNativeFolder()}
+                    title={`Open a folder · ${shortcutHint("open-folder")}`}
                     className="editor-welcome-action group flex min-h-[58px] w-full items-center gap-3 rounded-2xl border border-[color-mix(in_srgb,var(--ide-color-accent)_25%,transparent)] bg-gradient-to-r from-[color-mix(in_srgb,var(--ide-color-accent)_8%,transparent)] to-ide-welcome-action-bg px-3 py-2 text-left text-ide-text-strong shadow-[0_10px_28px_color-mix(in_srgb,var(--ide-color-accent)_8%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_4%,transparent)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_srgb,var(--ide-color-accent)_55%,transparent)] hover:from-[color-mix(in_srgb,var(--ide-color-accent)_13%,transparent)] hover:shadow-[0_16px_36px_color-mix(in_srgb,var(--ide-color-accent)_12%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring/70 lg:min-h-[74px] lg:gap-3.5 lg:px-4 lg:py-3"
                   >
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[color-mix(in_srgb,var(--ide-color-accent)_20%,transparent)] bg-[color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)] shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_8%,transparent)]">
@@ -2446,10 +2958,13 @@ export const EditorWorkbench: React.FC = () => {
                   <input
                     type="text"
                     autoFocus
-                    required
                     placeholder="e.g. app.ts, main.py, server.js"
                     value={newFileNameInput}
-                    onChange={(e) => setNewFileNameInput(e.target.value)}
+                    aria-invalid={Boolean(newFileNameError)}
+                    onChange={(e) => {
+                      setNewFileNameInput(e.target.value);
+                      setNewFileNameError("");
+                    }}
                     className="flex-1 px-3 py-2 bg-ide-input-bg border border-ide-input-border rounded-xl text-xs font-mono text-ide-text-strong focus:outline-none focus:border-ide-focus-ring"
                   />
                   <button
@@ -2467,6 +2982,11 @@ export const EditorWorkbench: React.FC = () => {
                     Cancel
                   </button>
                 </div>
+                {newFileNameError && (
+                  <p role="alert" className="text-xs text-ide-danger">
+                    {newFileNameError}
+                  </p>
+                )}
               </form>
             )}
             {isCreatingFolder && (
@@ -2481,12 +3001,13 @@ export const EditorWorkbench: React.FC = () => {
                   <input
                     type="text"
                     autoFocus
-                    required
                     placeholder="e.g. src, components, tests"
                     value={newFolderNameInput}
-                    onChange={(event) =>
-                      setNewFolderNameInput(event.target.value)
-                    }
+                    aria-invalid={Boolean(newFolderNameError)}
+                    onChange={(event) => {
+                      setNewFolderNameInput(event.target.value);
+                      setNewFolderNameError("");
+                    }}
                     className="flex-1 px-3 py-2 bg-ide-input-bg border border-ide-input-border rounded-xl text-xs font-mono text-ide-text-strong focus:outline-none focus:border-ide-focus-ring"
                   />
                   <button
@@ -2504,6 +3025,11 @@ export const EditorWorkbench: React.FC = () => {
                     Cancel
                   </button>
                 </div>
+                {newFolderNameError && (
+                  <p role="alert" className="text-[10px] text-ide-danger">
+                    {newFolderNameError}
+                  </p>
+                )}
               </form>
             )}
           </div>
@@ -2560,7 +3086,7 @@ export const EditorWorkbench: React.FC = () => {
           <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setIsFileTreeOpen((prev) => !prev)}
-              title="Toggle File Explorer"
+              title={`Toggle File Explorer · ${shortcutHint("toggle-explorer")}`}
               aria-label="Toggle File Explorer"
               className="rounded-lg p-1.5 text-ide-muted transition hover:bg-ide-hover hover:text-ide-text-strong"
             >
@@ -2615,11 +3141,17 @@ export const EditorWorkbench: React.FC = () => {
                   </div>
                 )}
               </div>
-              {activeFile?.isDirty && (
+              {(activeFile?.isDirty ||
+                (activeFile && draftFileIds.has(activeFile.id))) && (
                 <span
                   className="h-1.5 w-1.5 shrink-0 rounded-full bg-ide-success"
                   title="Unsaved changes"
                 />
+              )}
+              {huddle.controlGrant?.permission === "edit" && (
+                <span className="shrink-0 rounded-full border border-ide-info/30 bg-ide-info/10 px-2 py-0.5 text-[9px] font-medium text-ide-info">
+                  {huddle.controlGrant.participantName} is editing
+                </span>
               )}
             </div>
           </div>
@@ -2707,6 +3239,7 @@ export const EditorWorkbench: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => void openNativeFolder()}
+                  title={`Open Folder · ${shortcutHint("open-folder")}`}
                   className="editor-toolbar-button editor-toolbar-folder inline-flex items-center gap-1.5 rounded-lg border border-ide-border-subtle bg-ide-input-bg px-2.5 py-1.5 text-[10px] text-ide-text-secondary transition hover:border-[color-mix(in_srgb,var(--ide-color-accent)_25%,transparent)] hover:bg-ide-accent-soft hover:text-ide-text-strong sm:text-[11px]"
                 >
                   <FolderOpen className="h-3.5 w-3.5 text-ide-accent" />
@@ -2727,7 +3260,7 @@ export const EditorWorkbench: React.FC = () => {
                     setSearchQuery("");
                     setSearchMode("workspace");
                   }}
-                  title="Search in Files (Ctrl+Shift+F)"
+                  title={`Search in Files · ${shortcutHint("search-files")}`}
                   aria-label="Search in Files"
                   className="editor-toolbar-button editor-icon-button rounded-lg border border-ide-border-subtle bg-ide-input-bg p-1.5 text-ide-text-tertiary transition hover:border-ide-secondary/30 hover:bg-ide-secondary/[0.07] hover:text-ide-text-strong"
                 >
@@ -2745,18 +3278,23 @@ export const EditorWorkbench: React.FC = () => {
                 )}
                 <button
                   onClick={handleSaveFile}
-                  disabled={isSaving || !activeFile?.isDirty}
-                  title="Save changes (Ctrl+S)"
+                  disabled={
+                    isSaving ||
+                    (!activeFile?.isDirty &&
+                      !(activeFile && draftFileIds.has(activeFile.id)))
+                  }
+                  title={`Save changes · ${shortcutHint("save-file")}`}
                   className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-ide-secondary/30 bg-ide-secondary/[0.10] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--ide-color-secondary-readable)] transition hover:bg-ide-secondary/20 disabled:opacity-80 sm:text-[11px]"
                 >
                   <span>{isSaving ? "Saving..." : "Save"}</span>
                   <kbd className="hidden text-[9px] text-ide-text-tertiary lg:inline">
-                    Ctrl S
+                    {shortcutHint("save-file")}
                   </kbd>
                 </button>
                 <button
                   onClick={handleRunCode}
                   disabled={isRunningCode || !activeFile}
+                  title={`Run preview · ${shortcutHint("run-f5")} / ${shortcutHint("run-alt-r")}`}
                   className="editor-toolbar-button inline-flex items-center gap-1.5 rounded-lg border border-ide-accent/35 bg-ide-accent/10 px-3 py-1.5 text-[10px] font-semibold text-[var(--ide-color-accent-readable)] transition hover:bg-ide-accent/[0.18] active:scale-[.98] disabled:opacity-80 sm:text-[11px]"
                 >
                   <Play
@@ -2766,7 +3304,7 @@ export const EditorWorkbench: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setIsAiDrawerOpen((prev) => !prev)}
-                  title="Toggle AI Assistant"
+                  title={`Toggle AI Assistant · ${shortcutHint("toggle-ai-drawer")}`}
                   aria-label="Toggle AI Assistant"
                   className="editor-toolbar-button flex items-center gap-1 rounded-lg p-1.5 text-ide-text-tertiary transition hover:bg-ide-hover hover:text-ide-text-strong"
                 >
@@ -2780,7 +3318,7 @@ export const EditorWorkbench: React.FC = () => {
                 </button>
                 <IconButton
                   label="Open editor settings"
-                  shortcut="Ctrl+,"
+                  shortcut={shortcutHint("settings")}
                   onClick={() => setIsSettingsOpen(true)}
                   className="editor-icon-button"
                 >
@@ -2788,8 +3326,8 @@ export const EditorWorkbench: React.FC = () => {
                 </IconButton>
                 <IconButton
                   label="Keyboard shortcuts"
-                  shortcut="?"
-                  onClick={() => setIsShortcutsOpen(true)}
+                  shortcut={shortcutHint("shortcuts-dialog")}
+                  onClick={() => window.dispatchEvent(new CustomEvent("devpulse:open-shortcuts"))}
                   className="editor-icon-button"
                 >
                   <CircleHelp aria-hidden="true" />
@@ -2934,7 +3472,7 @@ export const EditorWorkbench: React.FC = () => {
                 <div className="editor-explorer-header-actions flex shrink-0 items-center">
                   <button
                     onClick={() => setIsCreatingFolder(true)}
-                    title="New Folder"
+                    title={`New Folder · ${shortcutHint("new-folder")}`}
                     aria-label="New Folder"
                     className="editor-icon-button editor-explorer-header-action rounded hover:bg-ide-surface-hover text-ide-text-dim hover:text-ide-text-strong"
                   >
@@ -2942,7 +3480,7 @@ export const EditorWorkbench: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setIsCreatingFile(true)}
-                    title="New File"
+                    title={`New File · ${shortcutHint("new-file")}`}
                     aria-label="New File"
                     className="editor-icon-button editor-explorer-header-action rounded hover:bg-ide-surface-hover text-ide-text-dim hover:text-ide-text-strong"
                   >
@@ -3031,9 +3569,9 @@ export const EditorWorkbench: React.FC = () => {
                   <input
                     type="text"
                     autoFocus
-                    required
                     placeholder="folder-name"
                     value={newFolderNameInput}
+                    aria-invalid={Boolean(newFolderNameError)}
                     onChange={(e) => setNewFolderNameInput(e.target.value)}
                     className="w-full px-2 py-1 bg-ide-input-bg border border-ide-input-border rounded-lg text-xs font-mono text-ide-text-strong focus:outline-none"
                   />
@@ -3068,10 +3606,13 @@ export const EditorWorkbench: React.FC = () => {
                   <input
                     type="text"
                     autoFocus
-                    required
                     placeholder="filename.ext"
                     value={newFileNameInput}
-                    onChange={(e) => setNewFileNameInput(e.target.value)}
+                    aria-invalid={Boolean(newFileNameError)}
+                    onChange={(e) => {
+                      setNewFileNameInput(e.target.value);
+                      setNewFileNameError("");
+                    }}
                     className="w-full px-2 py-1 bg-ide-input-bg border border-ide-input-border rounded-lg text-xs font-mono text-ide-text-strong focus:outline-none"
                   />
                   <div className="flex justify-end gap-1">
@@ -3090,6 +3631,11 @@ export const EditorWorkbench: React.FC = () => {
                       Add
                     </button>
                   </div>
+                  {newFileNameError && (
+                    <p role="alert" className="text-[10px] text-ide-danger">
+                      {newFileNameError}
+                    </p>
+                  )}
                 </form>
               )}
             </div>
@@ -3208,7 +3754,7 @@ export const EditorWorkbench: React.FC = () => {
                         closeFileFromEditor(file.id);
                       }}
                       type="button"
-                      title={`Close ${file.name}`}
+                      title={`Close ${file.name} · ${shortcutHint("close-tab")}`}
                       aria-label={`Close ${file.name}`}
                       className="editor-icon-button opacity-0 group-hover:opacity-100 hover:text-ide-text-strong text-ide-muted rounded"
                     >
@@ -3222,6 +3768,7 @@ export const EditorWorkbench: React.FC = () => {
             <div className="editor-tabs-actions flex items-center gap-2 text-xs text-ide-muted pr-2">
               <IconButton
                 label={isSplitEditor ? "Close split editor" : "Split editor"}
+                shortcut={shortcutHint("split-editor")}
                 onClick={() => setIsSplitEditor((split) => !split)}
                 aria-pressed={isSplitEditor}
                 className="editor-icon-button"
@@ -3230,7 +3777,7 @@ export const EditorWorkbench: React.FC = () => {
               </IconButton>
               <IconButton
                 label={isZenMode ? "Exit focus mode" : "Focus editor"}
-                shortcut="Ctrl+Shift+Z"
+                shortcut={shortcutHint("focus-mode")}
                 onClick={() => setIsZenMode((mode) => !mode)}
                 className="editor-icon-button"
               >
@@ -3365,7 +3912,7 @@ export const EditorWorkbench: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        title="Toggle Replace (Ctrl+H)"
+                        title={`Toggle Replace (${shortcutHint("monaco-replace")})`}
                         aria-label="Toggle Replace"
                         aria-expanded={isReplaceOpen}
                         onClick={() => setIsReplaceOpen((open) => !open)}
@@ -3432,7 +3979,7 @@ export const EditorWorkbench: React.FC = () => {
                       type="button"
                       onClick={replaceAllFindMatches}
                       disabled={!activeFileMatches.length}
-                      title="Replace All (Ctrl+Alt+Enter)"
+                      title={`Replace All (${shortcutHint("replace-all")})`}
                       className="rounded-md border border-ide-border px-2 py-1.5 text-[10px] text-ide-text-secondary hover:bg-ide-hover disabled:opacity-40"
                     >
                       Replace All
@@ -3481,7 +4028,7 @@ export const EditorWorkbench: React.FC = () => {
                       >
                         Generate code
                       </button>
-                      <span className="editor-empty-hint-shortcut"> · <Kbd>Ctrl+I</Kbd> · </span>
+                      <span className="editor-empty-hint-shortcut"> · <Kbd>{shortcutHint("open-ai")}</Kbd> · </span>
                       <span className="editor-language-hint" ref={languagePickerRef}>
                         <button
                           type="button"
@@ -3522,7 +4069,7 @@ export const EditorWorkbench: React.FC = () => {
                           </span>
                         )}
                       </span>
-                      <span className="editor-empty-hint-shortcut"> · <Kbd>Ctrl+K M</Kbd> · </span>
+                      <span className="editor-empty-hint-shortcut"> · <Kbd>{shortcutHint("language-picker")}</Kbd> · </span>
                       <button
                         type="button"
                         className="editor-empty-hint-action"
@@ -3600,9 +4147,37 @@ export const EditorWorkbench: React.FC = () => {
           </div>
 
           {/* Execution Output (if run) */}
-          {saveError && (
-            <div className="bg-ide-surface-danger border-t border-ide-border-danger px-3 py-2 text-xs font-mono text-ide-danger">
-              Save error: {saveError}
+          {fsNotice && (
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-2 border-t border-ide-border-strong bg-ide-surface px-3 py-2 text-xs text-ide-text-secondary"
+            >
+              <span>{fsNotice}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleGrantFolderAccess()}
+                  className="rounded-md border border-ide-border-strong px-2.5 py-1 text-[11px] font-medium text-ide-text-strong hover:bg-ide-surface-toolbar"
+                >
+                  Grant folder access
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveCopy}
+                  className="rounded-md border border-ide-border-strong px-2.5 py-1 text-[11px] font-medium text-ide-text-strong hover:bg-ide-surface-toolbar"
+                >
+                  Save a copy
+                </button>
+                <button
+                  type="button"
+                  aria-label="Dismiss local file access message"
+                  title="Dismiss message"
+                  onClick={() => setFsNotice(null)}
+                  className="rounded p-1 text-ide-text-soft hover:bg-ide-surface-toolbar hover:text-ide-text-strong"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -3660,7 +4235,7 @@ export const EditorWorkbench: React.FC = () => {
               <button
                 type="button"
                 className="editor-status-port"
-                title="Open integrated terminal"
+                title={`Open integrated terminal · ${shortcutHint("toggle-terminal")}`}
                 onClick={() => setIsTerminalOpen(true)}
               >
                 Port: 3000
@@ -3685,7 +4260,7 @@ export const EditorWorkbench: React.FC = () => {
                   aria-label="Change language mode"
                   aria-haspopup="listbox"
                   aria-expanded={isStatusLanguagePickerOpen}
-                  title="Change language mode"
+                  title={`Change language mode · ${shortcutHint("language-picker")}`}
                   disabled={!activeFile}
                   onClick={openStatusLanguagePicker}
                 >
@@ -3766,7 +4341,7 @@ export const EditorWorkbench: React.FC = () => {
                 type="button"
                 className="editor-status-settings"
                 aria-label="Open editor settings"
-                title="Editor settings (Ctrl+,)"
+                title={`Editor settings (${shortcutHint("settings")})`}
                 onClick={() => setIsSettingsOpen(true)}
               >
                 <Settings2 className="h-3 w-3" />
@@ -3802,7 +4377,7 @@ export const EditorWorkbench: React.FC = () => {
                 event.preventDefault();
                 setAiPanelWidth((width) =>
                   Math.max(
-                    280,
+                    275,
                     Math.min(520, width + (event.key === "ArrowLeft" ? 12 : -12)),
                   ),
                 );
@@ -4107,30 +4682,12 @@ export const EditorWorkbench: React.FC = () => {
             <div className="ide-setting-switch"><span>Compact density</span><Switch checked={editorSettings.density === "compact"} onChange={(compact) => setEditorSettings((settings) => ({ ...settings, density: compact ? "compact" : "comfortable" }))} label="Compact density" /></div>
             <Button
               type="button"
-              onClick={() => setIsShortcutsOpen(true)}
+              onClick={() => window.dispatchEvent(new CustomEvent("devpulse:open-shortcuts"))}
               className="justify-self-start"
             >
-              View keyboard shortcuts <Kbd>?</Kbd>
+              View keyboard shortcuts{" "}
+              <Kbd>{shortcutHint("shortcuts-dialog")}</Kbd>
             </Button>
-          </div>
-        </Modal>
-      )}
-      {isShortcutsOpen && (
-        <Modal title="Keyboard shortcuts" onClose={() => setIsShortcutsOpen(false)}>
-          <div className="ide-shortcuts-list">
-            {[
-              ["Command palette", "Ctrl/Cmd + K"],
-              ["Quick Open", "Ctrl/Cmd + P"],
-              ["Search in files", "Ctrl/Cmd + Shift + F"],
-              ["Save file", "Ctrl/Cmd + S"],
-              ["Open AI Assistant", "Ctrl/Cmd + I"],
-              ["Toggle terminal", "Ctrl + `"],
-              ["Focus mode", "Ctrl/Cmd + Shift + Z"],
-              ["Editor settings", "Ctrl/Cmd + ,"],
-              ["This shortcut guide", "Ctrl/Cmd + / or ?"],
-            ].map(([label, shortcut]) => (
-              <div key={label}><span>{label}</span><Kbd>{shortcut}</Kbd></div>
-            ))}
           </div>
         </Modal>
       )}
@@ -4184,7 +4741,8 @@ export const EditorWorkbench: React.FC = () => {
             </div>
             {saveError && (
               <p className="rounded-lg border border-ide-border-danger bg-ide-surface-danger p-2 text-xs text-ide-danger">
-                {saveError}
+                Your work could not be written to the selected folder. Keep
+                editing, grant folder access, or save a copy.
               </p>
             )}
             <div className="flex flex-wrap justify-end gap-2">

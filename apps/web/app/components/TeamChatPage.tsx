@@ -1,8 +1,10 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useApp } from "../context/AppContext";
+import { useHuddle } from "../context/HuddleContext";
 import {
   Hash,
   Send,
@@ -18,9 +20,15 @@ import {
   Plus,
   Bot,
   ChevronDown,
+  Headphones,
 } from "lucide-react";
 import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
 import { ChatListSkeleton } from "./SkeletonLoaders";
+
+const HuddlePanel = dynamic(
+  () => import("./HuddlePanel").then((module) => module.HuddlePanel),
+  { ssr: false },
+);
 
 interface ChatMessage {
   id: number;
@@ -89,8 +97,11 @@ const sanitizeMessageHtml = (html: string) => {
 
 export const TeamChatPage: React.FC = () => {
   const { theme, user } = useApp();
+  const huddle = useHuddle();
+  const startHuddleAction = huddle.start;
   const [activeChannel, setActiveChannel] = useState("frontend");
   const [isChannelDetailsOpen, setIsChannelDetailsOpen] = useState(false);
+  const [isHuddlePanelOpen, setIsHuddlePanelOpen] = useState(huddle.active);
   const [isChatLoading, setIsChatLoading] = useState(true);
   const editorRef = useRef<HTMLDivElement>(null);
   const [isMessageEmpty, setIsMessageEmpty] = useState(true);
@@ -147,6 +158,20 @@ export const TeamChatPage: React.FC = () => {
     const timer = window.setTimeout(() => setIsChatLoading(false), 450);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const startHuddle = () => {
+      startHuddleAction();
+      setIsHuddlePanelOpen(true);
+    };
+    window.addEventListener("devpulse:start-huddle", startHuddle);
+    return () =>
+      window.removeEventListener("devpulse:start-huddle", startHuddle);
+  }, [startHuddleAction]);
+
+  useEffect(() => {
+    if (huddle.active) setIsHuddlePanelOpen(true);
+  }, [huddle.active]);
 
   const handleFormat = (command: string) => {
     editorRef.current?.focus();
@@ -437,12 +462,31 @@ export const TeamChatPage: React.FC = () => {
               {channelDescriptions[activeChannel]}
             </div>
           </div>
-          <div className="ml-3 flex shrink-0 items-center gap-2 rounded-lg border border-ide-border-strong bg-ide-panel px-3 py-2 text-xs text-ide-text-tertiary">
-            <Users className="h-3.5 w-3.5 text-ide-text-soft" />
-            <span>14</span>
-            <span className="hidden text-ide-muted sm:inline">members</span>
+          <div className="ml-3 flex shrink-0 items-center gap-2">
+            <div className="hidden items-center gap-2 rounded-lg border border-ide-border-strong bg-ide-panel px-3 py-2 text-xs text-ide-text-tertiary sm:flex">
+              <Users className="h-3.5 w-3.5 text-ide-text-soft" />
+              <span>14</span>
+              <span className="hidden text-ide-muted sm:inline">members</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!huddle.active) huddle.start();
+                setIsHuddlePanelOpen(true);
+              }}
+              aria-label={huddle.active ? "Join active huddle" : "Start huddle"}
+              title={huddle.active ? "Join huddle" : "Start huddle"}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ide-success/30 bg-ide-success/10 px-3 py-2 text-xs font-medium text-ide-success hover:bg-ide-success/20"
+            >
+              <Headphones className="h-3.5 w-3.5" />
+              {huddle.active ? "Join huddle" : "Huddle"}
+            </button>
           </div>
         </div>
+
+        {isHuddlePanelOpen && huddle.active && (
+          <HuddlePanel onClose={() => setIsHuddlePanelOpen(false)} />
+        )}
 
         {/* Messages List */}
         <div className="flex-1 space-y-5 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 lg:px-8">
@@ -471,6 +515,8 @@ export const TeamChatPage: React.FC = () => {
                   alt={msg.sender}
                   width={40}
                   height={40}
+                  loading="lazy"
+                  decoding="async"
                   unoptimized
                   className="mt-0.5 h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-ide-focus-ring"
                 />

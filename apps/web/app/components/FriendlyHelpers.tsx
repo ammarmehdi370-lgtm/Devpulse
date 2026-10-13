@@ -38,14 +38,23 @@ export const ModalHost: React.FC = () => {
 
   useEffect(() => {
     if (!request) return;
+    const handleTopmostClose = (event: Event) => {
+      if ((event as CustomEvent<string>).detail !== "modal-host") return;
+      request.resolve(false);
+      setRequest(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && request.mode === "confirm") {
         request.resolve(false);
         setRequest(null);
       }
     };
+    window.addEventListener("devpulse:close-topmost", handleTopmostClose);
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("devpulse:close-topmost", handleTopmostClose);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [request]);
 
   if (!request) return null;

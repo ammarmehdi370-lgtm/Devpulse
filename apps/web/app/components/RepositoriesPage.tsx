@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import dynamic from "next/dynamic";
 import { useApp, Repository } from "../context/AppContext";
 import {
   Search,
@@ -20,11 +21,17 @@ import {
   Globe,
   Trash2,
   Loader2,
-  AlertCircle,
 } from "lucide-react";
 import { FriendlyHint, HelpfulInfo, friendlyConfirm } from "./FriendlyHelpers";
 import { PageHeader } from "./PageHeader";
 import { RepositoryRowSkeleton } from "./SkeletonLoaders";
+const RepositoryCreateDialog = dynamic(
+  () =>
+    import("./RepositoryCreateDialog").then(
+      (module) => module.RepositoryCreateDialog,
+    ),
+  { ssr: false },
+);
 
 export const RepositoriesPage: React.FC = () => {
   const {
@@ -436,103 +443,24 @@ export const RepositoriesPage: React.FC = () => {
 
       {/* New Repository Modal */}
       {isNewRepoModalOpen && (
-        <div className="fixed inset-0 bg-ide-overlay backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-ide-surface-card border border-ide-border-strong rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-ide-surface-control-hover">
-              <h3 className="text-ide-text-strong font-bold text-base">
-                Create a New Repository
-              </h3>
-              <button
-                onClick={() => setIsNewRepoModalOpen(false)}
-                className="text-ide-muted hover:text-ide-text-strong text-sm"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateRepo} className="space-y-4 text-xs">
-              <div>
-                <label className="text-ide-text-tertiary font-mono block mb-1">
-                  Repository Name <span className="text-ide-danger">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. edge-microservice"
-                  value={newRepoName}
-                  onChange={(e) => {
-                    setNewRepoName(e.target.value);
-                    setNameError("");
-                  }}
-                  className={`w-full px-3 py-2.5 rounded-xl bg-ide-surface-control border text-ide-text-strong focus:outline-none ${
-                    nameError
-                      ? "border-ide-danger focus:border-ide-danger"
-                      : "border-ide-border-control focus:border-ide-repository-focus"
-                  }`}
-                />
-                {nameError && (
-                  <div className="flex items-center gap-1.5 mt-1.5 text-ide-danger">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    <span>{nameError}</span>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="text-ide-text-tertiary font-mono block mb-1">
-                  Description (optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. High-throughput event pipeline"
-                  value={newRepoDesc}
-                  onChange={(e) => setNewRepoDesc(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-ide-surface-control border border-ide-border-control text-ide-text-strong focus:outline-none focus:border-ide-repository-focus"
-                />
-              </div>
-
-              <div>
-                <label className="text-ide-text-tertiary font-mono block mb-1">
-                  Primary Language
-                </label>
-                <select
-                  value={newRepoLang}
-                  onChange={(e) => setNewRepoLang(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-ide-surface-control border border-ide-border-control text-ide-text-strong focus:outline-none focus:border-ide-repository-focus"
-                >
-                  <option value="TypeScript">TypeScript</option>
-                  <option value="Python">Python</option>
-                  <option value="Rust">Rust</option>
-                  <option value="Go">Go</option>
-                </select>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsNewRepoModalOpen(false);
-                    setNameError("");
-                  }}
-                  className="px-4 py-2 rounded-xl bg-ide-surface-hover text-ide-text-tertiary hover:text-ide-text-strong"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreatingRepo}
-                  className="px-5 py-2 rounded-xl font-semibold text-ide-accent-fg flex items-center gap-2 disabled:opacity-60"
-                  style={{ backgroundColor: theme.primary }}
-                >
-                  {isCreatingRepo && (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  )}
-                  {isCreatingRepo ? "Creating…" : "Create Repository"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <RepositoryCreateDialog
+          primaryColor={theme.primary}
+          name={newRepoName}
+          description={newRepoDesc}
+          language={newRepoLang}
+          nameError={nameError}
+          isCreating={isCreatingRepo}
+          onNameChange={setNewRepoName}
+          onDescriptionChange={setNewRepoDesc}
+          onLanguageChange={setNewRepoLang}
+          onClearError={() => setNameError("")}
+          onClose={() => setIsNewRepoModalOpen(false)}
+          onCancel={() => {
+            setIsNewRepoModalOpen(false);
+            setNameError("");
+          }}
+          onSubmit={handleCreateRepo}
+        />
       )}
     </div>
   );

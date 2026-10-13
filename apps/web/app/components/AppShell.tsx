@@ -7,6 +7,8 @@ import { ToastContainer } from "./ToastContainer";
 import { friendlyAlert } from "./FriendlyHelpers";
 import { OnboardingTour } from "./OnboardingTour";
 import { LOGO_COLORS } from "../logoColors";
+import { prefetchPage } from "../pagePrefetch";
+import { formatShortcut, getShortcut } from "../editor/shortcuts";
 import {
   Box,
   GitFork,
@@ -22,7 +24,6 @@ import {
   LogOut,
   Terminal,
   Sparkles,
-  Monitor,
   CreditCard,
   Cpu,
   Radio,
@@ -95,24 +96,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       console.error("Unable to save workbench sidebar preference.", error);
     }
   }, [isSidebarOpen, isSidebarPreferenceHydrated]);
-
-  useEffect(() => {
-    const handleTerminalShortcut = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.code === "Backquote") {
-        event.preventDefault();
-        if (page !== "editor") {
-          setPage("editor");
-          setIsTerminalOpen(true);
-        } else {
-          setIsTerminalOpen((open) => !open);
-        }
-      }
-    };
-
-    document.addEventListener("keydown", handleTerminalShortcut);
-    return () =>
-      document.removeEventListener("keydown", handleTerminalShortcut);
-  }, [page, setIsTerminalOpen, setPage]);
 
   const toggleAccountMenu = (trigger: HTMLButtonElement) => {
     if (isAccountMenuOpen) {
@@ -287,6 +270,22 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     if (!isTerminalOpen || page !== "editor") setIsTerminalFocused(false);
   }, [isTerminalOpen, page, setIsTerminalFocused]);
+  useEffect(() => {
+    const closeMenus = (event: Event) => {
+      const owner = (event as CustomEvent<string>).detail;
+      if (owner === "shell-account" && isAccountMenuOpen) {
+        setIsAccountMenuOpen(false);
+        setAccountMenuPosition(null);
+      } else if (owner === "shell-settings" && settingsMenuPosition) {
+        setSettingsMenuPosition(null);
+      } else if (owner === "shell-mobile" && isMobileNavOpen) {
+        setIsMobileNavOpen(false);
+      }
+    };
+    window.addEventListener("devpulse:close-topmost", closeMenus);
+    return () =>
+      window.removeEventListener("devpulse:close-topmost", closeMenus);
+  }, [isAccountMenuOpen, isMobileNavOpen, settingsMenuPosition]);
   // Standard platform items
   const platformNavItems: {
     id: PageType;
@@ -299,7 +298,6 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
     { id: "repositories", label: "Your Code Projects", icon: GitFork },
     { id: "editor", label: "Code Editor", icon: Code2 },
     { id: "deployments", label: "Live Releases", icon: Rocket },
-    { id: "remote-control", label: "Pulse Pilot", icon: Monitor },
     { id: "ai-studio", label: "AI Assistant", icon: Sparkles },
     { id: "pricing", label: "Plans & Billing", icon: CreditCard },
     { id: "chat", label: "Team Chat", icon: MessageSquare },
@@ -441,6 +439,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               <button
                 key={link.id}
                 onClick={() => setPage(link.id as PageType)}
+                onMouseEnter={() => prefetchPage(link.id as PageType)}
+                onFocus={() => prefetchPage(link.id as PageType)}
                 aria-current={page === link.id ? "page" : undefined}
                 className={`topbar-nav-item ${
                   page === link.id ? "topbar-nav-item-active" : ""
@@ -454,10 +454,11 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
           {/* Right: Quick Jump, Status, Profile */}
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 xl:ml-0 xl:flex-1 xl:justify-end xl:gap-2.5">
-            {/* Search or jump to... Ctrl+K */}
+            {/* Search or jump to... */}
             <button
               onClick={() => setIsCommandPaletteOpen(true)}
               aria-label="Open command palette"
+              title={`Open command palette · ${formatShortcut(getShortcut("command-palette")!.keys)}`}
               className="topbar-pill flex items-center gap-1.5 px-2 sm:px-2.5"
             >
               <Search
@@ -466,7 +467,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               />
               <span className="hidden 2xl:inline text-ide-text-soft">Search</span>
               <kbd className="topbar-kbd">
-                <span>⌘K</span>
+                <span>{formatShortcut(getShortcut("command-palette")!.keys)}</span>
               </kbd>
             </button>
 
@@ -511,6 +512,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
       {isMobileNavOpen && (
         <div
           className="md:hidden fixed inset-0 top-14 z-40 bg-ide-overlay"
+          data-shortcut-close-owner="shell-mobile"
           onClick={() => setIsMobileNavOpen(false)}
         >
           <aside
@@ -536,6 +538,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                       setPage(item.id);
                       setIsMobileNavOpen(false);
                     }}
+                    onMouseEnter={() => prefetchPage(item.id)}
+                    onFocus={() => prefetchPage(item.id)}
                     aria-current={isActive ? "page" : undefined}
                     className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring ${isActive ? "text-ide-accent-fg font-semibold" : "text-ide-text-secondary hover:bg-ide-surface"}`}
                     style={isActive ? { backgroundColor: theme.primary } : {}}
@@ -586,6 +590,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             <button
               type="button"
               role="menuitem"
+              onMouseEnter={() => prefetchPage("settings")}
+              onFocus={() => prefetchPage("settings")}
               onClick={() => {
                 setSettingsMenuPosition(null);
                 setPage("settings");
@@ -601,6 +607,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             <button
               type="button"
               role="menuitem"
+              onMouseEnter={() => prefetchPage("theme")}
+              onFocus={() => prefetchPage("theme")}
               onClick={() => {
                 setSettingsMenuPosition(null);
                 setPage("theme");
@@ -733,12 +741,39 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                             if (item.action) item.action();
                             else setPage(item.id as PageType);
                           }}
+                          onMouseEnter={() =>
+                            prefetchPage(
+                              item.id === "source-control"
+                                ? "repositories"
+                                : item.id === "terminal" || item.id === "explorer"
+                                  ? "editor"
+                                  : (item.id as PageType),
+                            )
+                          }
+                          onFocus={() =>
+                            prefetchPage(
+                              item.id === "source-control"
+                                ? "repositories"
+                                : item.id === "terminal" || item.id === "explorer"
+                                  ? "editor"
+                                  : (item.id as PageType),
+                            )
+                          }
                           className={`group relative w-full flex items-center rounded-lg px-2.5 py-2.5 text-[12px] font-medium transition-all duration-150 ${
                             isSelected
                               ? "bg-ide-hover text-ide-text-strong shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_4%,transparent)]"
                               : "text-ide-muted hover:bg-ide-input-bg hover:text-ide-text"
                           }`}
                           aria-current={isSelected ? "page" : undefined}
+                          title={
+                            item.id === "explorer"
+                              ? `Explorer · ${formatShortcut(getShortcut("toggle-explorer")!.keys)}`
+                              : item.id === "terminal"
+                                ? `Terminal · ${formatShortcut(getShortcut("toggle-terminal")!.keys)}`
+                                : item.id === "source-control"
+                                  ? `Source Control · ${formatShortcut(getShortcut("source-control")!.keys)}`
+                                  : undefined
+                          }
                         >
                           {isSelected && (
                             <span
@@ -828,6 +863,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
                           onClick={() => {
                             setPage(item.id);
                           }}
+                          onMouseEnter={() => prefetchPage(item.id)}
+                          onFocus={() => prefetchPage(item.id)}
                           aria-label={
                             isCompactCloudCore ? item.label : undefined
                           }

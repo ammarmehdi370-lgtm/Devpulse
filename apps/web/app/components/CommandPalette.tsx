@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
+import { useHuddle } from "../context/HuddleContext";
+import { formatShortcut, getShortcut } from "../editor/shortcuts";
 import {
   Search,
   FileCode,
@@ -44,11 +46,17 @@ export const CommandPalette: React.FC = () => {
     isTerminalOpen,
     setIsTerminalOpen,
     setIsFileTreeOpen,
+    setIsAiDrawerOpen,
   } = useApp();
+  const huddle = useHuddle();
 
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const shortcutHint = (id: string) => {
+    const shortcut = getShortcut(id);
+    return shortcut ? formatShortcut(shortcut.keys) : undefined;
+  };
 
   useEffect(() => {
     if (!isCommandPaletteOpen) {
@@ -76,9 +84,9 @@ export const CommandPalette: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isCommandPaletteOpen, setIsCommandPaletteOpen]);
 
-  const dispatchEditorAction = (action: string) => {
+  const requestEditorAction = (action: string) => {
     window.dispatchEvent(
-      new CustomEvent("devpulse:editor-action", { detail: action }),
+      new CustomEvent("devpulse:request-editor-action", { detail: action }),
     );
   };
 
@@ -87,18 +95,18 @@ export const CommandPalette: React.FC = () => {
       id: "editor-quick-open",
       label: "Quick Open",
       category: "Editor",
-      shortcut: "Ctrl/Cmd + P",
+      shortcut: shortcutHint("quick-open"),
       icon: Search,
       action: () => {
         setPage("editor");
-        window.setTimeout(() => dispatchEditorAction("quick-open"), 0);
+        requestEditorAction("quick-open");
       },
     },
     {
       id: "editor-toggle-terminal",
       label: isTerminalOpen ? "Hide Integrated Terminal" : "Show Integrated Terminal",
       category: "Editor",
-      shortcut: "Ctrl + `",
+      shortcut: shortcutHint("toggle-terminal"),
       icon: Terminal,
       action: () => {
         setPage("editor");
@@ -109,6 +117,7 @@ export const CommandPalette: React.FC = () => {
       id: "editor-toggle-explorer",
       label: "Toggle Explorer",
       category: "Editor",
+      shortcut: shortcutHint("toggle-explorer"),
       icon: Box,
       action: () => {
         setPage("editor");
@@ -116,37 +125,72 @@ export const CommandPalette: React.FC = () => {
       },
     },
     {
+      id: "editor-ai",
+      label: "Open AI Assistant",
+      category: "Editor",
+      shortcut: shortcutHint("open-ai"),
+      icon: Zap,
+      action: () => {
+        setPage("editor");
+        setIsAiDrawerOpen(true);
+      },
+    },
+    {
+      id: "editor-toggle-ai",
+      label: "Toggle AI Assistant drawer",
+      category: "Editor",
+      shortcut: shortcutHint("toggle-ai-drawer"),
+      icon: Zap,
+      action: () => {
+        setPage("editor");
+        setIsAiDrawerOpen((open) => !open);
+      },
+    },
+    {
       id: "editor-settings",
       label: "Open Editor Settings",
       category: "Editor",
-      shortcut: "Ctrl/Cmd + ,",
+      shortcut: shortcutHint("settings"),
       icon: Settings2,
       action: () => {
         setPage("editor");
-        window.setTimeout(() => dispatchEditorAction("settings"), 0);
+        requestEditorAction("settings");
       },
     },
     {
       id: "editor-focus",
       label: "Toggle Focus Mode",
       category: "Editor",
-      shortcut: "Ctrl/Cmd + Shift + Z",
+      shortcut: shortcutHint("focus-mode"),
       icon: Columns,
       action: () => {
         setPage("editor");
-        window.setTimeout(() => dispatchEditorAction("zen"), 0);
+        requestEditorAction("zen");
       },
     },
     {
       id: "editor-shortcuts",
       label: "Keyboard Shortcuts",
-      category: "Help",
-      shortcut: "?",
+      category: "General",
+      shortcut: shortcutHint("shortcuts-dialog"),
       icon: CircleHelp,
-      action: () => {
-        setPage("editor");
-        window.setTimeout(() => dispatchEditorAction("shortcuts"), 0);
-      },
+      action: () => window.dispatchEvent(new CustomEvent("devpulse:open-shortcuts")),
+    },
+    {
+      id: "goto-theme",
+      label: "Open Theme Palette",
+      category: "Theme",
+      shortcut: shortcutHint("theme-page"),
+      icon: Palette,
+      action: () => setPage("theme"),
+    },
+    {
+      id: "editor-run",
+      label: "Run Preview",
+      category: "Editor",
+      shortcut: `${shortcutHint("run-f5")} / ${shortcutHint("run-alt-r")}`,
+      icon: Zap,
+      action: () => window.dispatchEvent(new CustomEvent("devpulse:request-run")),
     },
     {
       id: "goto-editor",
@@ -163,11 +207,14 @@ export const CommandPalette: React.FC = () => {
       action: () => setPage("api-sandbox"),
     },
     {
-      id: "goto-remote",
-      label: "Join Remote Control Pairing Session",
-      category: "Navigation",
-      icon: Terminal,
-      action: () => setPage("remote-control"),
+      id: "start-huddle",
+      label: huddle.active ? "Join Team Huddle" : "Start Huddle",
+      category: "Team Chat",
+      icon: Radio,
+      action: () => {
+        huddle.start();
+        setPage("chat");
+      },
     },
     {
       id: "goto-ai",

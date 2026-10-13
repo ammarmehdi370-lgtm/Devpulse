@@ -112,3 +112,40 @@ export const ChatListSkeleton: React.FC = () => {
     </div>
   );
 };
+
+export const AppPageSkeleton: React.FC<{
+  variant?: "auth" | "theme" | "list" | "dashboard";
+}> = ({ variant = "dashboard" }) => {
+  if (variant === "auth") {
+    return (
+      <main className="min-h-screen bg-ide-app-content-bg px-4 py-8" aria-label="Loading sign in" aria-busy="true">
+        <div className="mx-auto grid min-h-[min(820px,calc(100vh-4rem))] max-w-5xl animate-pulse overflow-hidden rounded-2xl border border-ide-border bg-ide-panel lg:grid-cols-2">
+          <div className="space-y-5 p-8"><div className="h-8 w-32 rounded bg-ide-skeleton-strong" /><div className="mt-12 h-8 w-56 rounded bg-ide-skeleton-mid" /><div className="h-12 rounded bg-ide-skeleton-strong" /><div className="h-12 rounded bg-ide-skeleton-strong" /></div>
+          <div className="hidden bg-ide-surface lg:block" />
+        </div>
+      </main>
+    );
+  }
+
+  if (variant === "theme") {
+    return (
+      <main className="flex min-h-full items-center justify-center bg-ide-app-content-bg p-4" aria-label="Loading theme selector" aria-busy="true">
+        <div className="w-full max-w-6xl animate-pulse rounded-2xl border border-ide-border bg-ide-panel p-6">
+          <div className="mx-auto mb-8 h-8 w-64 rounded bg-ide-skeleton-strong" />
+          <div className="grid gap-6 md:grid-cols-2"><div className="h-14 rounded-xl bg-ide-skeleton-mid" /><div className="aspect-video rounded-xl bg-ide-surface" /></div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <div className="h-full min-h-[40vh] overflow-y-auto bg-ide-app-content-bg px-4 py-6 sm:px-6" aria-label="Loading workspace page" aria-busy="true">
+      <div className="mx-auto max-w-7xl animate-pulse">
+        <div className="mb-6 flex items-center justify-between gap-4"><div className="space-y-2"><div className="h-6 w-48 rounded bg-ide-skeleton-strong" /><div className="h-3 w-72 max-w-full rounded bg-ide-skeleton-mid" /></div><div className="h-9 w-28 rounded-lg bg-ide-skeleton-strong" /></div>
+        <div className={`grid gap-4 ${variant === "list" ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"}`}>
+          {Array.from({ length: variant === "list" ? 4 : 6 }, (_, index) => <div key={index} className="h-32 rounded-xl border border-ide-border bg-ide-surface" />)}
+        </div>
+      </div>
+    </div>
+  );
+};

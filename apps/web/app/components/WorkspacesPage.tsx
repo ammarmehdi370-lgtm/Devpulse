@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useApp, WorkspaceDevbox } from "../context/AppContext";
+import { formatShortcut, getShortcut } from "../editor/shortcuts";
 import {
   GitBranch,
   Copy,
@@ -755,14 +756,14 @@ export const WorkspacesPage: React.FC = () => {
         <div className="flex items-center gap-3">
           <span>
             <kbd className="px-1.5 py-0.5 rounded bg-ide-surface-control border border-ide-border-control text-ide-text-strong">
-              Ctrl+`
+              {formatShortcut(getShortcut("toggle-terminal")?.keys ?? [])}
             </kbd>{" "}
             Open integrated terminal
           </span>
           <span>
             Press{" "}
             <kbd className="px-1 rounded bg-ide-surface-control border border-ide-border-control text-ide-text-strong">
-              ?
+              {formatShortcut(getShortcut("shortcuts-dialog")?.keys ?? [])}
             </kbd>{" "}
             for keyboard map
           </span>

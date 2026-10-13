@@ -42,8 +42,12 @@ export const LoginPage: React.FC = () => {
     setLoginMethod(provider);
     setAuthError("");
 
+    if (provider === "google") {
+      login("dev-github@localhost.dev", "Alex");
+      return;
+    }
+
     if (
-      provider === "google" ||
       provider === "github" ||
       provider === "gitlab" ||
       provider === "sso"
@@ -51,7 +55,7 @@ export const LoginPage: React.FC = () => {
       // ── DEV BYPASS ────────────────────────────────────────────────────────
       // In development, skip the real OAuth redirect and log in immediately
       // with a mock dev user so you can test the full app flow locally.
-      if (provider !== "google" && process.env.NODE_ENV === "development") {
+      if (process.env.NODE_ENV === "development") {
         const providerLabels: Record<string, string> = {
           github: "Alex",
           gitlab: "GitLab Dev",
