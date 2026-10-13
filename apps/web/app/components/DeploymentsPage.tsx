@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "../context/AppContext";
+import { ErrorState, NoDeploymentsEmpty } from "./EmptyStates";
+import { ListSkeleton } from "./SkeletonLoaders";
 import {
   Rocket,
   RefreshCw,
@@ -43,6 +45,9 @@ export const DeploymentsPage: React.FC = () => {
     logs,
     clearLogs,
     theme,
+    isDataLoading,
+    dataErrors,
+    retryDataLoad,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState("deployments");
@@ -255,7 +260,17 @@ export const DeploymentsPage: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            {deployments.map((dep) => (
+            {isDataLoading ? (
+              <ListSkeleton count={3} />
+            ) : dataErrors.deployments ? (
+              <ErrorState
+                message={dataErrors.deployments}
+                onRetry={() => void retryDataLoad()}
+              />
+            ) : deployments.length === 0 ? (
+              <NoDeploymentsEmpty onDeploy={() => void triggerNewRelease()} />
+            ) : (
+              deployments.map((dep) => (
               <div
                 key={dep.id}
                 className="bg-[#141420] border border-[#222232] hover:border-[#2e2e42] rounded-xl p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -309,7 +324,8 @@ export const DeploymentsPage: React.FC = () => {
                   </div>
                 </div>
               </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 

@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useApp, WorkspaceDevbox } from "../context/AppContext";
+import { ErrorState, NoWorkspacesEmpty } from "./EmptyStates";
+import { ListSkeleton, WorkspaceSkeleton } from "./SkeletonLoaders";
 import {
   GitBranch,
   Copy,
@@ -34,12 +36,16 @@ export const WorkspacesPage: React.FC = () => {
     deleteWorkspace,
     theme,
     setPage,
+    isDataLoading,
+    dataErrors,
+    retryDataLoad,
   } = useApp();
 
   const [cloneUrl, setCloneUrl] = useState("https://github.com/org/repo.git");
   const [selectedTemplate, setSelectedTemplate] = useState("Next.js 15");
   const [cliCopied, setCliCopied] = useState(false);
   const [isCloning, setIsCloning] = useState(false);
+  const templateOptionsRef = useRef<HTMLDivElement>(null);
 
   const templates = [
     {
@@ -143,7 +149,10 @@ export const WorkspacesPage: React.FC = () => {
       </div>
 
       {/* 3 Main Options Cards Grid (Pixel-Perfect to Screenshot 3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div
+        ref={templateOptionsRef}
+        className="grid grid-cols-1 lg:grid-cols-3 gap-5"
+      >
         {/* OPTION 01: Clone a Git Repository */}
         <div className="bg-[#12121b] border border-[#222234] rounded-2xl p-6 flex flex-col justify-between shadow-xl relative overflow-hidden">
           <div className="space-y-4">
@@ -382,12 +391,22 @@ export const WorkspacesPage: React.FC = () => {
         </div>
 
         {/* Dynamic Devbox Workspace Cards */}
-        {workspaces.length === 0 ? (
-          <div className="p-8 text-center text-xs text-[#777792]">
-            You don't have any running workspaces yet. Once launched, your
-            compute instances, pinned ports, and environment secrets will
-            populate here for fast resumption.
-          </div>
+        {isDataLoading ? (
+          <ListSkeleton count={3} Skeleton={WorkspaceSkeleton} />
+        ) : dataErrors.workspaces ? (
+          <ErrorState
+            message={dataErrors.workspaces}
+            onRetry={() => void retryDataLoad()}
+          />
+        ) : workspaces.length === 0 ? (
+          <NoWorkspacesEmpty
+            onCreate={() =>
+              templateOptionsRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              })
+            }
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             {workspaces.map((ws) => (

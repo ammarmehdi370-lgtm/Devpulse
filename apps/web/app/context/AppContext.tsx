@@ -7,6 +7,7 @@ import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices, type BrowserServices } from "../../src/lib/services";
 import { THEME_PRESETS, type ThemeConfig } from "./themeLibrary";
+import { ToastContainer, type ToastMessage } from "../components/ToastContainer";
 
 export type PageType =
   | "login"
@@ -122,6 +123,11 @@ interface AppContextType {
   login: (email?: string, name?: string) => Promise<void>;
   loginAndLoad: (email?: string, name?: string) => Promise<void>;
   isDataLoading: boolean;
+  dataErrors: AppDataErrors;
+  retryDataLoad: () => Promise<void>;
+  toasts: ToastMessage[];
+  addToast: (toast: Omit<ToastMessage, "id">) => void;
+  dismissToast: (id: string) => void;
   logout: () => void;
   theme: ThemeConfig;
   setTheme: (theme: ThemeConfig) => void;
@@ -241,6 +247,18 @@ export class ApiRequestError extends Error {
   details: Record<string, unknown>;
   constructor(status: number, message: string, details: Record<string, unknown> = {}) { super(message); this.name = "ApiRequestError"; this.status = status; this.details = details; }
 }
+
+type AppDataErrors = {
+  repositories: string;
+  workspaces: string;
+  deployments: string;
+};
+
+const EMPTY_DATA_ERRORS: AppDataErrors = {
+  repositories: "",
+  workspaces: "",
+  deployments: "",
+};
 
 const INITIAL_REPOSITORIES: Repository[] = [
   {
@@ -521,6 +539,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [services, setServices] = useState<BrowserServices | null>(null);
   const [page, setPage] = useState<PageType>("login");
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [dataErrors, setDataErrors] =
+    useState<AppDataErrors>(EMPTY_DATA_ERRORS);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [theme, setThemeState] = useState<ThemeConfig>(THEME_PRESETS[0]!);
   const [user, setUser] = useState<UserProfile>({
     name: "Alex",
@@ -1264,7 +1285,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     return response.status === 204 ? (undefined as T) : response.json();
   };
 
-  const loadInitialAppData = async () => {
+  const loadInitialAppData = async (): Promise<AppDataErrors> => {
     if (!services) throw new Error("Browser services are still initializing.");
     const userId = getCurrentUserId();
     if (!userId) throw new Error("Cannot load application data without a user.");
@@ -1310,6 +1331,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         failures.map((failure) => failure.reason),
       );
     }
+    const retryMessage = "Could not load this data. Please retry.";
+    return {
+      repositories:
+        results[0]?.status === "rejected" ? retryMessage : "",
+      workspaces:
+        results[1]?.status === "rejected" ? retryMessage : "",
+      deployments:
+        results[2]?.status === "rejected" ||
+        results[3]?.status === "rejected"
+          ? retryMessage
+          : "",
+    };
   };
 
   const getPostLoginPage = (): PageType =>
@@ -1319,16 +1352,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const loginAndLoad = async (email?: string, name?: string) => {
     setIsDataLoading(true);
+    setDataErrors(EMPTY_DATA_ERRORS);
     try {
       await login(email, name);
       initializedUserIdRef.current = getCurrentUserId() ?? null;
-      await loadInitialAppData();
+      setDataErrors(await loadInitialAppData());
       setPage(getPostLoginPage());
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Application data could not be loaded. Please retry.";
+      setDataErrors({
+        repositories: message,
+        workspaces: message,
+        deployments: message,
+      });
+      throw error;
     } finally {
       setIsDataLoading(false);
     }
   };
 
+  const retryDataLoad = async () => {
+    setIsDataLoading(true);
+    setDataErrors(EMPTY_DATA_ERRORS);
+    try {
+      setDataErrors(await loadInitialAppData());
+    } catch (error) {
+      console.error("[AppContext] Could not retry application data loading.", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Application data could not be loaded. Please retry.";
+      setDataErrors({
+        repositories: message,
+        workspaces: message,
+        deployments: message,
+      });
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
+
+  const addToast = (toast: Omit<ToastMessage, "id">) => {
+    const id = crypto.randomUUID();
+    const duration = toast.duration ?? 4000;
+    setToasts((previous) => [...previous, { ...toast, id, duration }]);
+    window.setTimeout(() => {
+      setToasts((previous) => previous.filter((current) => current.id !== id));
+    }, duration);
+  };
+
+  const dismissToast = (id: string) => {
+    setToasts((previous) => previous.filter((toast) => toast.id !== id));
+  };
   useEffect(() => {
     if (!services || !user.isAuthenticated) return;
     const userId = getCurrentUserId();
@@ -1336,12 +1414,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
     initializedUserIdRef.current = userId;
     setIsDataLoading(true);
+    setDataErrors(EMPTY_DATA_ERRORS);
     void loadInitialAppData()
-      .then(() => {
+      .then((errors) => {
+        setDataErrors(errors);
         if (page === "login") setPage(getPostLoginPage());
       })
       .catch((error: unknown) => {
         console.error("[AppContext] Could not initialize application data.", error);
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Application data could not be loaded. Please retry.";
+        setDataErrors({
+          repositories: message,
+          workspaces: message,
+          deployments: message,
+        });
         if (page === "login") setPage(getPostLoginPage());
       })
       .finally(() => setIsDataLoading(false));
@@ -1817,6 +1906,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         login,
         loginAndLoad,
         isDataLoading,
+        dataErrors,
+        retryDataLoad,
+        toasts,
+        addToast,
+        dismissToast,
         logout,
         theme,
         setTheme,
@@ -1892,6 +1986,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }}
     >
       {children}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </AppContext.Provider>
   );
 };

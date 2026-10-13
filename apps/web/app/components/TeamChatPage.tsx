@@ -6,6 +6,7 @@ import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices, type DevpulseServices } from "../../src/lib/services";
 import { useApp } from "../context/AppContext";
+import { ErrorState, NoChatMessages } from "./EmptyStates";
 import {
   Hash,
   Send,
@@ -47,6 +48,9 @@ export const TeamChatPage: React.FC = () => {
   const [services, setServices] = useState<DevpulseServices | null>(null);
   const [activeChannel, setActiveChannel] = useState("general");
   const [activeChannelId, setActiveChannelId] = useState("");
+  const [isChatLoading, setIsChatLoading] = useState(true);
+  const [chatError, setChatError] = useState("");
+  const [chatLoadAttempt, setChatLoadAttempt] = useState(0);
   const [messageInput, setMessageInput] = useState("");
   const sentMessageIds = useRef(new Set<string>());
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -115,42 +119,56 @@ export const TeamChatPage: React.FC = () => {
 
   useEffect(() => {
     let active = true;
+    const startedAt = Date.now();
     setActiveChannelId("");
-    const loadMessages = async () => {
-      const db = await getDB();
-      const userId = sessionStorage.getItem("dp_user_id");
-      if (!userId) return;
+    setIsChatLoading(true);
+    setChatError("");
+     const loadMessages = async () => {
+      try {
+        const db = await getDB();
+        const userId = sessionStorage.getItem("dp_user_id");
+        if (!userId) {
+          if (active) setMessages([]);
+          return;
+        }
 
-      const memberships = await db
-        .select()
-        .from(schema.workspaceMembers)
-        .where(eq(schema.workspaceMembers.userId, userId));
+        const memberships = await db
+          .select()
+          .from(schema.workspaceMembers)
+          .where(eq(schema.workspaceMembers.userId, userId));
 
-      if (memberships.length === 0) return;
+        if (!active) return;
+        if (memberships.length === 0) {
+          setMessages([]);
+          return;
+        }
 
-      const workspaceId = memberships[0]!.workspaceId;
-      const channelRows = await db
-        .select()
-        .from(schema.channels)
-        .where(eq(schema.channels.workspaceId, workspaceId))
-        .limit(1);
+        const workspaceId = memberships[0]!.workspaceId;
+        const channelRows = await db
+          .select()
+          .from(schema.channels)
+          .where(eq(schema.channels.workspaceId, workspaceId))
+          .limit(1);
 
-      const channel = channelRows.find((row) => row.name === activeChannel) ?? channelRows[0];
-      if (!channel || !active) return;
-      setActiveChannelId(channel.id);
+        const channel =
+          channelRows.find((row) => row.name === activeChannel) ??
+          channelRows[0];
+        if (!channel || !active) {
+          if (active) setMessages([]);
+          return;
+        }
+        setActiveChannelId(channel.id);
 
-      const rows = await db
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.channelId, channel.id))
-        .orderBy(desc(schema.messages.createdAt))
-        .limit(25);
+        const rows = await db
+          .select()
+          .from(schema.messages)
+          .where(eq(schema.messages.channelId, channel.id))
+          .orderBy(desc(schema.messages.createdAt))
+          .limit(25);
 
-      if (!active) return;
-      setMessages(
-        rows
-          .reverse()
-          .map((row, index) => ({
+        if (!active) return;
+        setMessages(
+          rows.reverse().map((row, index) => ({
             id: index + 1,
             sender: row.authorId,
             role: "Member",
@@ -163,14 +181,27 @@ export const TeamChatPage: React.FC = () => {
             text: row.body,
             reactions: [],
           })),
-      );
+        );
+      } catch (error) {
+        if (!active) return;
+        console.error("Could not load chat messages.", error);
+        setChatError(
+          error instanceof Error
+            ? error.message
+            : "Could not load chat messages. Please retry.",
+        );
+      } finally {
+        const remaining = Math.max(0, 450 - (Date.now() - startedAt));
+        await new Promise((resolve) => window.setTimeout(resolve, remaining));
+        if (active) setIsChatLoading(false);
+      }
     };
 
     void loadMessages();
     return () => {
       active = false;
     };
-  }, [activeChannel]);
+  }, [activeChannel, chatLoadAttempt]);
 
   useEffect(() => {
     if (!services || !activeChannelId) return;
@@ -374,6 +405,27 @@ export const TeamChatPage: React.FC = () => {
 
         {/* Messages List */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5 select-text">
+          {isChatLoading ? (
+            <div aria-busy="true" aria-label="Loading chat messages" className="flex-1 space-y-3 p-4">
+              {Array.from({ length: 5 }, (_, index) => (
+                <div key={index} className="flex animate-pulse gap-3">
+                  <div className="h-7 w-7 shrink-0 rounded-full bg-[var(--skeleton-strong)]" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 w-32 rounded bg-[var(--skeleton-strong)]" />
+                    <div className="h-4 w-64 max-w-full rounded bg-[var(--skeleton-mid)]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : chatError ? (
+            <ErrorState
+              message={chatError}
+              onRetry={() => setChatLoadAttempt((attempt) => attempt + 1)}
+            />
+          ) : messages.length === 0 ? (
+            <NoChatMessages channelName={activeChannel} />
+          ) : (
+            <>
           <div className="text-center">
             <span className="px-3 py-1 rounded-full bg-[#141420] border border-[#222234] text-[10px] font-mono text-[#6c6c88]">
               TODAY
@@ -457,6 +509,8 @@ export const TeamChatPage: React.FC = () => {
               </div>
             </div>
           ))}
+            </>
+          )}
         </div>
 
         {/* Chat Input */}

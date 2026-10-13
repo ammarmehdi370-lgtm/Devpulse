@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { useApp, Repository } from "../context/AppContext";
+import { EmptyState, ErrorState, NoRepositoriesEmpty } from "./EmptyStates";
+import { ListSkeleton, RepositorySkeleton } from "./SkeletonLoaders";
 import {
   Search,
   Plus,
@@ -34,6 +36,9 @@ export const RepositoriesPage: React.FC = () => {
     spinUpDevbox,
     setPage,
     theme,
+    isDataLoading,
+    dataErrors,
+    retryDataLoad,
   } = useApp();
 
   const [isNewRepoModalOpen, setIsNewRepoModalOpen] = useState(false);
@@ -170,16 +175,27 @@ export const RepositoriesPage: React.FC = () => {
 
       {/* Repositories List */}
       <div className="grid grid-cols-1 gap-4">
-        {filteredRepos.length === 0 ? (
-          <div className="p-12 text-center bg-[#11111a] border border-[#1f1f2e] rounded-2xl">
-            <FolderGit2 className="w-10 h-10 text-[#555570] mx-auto mb-3" />
-            <h3 className="text-white text-sm font-semibold">
-              No repositories found
-            </h3>
-            <p className="text-xs text-[#7e7e98] mt-1">
-              Try adjusting your search or create a new repository.
-            </p>
-          </div>
+        {isDataLoading ? (
+          <ListSkeleton count={4} Skeleton={RepositorySkeleton} />
+        ) : dataErrors.repositories ? (
+          <ErrorState
+            message={dataErrors.repositories}
+            onRetry={() => void retryDataLoad()}
+          />
+        ) : filteredRepos.length === 0 ? (
+          repositories.length === 0 && !searchRepoQuery && repoFilter === "all" ? (
+            <NoRepositoriesEmpty onCreate={() => setIsNewRepoModalOpen(true)} />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="No repositories match"
+              description={
+                searchRepoQuery
+                  ? `No results for "${searchRepoQuery}".`
+                  : "No repositories match the selected filters."
+              }
+            />
+          )
         ) : (
           filteredRepos.map((repo) => (
             <div
