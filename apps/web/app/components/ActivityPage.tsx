@@ -31,7 +31,7 @@ const ActivityDetailDialog = dynamic(
   { ssr: false },
 );
 
-type ActivityRange = "today" | "7d" | "30d";
+type ActivityRange = "today" | "7d" | "30d" | "90d";
 type ActivityFilter = "all" | "Focus" | "Code" | "Project" | "Workspace" | "Release" | "System";
 
 interface ActivityRow extends ActivityEvent {
@@ -54,6 +54,7 @@ const FILTERS: ActivityFilter[] = [
   "Release",
   "System",
 ];
+const CHART_CATEGORIES: ActivityFilter[] = FILTERS.slice(1);
 
 function readTimerState(): TimerState {
   if (typeof window === "undefined") return { elapsedSeconds: 0, startedAt: null };
@@ -216,6 +217,7 @@ export function ActivityPage() {
     date.setHours(0, 0, 0, 0);
     if (range === "7d") date.setDate(date.getDate() - 6);
     if (range === "30d") date.setDate(date.getDate() - 29);
+    if (range === "90d") date.setDate(date.getDate() - 89);
     return date;
   }, [now, range]);
 
@@ -265,7 +267,9 @@ export function ActivityPage() {
   const releasesToday = todayRows.filter(
     (row) => row.category === "Release",
   ).length;
-  const dayCount = range === "today" ? 1 : range === "7d" ? 7 : 30;
+  const dayCount =
+    range === "today" ? 1 : range === "7d" ? 7 : range === "30d" ? 30 : 90;
+  const chartCategories = CHART_CATEGORIES;
   const chartDays = useMemo(
     () =>
       Array.from({ length: dayCount }, (_, index) => {
@@ -274,31 +278,84 @@ export function ActivityPage() {
         const matchingEvents = filteredRows.filter(
           (row) => dateKey(new Date(row.timestamp)) === dateKey(date),
         );
-        const categories = ["Code", "Project", "Workspace", "Release", "Focus", "System"];
         return {
           date,
-          label: new Intl.DateTimeFormat(undefined, {
-            weekday: dayCount === 1 ? undefined : "short",
-            day: dayCount > 7 ? "numeric" : undefined,
-          }).format(date),
           total: matchingEvents.length,
-          stacks: categories.map((category) => ({
+          stacks: chartCategories.map((category) => ({
             category,
             count: matchingEvents.filter((event) => event.category === category)
               .length,
           })),
         };
       }),
-    [dayCount, filteredRows, rangeStart],
+    [chartCategories, dayCount, filteredRows, rangeStart],
   );
-  const maxActivity = Math.max(1, ...chartDays.map((day) => day.total));
+  const chartBars = useMemo(() => {
+    if (dayCount < 90) {
+      return chartDays.map((day, index) => ({
+        ...day,
+        label:
+          dayCount === 7
+            ? new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(
+                day.date,
+              )
+            : dayCount === 30
+              ? index % 5 === 0 || index === chartDays.length - 1
+                ? new Intl.DateTimeFormat(undefined, {
+                    day: "numeric",
+                    month: "short",
+                  }).format(day.date)
+                : ""
+              : new Intl.DateTimeFormat(undefined, {
+                  day: "numeric",
+                  month: "short",
+                }).format(day.date),
+      }));
+    }
+
+    const weeks: (typeof chartDays)[] = [];
+    for (let index = 0; index < chartDays.length; index += 7) {
+      weeks.push(chartDays.slice(index, index + 7));
+    }
+    const labelInterval = weeks.length > 18 ? 4 : 2;
+    return weeks.map((week, index) => {
+      const totals = chartCategories.map((category) => ({
+        category,
+        count: week.reduce(
+          (sum, day) =>
+            sum +
+            (day.stacks.find((stack) => stack.category === category)?.count ??
+              0),
+          0,
+        ),
+      }));
+      return {
+        date: week[0]?.date ?? new Date(),
+        total: totals.reduce((sum, category) => sum + category.count, 0),
+        stacks: totals,
+        label:
+          index % labelInterval === 0 || index === weeks.length - 1
+            ? new Intl.DateTimeFormat(undefined, {
+                day: "numeric",
+                month: "short",
+              }).format(week[0]?.date ?? new Date())
+            : "",
+      };
+    });
+  }, [chartCategories, chartDays, dayCount]);
+  const maxActivity = Math.max(1, ...chartBars.map((day) => day.total));
   const categoryCounts = FILTERS.slice(1).map((category) => ({
     category,
     count: filteredRows.filter((row) => row.category === category).length,
   }));
-  const busiestDay = chartDays.reduce(
+  const busiestDay = chartBars.reduce(
     (busiest, day) => (day.total > busiest.total ? day : busiest),
-    chartDays[0] || { total: 0, label: "No activity", date: new Date(), stacks: [] },
+    chartBars[0] || {
+      total: 0,
+      label: "No activity",
+      date: new Date(),
+      stacks: [],
+    },
   );
   const averagePerDay = Math.round(filteredRows.length / Math.max(1, dayCount));
   const currentPageRows = visibleRows;
@@ -541,36 +598,180 @@ export function ActivityPage() {
                   <option value="today">Today</option>
                   <option value="7d">Last 7 days</option>
                   <option value="30d">Last 30 days</option>
+                  <option value="90d">Last 90 days</option>
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ide-muted" />
               </label>
             </div>
-            <div className="flex h-44 items-end gap-1.5 border-b border-ide-border-strong px-1 pb-2 sm:gap-3">
-              {chartDays.map((day) => (
+            {isDataLoading ? (
+              <div
+                aria-label="Loading activity chart"
+                className="flex h-[220px] min-h-[220px] w-full min-w-0 animate-pulse items-end gap-2 border-b border-ide-border-strong px-8 pb-0 motion-reduce:animate-none sm:gap-3"
+              >
+                {Array.from({
+                  length: range === "30d" ? 15 : range === "90d" ? 13 : 7,
+                }).map(
+                  (_, index) => (
+                    <span
+                      key={index}
+                      className="flex-1 rounded-t-md bg-ide-surface-toolbar"
+                      style={{ height: `${24 + ((index * 31) % 68)}%` }}
+                    />
+                  ),
+                )}
+              </div>
+            ) : filteredRows.length === 0 ? (
+              <div className="flex h-[220px] min-h-[220px] w-full min-w-0 flex-col items-center justify-center gap-2 border-b border-ide-border-strong text-center">
+                <Activity className="h-5 w-5 text-ide-muted" aria-hidden="true" />
+                <p className="text-xs font-medium text-ide-text-secondary">
+                  No activity in this range
+                </p>
+              </div>
+            ) : (
+              <div className="flex w-full min-w-0 items-stretch">
                 <div
-                  key={dateKey(day.date)}
-                  className="group flex h-full min-w-0 flex-1 flex-col items-center justify-end gap-2"
-                  title={`${day.label}: ${day.total} events`}
+                  aria-hidden="true"
+                  className="relative h-[220px] min-h-[220px] w-8 shrink-0"
                 >
-                  <div className="flex h-[calc(100%-20px)] w-full max-w-9 items-end overflow-hidden rounded-t-[4px] bg-ide-surface-toolbar">
-                    <div className="flex w-full flex-col-reverse overflow-hidden rounded-t-[4px]">
-                      {day.stacks.map(({ category, count }) => (
-                        <div
-                          key={category}
-                          className={`w-full transition-[height] duration-500 ${chartColor(category)}`}
-                          style={{
-                            height: `${count ? Math.max(4, (count / maxActivity) * 100) : 0}%`,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                  <span className="truncate text-[9px] text-ide-muted">
-                    {day.label}
-                  </span>
+                  {[3, 2, 1, 0].map((tick) => (
+                    <span
+                      key={tick}
+                      className="absolute right-1 -translate-y-1/2 font-mono text-[9px] tabular-nums text-ide-muted"
+                      style={{ top: `${((3 - tick) / 3) * 100}%` }}
+                    >
+                      {Math.round((maxActivity * tick) / 3)}
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
+                <div className="min-w-0 flex-1">
+                  <div
+                    role="img"
+                    aria-label={`Activity intensity chart for ${range}, ${filteredRows.length} events`}
+                    className="relative flex h-[220px] min-h-[220px] w-full min-w-0 items-end"
+                  >
+                    {[0, 1, 2, 3].map((tick) => (
+                      <span
+                        key={tick}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-x-0 z-0 border-t border-ide-border-strong/40"
+                        style={{ bottom: `${(tick / 3) * 100}%` }}
+                      />
+                    ))}
+                    {chartBars.map((day) => {
+                      const nonzeroSegments = day.stacks.filter(
+                        (stack) => stack.count > 0,
+                      ).length;
+                      const barHeight = day.total
+                        ? Math.max(
+                            (day.total / maxActivity) * 100,
+                            (nonzeroSegments * 3 * 100) / 220,
+                          )
+                        : 0;
+                      const tooltip = [
+                        formatDate(day.date),
+                        ...day.stacks.map(
+                          ({ category, count }) => `${category}: ${count}`,
+                        ),
+                        `Total: ${day.total}`,
+                      ].join("\n");
+
+                      return (
+                        <div
+                          key={dateKey(day.date)}
+                          className={`group relative z-10 flex h-full min-w-0 flex-1 flex-col items-center justify-end ${
+                            dayCount === 30 ? "px-px" : "px-0.5"
+                          }`}
+                        >
+                          <div
+                            className="relative flex h-full w-full items-end justify-center"
+                            title={tooltip}
+                          >
+                            <div
+                              aria-hidden="true"
+                              className="flex w-full max-w-9 flex-col-reverse overflow-hidden rounded-t-md"
+                              style={{
+                                height: day.total ? `${barHeight}%` : "2px",
+                              }}
+                            >
+                              {day.stacks.map(({ category, count }) =>
+                                count > 0 ? (
+                                  <span
+                                    key={category}
+                                    className={`min-h-[3px] w-full shrink-0 transition-[height] duration-200 motion-reduce:transition-none ${chartColor(category)}`}
+                                    style={{
+                                      flex: `${count} 1 0%`,
+                                    }}
+                                  />
+                                ) : null,
+                              )}
+                            </div>
+                            <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 hidden w-40 -translate-x-1/2 rounded-lg border border-ide-border-strong bg-ide-panel p-2.5 text-left text-[10px] leading-4 text-ide-text-secondary shadow-lg group-hover:block group-focus-within:block">
+                              <span className="mb-1.5 block border-b border-ide-border-subtle pb-1.5 font-semibold text-ide-text-strong">
+                                {formatDate(day.date)}
+                              </span>
+                              {day.stacks.map(({ category, count }) => (
+                                <span
+                                  key={category}
+                                  className="flex items-center justify-between gap-2"
+                                >
+                                  <span className="flex min-w-0 items-center gap-1.5">
+                                    <span
+                                      className={`h-1.5 w-1.5 shrink-0 rounded-sm ${chartColor(category)}`}
+                                    />
+                                    <span className="truncate">{category}</span>
+                                  </span>
+                                  <span className="font-mono tabular-nums text-ide-text-strong">
+                                    {count}
+                                  </span>
+                                </span>
+                              ))}
+                              <span className="mt-1.5 flex justify-between border-t border-ide-border-subtle pt-1.5 font-semibold text-ide-text-strong">
+                                <span>Total</span>
+                                <span className="font-mono tabular-nums">
+                                  {day.total}
+                                </span>
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="relative flex h-7 w-full min-w-0 items-start border-b border-ide-border-strong">
+                    {chartBars.map((day, index) => {
+                      return (
+                        <div
+                          key={dateKey(day.date)}
+                          className={`relative h-full min-w-0 flex-1 ${
+                            dayCount === 30 ? "px-px" : "px-0.5"
+                          }`}
+                          title={day.label ? formatDate(day.date) : undefined}
+                        >
+                          {day.label ? (
+                            <span
+                              className={`absolute top-0 max-w-[3rem] truncate whitespace-nowrap text-[11px] text-ide-muted ${
+                                index === 0
+                                  ? "left-0"
+                                  : index === chartBars.length - 1
+                                    ? "right-0"
+                                    : "left-1/2 -translate-x-1/2"
+                              }`}
+                            >
+                              {day.label}
+                            </span>
+                          ) : (
+                            <span
+                              aria-hidden="true"
+                              className="mt-0.5 h-1.5 border-l border-ide-border-strong/70"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
               {categoryCounts.map(({ category }) => (
                 <span
@@ -895,12 +1096,12 @@ export function ActivityPage() {
 }
 
 function chartColor(category: string) {
+  if (category === "Focus") return "bg-ide-accent";
   if (category === "Code") return "bg-ide-secondary";
-  if (category === "Project") return "bg-ide-secondary";
-  if (category === "Workspace") return "bg-ide-info";
-  if (category === "Release") return "bg-ide-warning";
-  if (category === "Focus") return "bg-ide-secondary";
-  return "bg-ide-info";
+  if (category === "Project") return "bg-ide-tertiary";
+  if (category === "Workspace") return "bg-ide-success";
+  if (category === "Release") return "bg-ide-info";
+  return "bg-ide-warning";
 }
 
 function MetricCard({

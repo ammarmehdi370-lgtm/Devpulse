@@ -20,10 +20,17 @@ import {
   Plus,
   Bot,
   ChevronDown,
+  ChevronRight,
   Headphones,
+  UserRound,
 } from "lucide-react";
 import { FriendlyHint, HelpfulInfo } from "./FriendlyHelpers";
 import { ChatListSkeleton } from "./SkeletonLoaders";
+
+const formatHuddleDuration = (seconds: number) =>
+  `${Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
 
 const HuddlePanel = dynamic(
   () => import("./HuddlePanel").then((module) => module.HuddlePanel),
@@ -55,6 +62,54 @@ const channelDescriptions: Record<string, string> = {
   frontend: "Client-side architecture & review",
   bugs: "Bug triage and fixes",
   random: "Off-topic team conversation",
+};
+
+const directMessages: { name: string; status?: string; isBot?: boolean }[] = [
+  { name: "Sarah Lin", status: "online" },
+  { name: "Marcus Vance", status: "online" },
+  { name: "Elena Rostova", status: "online" },
+  { name: "Devpulse Bot", isBot: true },
+];
+
+const getPersistedThreads = (value: string): Record<string, ChatMessage[]> => {
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Saved chat data has an invalid format.");
+  }
+
+  return Object.fromEntries(
+    Object.entries(parsed).map(([threadId, threadMessages]) => {
+      if (!Array.isArray(threadMessages)) {
+        throw new Error(`Saved chat thread "${threadId}" is invalid.`);
+      }
+
+      const messages = threadMessages.map((message) => {
+        if (
+          !message ||
+          typeof message !== "object" ||
+          typeof message.id !== "number" ||
+          typeof message.sender !== "string" ||
+          typeof message.role !== "string" ||
+          typeof message.roleColor !== "string" ||
+          typeof message.avatar !== "string" ||
+          typeof message.time !== "string" ||
+          typeof message.text !== "string"
+        ) {
+          throw new Error(`A message in "${threadId}" is invalid.`);
+        }
+
+        return {
+          ...message,
+          richTextHtml:
+            typeof message.richTextHtml === "string"
+              ? sanitizeMessageHtml(message.richTextHtml)
+              : undefined,
+        };
+      });
+
+      return [threadId, messages];
+    }),
+  );
 };
 
 const allowedMessageTags = new Set([
@@ -100,24 +155,32 @@ export const TeamChatPage: React.FC = () => {
   const huddle = useHuddle();
   const startHuddleAction = huddle.start;
   const [activeChannel, setActiveChannel] = useState("frontend");
+  const [activeDirectMessage, setActiveDirectMessage] = useState<string | null>(
+    null,
+  );
   const [isChannelDetailsOpen, setIsChannelDetailsOpen] = useState(false);
   const [isHuddlePanelOpen, setIsHuddlePanelOpen] = useState(huddle.active);
+  const [huddleElapsed, setHuddleElapsed] = useState(0);
   const [isChatLoading, setIsChatLoading] = useState(true);
+  const [isMessagesHydrated, setIsMessagesHydrated] = useState(false);
   const editorRef = useRef<HTMLDivElement>(null);
   const [isMessageEmpty, setIsMessageEmpty] = useState(true);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      sender: "Sarah Lin",
-      role: "Staff UI Engineer",
-      roleColor: "bg-ide-info/15 text-[var(--ide-color-info-readable)] border-ide-info/30",
-      avatar:
-        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=faces",
-      time: "10:24 AM",
-      text: "Hey team, pushed the new optimistic updates look for the cloud terminal. Can someone review before we merge into staging? Here's the core diff:",
-      hasCode: true,
-      codeFilename: "packages/hooks/useOptimisticMutation.ts",
-      codeSnippet: `export function useOptimisticMutation<TData, TVariables>(
+  const [threadMessages, setThreadMessages] = useState<
+    Record<string, ChatMessage[]>
+  >({
+    "channel:frontend": [
+      {
+        id: 1,
+        sender: "Sarah Lin",
+        role: "Staff UI Engineer",
+        roleColor: "bg-ide-info/15 text-[var(--ide-color-info-readable)] border-ide-info/30",
+        avatar:
+          "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=faces",
+        time: "10:24 AM",
+        text: "Hey team, pushed the new optimistic updates look for the cloud terminal. Can someone review before we merge into staging? Here's the core diff:",
+        hasCode: true,
+        codeFilename: "packages/hooks/useOptimisticMutation.ts",
+        codeSnippet: `export function useOptimisticMutation<TData, TVariables>(
   mutationFn: (variables: TVariables) => Promise<TData>,
   options?: OptimisticOptions<TData>
 ) {
@@ -131,28 +194,58 @@ export const TeamChatPage: React.FC = () => {
 
   return { trigger, state };
 }`,
-      reactions: [
-        { emoji: "🔥", count: 3 },
-        { emoji: "❤️", count: 2 },
-      ],
-    },
-    {
-      id: 2,
-      sender: "Marcus Vance",
-      role: "DevOps",
-      roleColor: "bg-ide-success/15 text-[var(--ide-color-success-readable)] border-ide-success/30",
-      avatar:
-        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces",
-      time: "10:31 AM",
-      text: "Looks super clean @Sarah! Verified the edge cache invalidation latency. Also attaching the benchmark profile from the us-east cluster run:",
-      attachment: {
-        name: "edge-benchmarks-v2.4.json",
-        size: "142 KB",
-        sub: "p99 latency: 14.2ms",
+        reactions: [
+          { emoji: "🔥", count: 3 },
+          { emoji: "❤️", count: 2 },
+        ],
       },
-      reactions: [{ emoji: "🙌", count: 1 }],
-    },
-  ]);
+      {
+        id: 2,
+        sender: "Marcus Vance",
+        role: "DevOps",
+        roleColor: "bg-ide-success/15 text-[var(--ide-color-success-readable)] border-ide-success/30",
+        avatar:
+          "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces",
+        time: "10:31 AM",
+        text: "Looks super clean @Sarah! Verified the edge cache invalidation latency. Also attaching the benchmark profile from the us-east cluster run:",
+        attachment: {
+          name: "edge-benchmarks-v2.4.json",
+          size: "142 KB",
+          sub: "p99 latency: 14.2ms",
+        },
+        reactions: [{ emoji: "🙌", count: 1 }],
+      },
+    ],
+  });
+  const activeThreadId = activeDirectMessage
+    ? `dm:${activeDirectMessage}`
+    : `channel:${activeChannel}`;
+  const messages = threadMessages[activeThreadId] ?? [];
+  const chatStorageKey = `devpulse-chat-messages:${user.email.toLowerCase()}`;
+
+  useEffect(() => {
+    try {
+      const savedThreads = window.localStorage.getItem(chatStorageKey);
+      if (savedThreads !== null) {
+        setThreadMessages(getPersistedThreads(savedThreads));
+      }
+    } catch (error) {
+      console.error("Unable to restore chat messages.", error);
+    }
+    setIsMessagesHydrated(true);
+  }, [chatStorageKey]);
+
+  useEffect(() => {
+    if (!isMessagesHydrated) return;
+    try {
+      window.localStorage.setItem(
+        chatStorageKey,
+        JSON.stringify(threadMessages),
+      );
+    } catch (error) {
+      console.error("Unable to save chat messages.", error);
+    }
+  }, [chatStorageKey, isMessagesHydrated, threadMessages]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setIsChatLoading(false), 450);
@@ -172,6 +265,16 @@ export const TeamChatPage: React.FC = () => {
   useEffect(() => {
     if (huddle.active) setIsHuddlePanelOpen(true);
   }, [huddle.active]);
+
+  useEffect(() => {
+    const startedAt = huddle.startedAt;
+    if (!huddle.active || !startedAt) return;
+    const updateElapsed = () =>
+      setHuddleElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(interval);
+  }, [huddle.active, huddle.startedAt]);
 
   const handleFormat = (command: string) => {
     editorRef.current?.focus();
@@ -197,8 +300,26 @@ export const TeamChatPage: React.FC = () => {
       reactions: [],
     };
 
-    setMessages([...messages, newMsg]);
+    setThreadMessages((currentThreads) => ({
+      ...currentThreads,
+      [activeThreadId]: [...(currentThreads[activeThreadId] ?? []), newMsg],
+    }));
     editor.innerHTML = "";
+    setIsMessageEmpty(true);
+  };
+
+  const selectChannel = (channel: string) => {
+    setActiveChannel(channel);
+    setActiveDirectMessage(null);
+    setIsChannelDetailsOpen(false);
+    if (editorRef.current) editorRef.current.innerHTML = "";
+    setIsMessageEmpty(true);
+  };
+
+  const selectDirectMessage = (name: string) => {
+    setActiveDirectMessage(name);
+    setIsChannelDetailsOpen(false);
+    if (editorRef.current) editorRef.current.innerHTML = "";
     setIsMessageEmpty(true);
   };
 
@@ -244,7 +365,7 @@ export const TeamChatPage: React.FC = () => {
             </div>
             <div className="space-y-1">
               {["general", "frontend", "bugs", "random"].map((ch) => {
-                const isActive = activeChannel === ch;
+                const isActive = activeChannel === ch && !activeDirectMessage;
                 return (
                   <div key={ch}>
                     <div
@@ -256,10 +377,7 @@ export const TeamChatPage: React.FC = () => {
                     >
                       <button
                         type="button"
-                        onClick={() => {
-                          setActiveChannel(ch);
-                          setIsChannelDetailsOpen(false);
-                        }}
+                        onClick={() => selectChannel(ch)}
                         aria-current={isActive ? "page" : undefined}
                         className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
                       >
@@ -272,14 +390,15 @@ export const TeamChatPage: React.FC = () => {
                         aria-expanded={isActive && isChannelDetailsOpen}
                         onClick={() => {
                           setActiveChannel(ch);
+                          setActiveDirectMessage(null);
                           setIsChannelDetailsOpen(
                             isActive ? !isChannelDetailsOpen : true,
                           );
                         }}
                         className="mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ide-muted transition hover:bg-ide-surface hover:text-ide-text-strong"
                       >
-                        <ChevronDown
-                          className={`h-3.5 w-3.5 transition-transform ${isActive && isChannelDetailsOpen ? "rotate-180" : ""}`}
+                        <ChevronRight
+                          className={`h-3.5 w-3.5 transition-transform ${isActive && isChannelDetailsOpen ? "rotate-90" : ""}`}
                         />
                       </button>
                     </div>
@@ -423,15 +542,17 @@ export const TeamChatPage: React.FC = () => {
               </button>
             </div>
             <div className="space-y-1 text-xs">
-              {[
-                { name: "Sarah Lin", status: "online" },
-                { name: "Marcus Vance", status: "online" },
-                { name: "Elena Rostova", status: "online" },
-                { name: "Devpulse Bot", isBot: true },
-              ].map((dm) => (
-                <div
+              {directMessages.map((dm) => (
+                <button
+                  type="button"
                   key={dm.name}
-                  className="flex items-center justify-between rounded-lg px-3 py-2 text-ide-text-soft transition-colors hover:bg-ide-panel hover:text-ide-text"
+                  onClick={() => selectDirectMessage(dm.name)}
+                  aria-current={activeDirectMessage === dm.name ? "page" : undefined}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-ide-text-soft transition-colors hover:bg-ide-panel hover:text-ide-text ${
+                    activeDirectMessage === dm.name
+                      ? "bg-ide-surface-toolbar font-medium text-ide-text-strong ring-1 ring-inset ring-ide-focus-ring"
+                      : ""
+                  }`}
                 >
                   <div className="flex items-center gap-2">
                     {dm.isBot ? (
@@ -441,7 +562,7 @@ export const TeamChatPage: React.FC = () => {
                     )}
                     <span>{dm.name}</span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -453,43 +574,82 @@ export const TeamChatPage: React.FC = () => {
         <div className="flex min-h-[4.25rem] shrink-0 items-center justify-between border-b border-ide-border-strong bg-ide-workbench-bg px-4 sm:px-7">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <Hash className="h-4 w-4 shrink-0 text-ide-success" />
+              {activeDirectMessage ? (
+                <UserRound className="h-4 w-4 shrink-0 text-ide-info" />
+              ) : (
+                <Hash className="h-4 w-4 shrink-0 text-ide-success" />
+              )}
               <h1 className="truncate text-base font-semibold text-ide-text-strong">
-                {activeChannel}
+                {activeDirectMessage ?? activeChannel}
               </h1>
             </div>
             <div className="mt-1 truncate pl-6 text-xs text-ide-text-soft">
-              {channelDescriptions[activeChannel]}
+              {activeDirectMessage
+                ? "Direct message"
+                : channelDescriptions[activeChannel]}
             </div>
           </div>
           <div className="ml-3 flex shrink-0 items-center gap-2">
-            <div className="hidden items-center gap-2 rounded-lg border border-ide-border-strong bg-ide-panel px-3 py-2 text-xs text-ide-text-tertiary sm:flex">
-              <Users className="h-3.5 w-3.5 text-ide-text-soft" />
-              <span>14</span>
-              <span className="hidden text-ide-muted sm:inline">members</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (!huddle.active) huddle.start();
-                setIsHuddlePanelOpen(true);
-              }}
-              aria-label={huddle.active ? "Join active huddle" : "Start huddle"}
-              title={huddle.active ? "Join huddle" : "Start huddle"}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-ide-success/30 bg-ide-success/10 px-3 py-2 text-xs font-medium text-ide-success hover:bg-ide-success/20"
-            >
-              <Headphones className="h-3.5 w-3.5" />
-              {huddle.active ? "Join huddle" : "Huddle"}
-            </button>
+            {!activeDirectMessage && (
+              <div className="hidden items-center gap-2 rounded-lg border border-ide-border-strong bg-ide-panel px-3 py-2 text-xs text-ide-text-tertiary sm:flex">
+                <Users className="h-3.5 w-3.5 text-ide-text-soft" />
+                <span>14</span>
+                <span className="hidden text-ide-muted sm:inline">members</span>
+              </div>
+            )}
+            {!huddle.active ? (
+              <button
+                type="button"
+                onClick={() => {
+                  huddle.start();
+                  setIsHuddlePanelOpen(true);
+                }}
+                aria-label="Start huddle"
+                title="Start huddle"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-ide-accent/30 bg-ide-accent/10 px-3 py-2 text-xs font-medium text-ide-accent transition hover:bg-ide-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+              >
+                <Headphones className="h-3.5 w-3.5" aria-hidden="true" />
+                Start huddle
+              </button>
+            ) : huddle.participants.some((participant) => participant.isLocal) ? (
+              <button
+                type="button"
+                onClick={() => setIsHuddlePanelOpen(true)}
+                aria-label={`In huddle · ${formatHuddleDuration(huddleElapsed)}`}
+                title="Show huddle"
+                className="inline-flex items-center gap-2 rounded-lg border border-ide-success/30 bg-ide-success/10 px-3 py-2 text-xs font-medium text-ide-success transition hover:bg-ide-success/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+              >
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ide-success motion-reduce:animate-none" />
+                In huddle · {formatHuddleDuration(huddleElapsed)}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  huddle.start();
+                  setIsHuddlePanelOpen(true);
+                }}
+                aria-label="Join huddle"
+                title="Join huddle"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-ide-success/30 bg-ide-success/10 px-3 py-2 text-xs font-medium text-ide-success transition hover:bg-ide-success/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+              >
+                <Headphones className="h-3.5 w-3.5" aria-hidden="true" />
+                Join huddle
+              </button>
+            )}
           </div>
         </div>
 
-        {isHuddlePanelOpen && huddle.active && (
-          <HuddlePanel onClose={() => setIsHuddlePanelOpen(false)} />
+        {huddle.active && (
+          <HuddlePanel
+            minimized={!isHuddlePanelOpen}
+            onMinimize={() => setIsHuddlePanelOpen(false)}
+            onExpand={() => setIsHuddlePanelOpen(true)}
+          />
         )}
 
         {/* Messages List */}
-        <div className="flex-1 space-y-5 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 lg:px-8">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 lg:px-8">
           <div className="flex items-center gap-3" aria-label="Today">
             <span className="h-px flex-1 bg-ide-surface-toolbar" />
             <span className="rounded-full border border-ide-border-strong bg-ide-panel px-3 py-1 text-[10px] font-mono uppercase tracking-wider text-ide-text-soft">
@@ -642,8 +802,16 @@ export const TeamChatPage: React.FC = () => {
                   suppressContentEditableWarning
                   role="textbox"
                   aria-multiline="true"
-                  aria-label={`Message #${activeChannel}`}
-                  data-placeholder={`Message #${activeChannel}...`}
+                  aria-label={
+                    activeDirectMessage
+                      ? `Message ${activeDirectMessage}`
+                      : `Message #${activeChannel}`
+                  }
+                  data-placeholder={
+                    activeDirectMessage
+                      ? `Message ${activeDirectMessage}...`
+                      : `Message #${activeChannel}...`
+                  }
                   onInput={(event) =>
                     setIsMessageEmpty(!event.currentTarget.innerText.trim())
                   }

@@ -167,6 +167,50 @@ select optgroup {
   color: var(--ide-color-accent);
 }
 
+.huddle-panel-motion {
+  transition:
+    max-height 180ms ease,
+    opacity 180ms ease;
+}
+
+.huddle-speaking-ring::before {
+  position: absolute;
+  inset: -3px;
+  border: 1px solid color-mix(in srgb, var(--ide-color-accent) 70%, transparent);
+  border-radius: 9999px;
+  content: "";
+  animation: huddle-speaking-ring 1.8s ease-out infinite;
+}
+
+@keyframes huddle-speaking-ring {
+  0% {
+    opacity: 0.75;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .huddle-panel-motion {
+    transition: none;
+  }
+
+  .huddle-speaking-ring::before {
+    animation: none;
+  }
+}
+
+html[data-reduce-motion="true"] .huddle-panel-motion {
+  transition: none;
+}
+
+html[data-reduce-motion="true"] .huddle-speaking-ring::before {
+  animation: none;
+}
+
 .editor-breadcrumb-menu {
   position: absolute;
   z-index: var(--ide-z-popover);

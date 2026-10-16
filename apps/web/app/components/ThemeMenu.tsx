@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, ChevronUp, Star, Trash2, Upload } from "lucide-react";
 import { useApp, type ThemeConfig } from "../context/AppContext";
-import { BUILT_IN_THEME_IDS } from "../context/themeModel";
+import { BUILT_IN_THEME_IDS, DEFAULT_THEME_ID } from "../context/themeModel";
 import { convertVscodeThemeToAppTheme } from "../editor/vscodeThemeConverter";
 
 const FAVORITES_KEY = "devpulse_theme_favorites";
@@ -158,8 +158,7 @@ export const ThemeMenu: React.FC<{ showDetails?: boolean }> = ({ showDetails = f
       ...themes.map((item) => item.id),
     ]);
     const normalize = (ids: string[], limit?: number) => {
-      const defaultId = availableThemes[0]?.id ?? "default";
-      return [...new Set(ids.map((id) => validIds.has(id) ? id : defaultId))]
+      return [...new Set(ids.map((id) => validIds.has(id) ? id : DEFAULT_THEME_ID))]
         .slice(0, limit);
     };
     const normalizedFavorites = normalize(readIds(FAVORITES_KEY));
@@ -324,6 +323,11 @@ export const ThemeMenu: React.FC<{ showDetails?: boolean }> = ({ showDetails = f
       >
         <span className="h-3 w-3 shrink-0 rounded-full border border-ide-border" style={{ background: item.ui.accent }} />
         <span className="min-w-0 flex-1 truncate">{item.name}</span>
+        {item.id === DEFAULT_THEME_ID && (
+          <span className="shrink-0 rounded border border-ide-accent/30 px-1.5 py-0.5 text-[9px] font-medium text-ide-accent">
+            Default
+          </span>
+        )}
         {theme.id === item.id && <Check className="h-4 w-4 text-ide-accent" aria-label="Selected" />}
       </button>
       <button
@@ -342,7 +346,9 @@ export const ThemeMenu: React.FC<{ showDetails?: boolean }> = ({ showDetails = f
           onClick={() => {
             try {
               deleteImportedTheme(item.id);
-              const defaultTheme = availableThemes[0];
+              const defaultTheme = availableThemes.find(
+                (availableTheme) => availableTheme.id === DEFAULT_THEME_ID,
+              );
               if (theme.id === item.id && defaultTheme) chooseTheme(defaultTheme);
             } catch (error) {
               console.error("Unable to delete imported theme.", error);

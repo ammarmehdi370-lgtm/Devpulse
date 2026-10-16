@@ -27,14 +27,14 @@ export const ToastContainer: React.FC = () => {
     <div
       role="region"
       aria-label="Notifications"
-      className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none font-sans"
+      className="pointer-events-none fixed right-3 top-[4.5rem] z-[110] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2 font-sans sm:right-5"
     >
-      {toasts.map((toast) => (
+      {toasts.slice(-3).map((toast) => (
         <div
           key={toast.id}
           role="status"
           aria-live="polite"
-          className={`pointer-events-auto flex items-start gap-3 p-3.5 rounded-2xl bg-ide-surface-overlay backdrop-blur-xl border ${borderMap[toast.type]} shadow-xl text-xs transition-all duration-200 animate-in slide-in-from-bottom-2 fade-in`}
+          className={`pointer-events-auto flex min-w-0 items-start gap-3 rounded-xl border bg-ide-panel/95 p-3.5 text-xs shadow-xl backdrop-blur-xl transition-all duration-200 animate-in slide-in-from-top-2 fade-in motion-reduce:animate-none ${borderMap[toast.type]}`}
         >
           {iconMap[toast.type]}
           <div className="flex-1 space-y-0.5">

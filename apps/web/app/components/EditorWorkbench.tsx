@@ -198,6 +198,30 @@ const getMonacoThemeData = (theme: ThemeConfig) => {
       { token: "keyword", foreground: syntax.keyword.replace(/^#/, "") },
       { token: "string", foreground: syntax.string.replace(/^#/, "") },
       { token: "number", foreground: syntax.number.replace(/^#/, "") },
+      ...(syntax.boolean
+        ? [{ token: "constant.language", foreground: syntax.boolean.replace(/^#/, "") }]
+        : []),
+      ...(syntax.function
+        ? [
+            { token: "function", foreground: syntax.function.replace(/^#/, "") },
+            { token: "entity.name.function", foreground: syntax.function.replace(/^#/, "") },
+          ]
+        : []),
+      ...(syntax.variable
+        ? [
+            { token: "variable", foreground: syntax.variable.replace(/^#/, "") },
+            { token: "identifier", foreground: syntax.variable.replace(/^#/, "") },
+          ]
+        : []),
+      ...(syntax.property
+        ? [{ token: "property", foreground: syntax.property.replace(/^#/, "") }]
+        : []),
+      ...(syntax.type
+        ? [
+            { token: "type", foreground: syntax.type.replace(/^#/, "") },
+            { token: "type.identifier", foreground: syntax.type.replace(/^#/, "") },
+          ]
+        : []),
     ],
     colors: {
       "editor.background": ui["editor-bg"],

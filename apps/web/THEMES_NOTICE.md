@@ -9,6 +9,7 @@ browser storage.
 
 | Theme | Upstream source | Upstream license |
 | --- | --- | --- |
+| Muted Coast | Devpulse | Original Devpulse palette |
 | Cyber Mint | Devpulse | Original Devpulse palette |
 | One Dark Pro | [Binaryify/OneDark-Pro](https://github.com/Binaryify/OneDark-Pro) | [ISC](https://github.com/Binaryify/OneDark-Pro/blob/master/LICENSE) |
 | Dracula | [dracula/visual-studio-code](https://github.com/dracula/visual-studio-code) | [MIT](https://github.com/dracula/visual-studio-code/blob/main/LICENSE) |

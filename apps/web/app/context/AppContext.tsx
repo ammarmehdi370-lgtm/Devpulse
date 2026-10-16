@@ -1025,7 +1025,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [page, setPageState] = useState<PageType>("api-sandbox");
-  const [theme, setThemeState] = useState<ThemeConfig>(THEME_PRESETS[0]!);
+  const [theme, setThemeState] = useState<ThemeConfig>(DEFAULT_THEME);
   const [importedThemes, setImportedThemes] = useState<ThemeConfig[]>([]);
   const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
   const [user, setUser] = useState<UserProfile>(getDefaultUser);
@@ -1340,7 +1340,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       throw new Error("Unable to save the imported theme changes.");
     }
     setImportedThemes(next);
-    if (theme.id === themeId) setTheme(THEME_PRESETS[0]!);
+    if (theme.id === themeId) setTheme(DEFAULT_THEME);
   };
 
   useEffect(() => {

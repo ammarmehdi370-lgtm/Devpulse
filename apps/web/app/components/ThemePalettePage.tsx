@@ -33,7 +33,7 @@ export const ThemePalettePage: React.FC = () => {
             Choose your workspace theme
           </h1>
           <p className="mx-auto mt-1 max-w-2xl text-sm leading-5 text-ide-muted">
-            Choose from 12 built-in themes or import a VS Code theme. You can change it any time.
+            Choose from 13 built-in themes or import a VS Code theme. You can change it any time.
           </p>
         </header>
 

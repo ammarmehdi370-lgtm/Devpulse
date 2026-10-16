@@ -407,7 +407,7 @@ export const SiteSettingsPage: React.FC = () => {
                 <span className="min-w-0 flex-1 text-left">
                   <strong>Reset preferences</strong>
                   <small>
-                    Restore Cyber Mint, reset density and motion, and clear saved theme favorites and recents.
+                    Restore Muted Coast, reset density and motion, and clear saved theme favorites and recents.
                   </small>
                 </span>
                 <ChevronRight className="h-4 w-4 text-ide-muted" />

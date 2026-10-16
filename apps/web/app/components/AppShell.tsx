@@ -38,7 +38,70 @@ import {
   X,
   Bell,
   Gauge,
+  CheckCheck,
+  MessageCircle,
+  GitPullRequest,
+  CircleCheck,
+  ArrowUpRight,
 } from "lucide-react";
+
+type NotificationItem = {
+  id: string;
+  category: string;
+  title: string;
+  description: string;
+  time: string;
+  icon: React.ComponentType<{ className?: string }>;
+  tone: string;
+  page: PageType;
+};
+
+const notifications: NotificationItem[] = [
+  {
+    id: "release-live",
+    category: "Deployment",
+    title: "Your release is live",
+    description:
+      "devpulse-core is now running in production. All systems are operational.",
+    time: "12 min ago",
+    icon: CircleCheck,
+    tone: "text-ide-success bg-ide-success/10 ring-ide-success/20",
+    page: "deployments",
+  },
+  {
+    id: "review-request",
+    category: "Code review",
+    title: "Sarah Lin requested your review",
+    description:
+      "Optimistic updates for the cloud terminal are ready for a final look.",
+    time: "38 min ago",
+    icon: GitPullRequest,
+    tone: "text-ide-info bg-ide-info/10 ring-ide-info/20",
+    page: "repositories",
+  },
+  {
+    id: "team-message",
+    category: "Team chat",
+    title: "A new message in #frontend",
+    description:
+      "Marcus Vance shared the latest edge cache benchmark results.",
+    time: "1 hour ago",
+    icon: MessageCircle,
+    tone: "text-ide-secondary bg-ide-secondary/10 ring-ide-secondary/20",
+    page: "chat",
+  },
+  {
+    id: "workspace-insight",
+    category: "Workspace",
+    title: "Your workspace is looking good",
+    description:
+      "All 14 team members have access and your project checks are passing.",
+    time: "Yesterday",
+    icon: Sparkles,
+    tone: "text-ide-warning bg-ide-warning/10 ring-ide-warning/20",
+    page: "workspaces",
+  },
+];
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -58,6 +121,16 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   } = useApp();
 
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [notificationFilter, setNotificationFilter] = useState<
+    "all" | "unread"
+  >("all");
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>([]);
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<
+    string[]
+  >([]);
+  const [areNotificationsHydrated, setAreNotificationsHydrated] =
+    useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSidebarPreferenceHydrated, setIsSidebarPreferenceHydrated] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
@@ -74,6 +147,89 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const workbenchSidebarContentRef = useRef<HTMLDivElement>(null);
+  const notificationStorageKey = `devpulse-notifications:${user.email.toLowerCase()}`;
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(notificationStorageKey);
+      if (stored) {
+        const parsed: unknown = JSON.parse(stored);
+        if (
+          !parsed ||
+          typeof parsed !== "object" ||
+          !("read" in parsed) ||
+          !Array.isArray(parsed.read) ||
+          !parsed.read.every((id) => typeof id === "string") ||
+          !("dismissed" in parsed) ||
+          !Array.isArray(parsed.dismissed) ||
+          !parsed.dismissed.every((id) => typeof id === "string")
+        ) {
+          throw new Error("Saved notification preferences are invalid.");
+        }
+        setReadNotificationIds(parsed.read);
+        setDismissedNotificationIds(parsed.dismissed);
+      }
+    } catch (error) {
+      console.error("Unable to restore notification preferences.", error);
+    }
+    setAreNotificationsHydrated(true);
+  }, [notificationStorageKey]);
+
+  useEffect(() => {
+    if (!areNotificationsHydrated) return;
+    try {
+      window.localStorage.setItem(
+        notificationStorageKey,
+        JSON.stringify({
+          read: readNotificationIds,
+          dismissed: dismissedNotificationIds,
+        }),
+      );
+    } catch (error) {
+      console.error("Unable to save notification preferences.", error);
+    }
+  }, [
+    areNotificationsHydrated,
+    dismissedNotificationIds,
+    notificationStorageKey,
+    readNotificationIds,
+  ]);
+
+  useEffect(() => {
+    if (!isNotificationCenterOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsNotificationCenterOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isNotificationCenterOpen]);
+
+  const visibleNotifications = notifications.filter((notification) => {
+    if (dismissedNotificationIds.includes(notification.id)) return false;
+    return (
+      notificationFilter === "all" ||
+      !readNotificationIds.includes(notification.id)
+    );
+  });
+  const unreadNotificationCount = notifications.filter(
+    (notification) =>
+      !dismissedNotificationIds.includes(notification.id) &&
+      !readNotificationIds.includes(notification.id),
+  ).length;
+
+  const markAllNotificationsRead = () => {
+    setReadNotificationIds((current) => [
+      ...new Set([
+        ...current,
+        ...notifications
+          .filter(
+            (notification) =>
+              !dismissedNotificationIds.includes(notification.id),
+          )
+          .map((notification) => notification.id),
+      ]),
+    ]);
+  };
 
   useEffect(() => {
     try {
@@ -487,15 +643,21 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
             </button>
 
             <button
+              type="button"
+              onClick={() => setIsNotificationCenterOpen(true)}
               className="topbar-icon-button relative"
               aria-label="Notifications"
               title="Notifications"
+              aria-haspopup="dialog"
+              aria-expanded={isNotificationCenterOpen}
+              aria-controls="notification-center"
             >
               <Bell className="h-4 w-4" aria-hidden="true" />
-              <span
-                className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-ide-accent"
-                aria-label="New notifications"
-              />
+              {unreadNotificationCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-ide-topbar-bg bg-ide-accent px-0.5 text-[8px] font-bold leading-none text-ide-accent-fg">
+                  {unreadNotificationCount}
+                </span>
+              )}
             </button>
 
             <div
@@ -508,6 +670,193 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
           </div>
         </header>
       </div>
+
+      {isNotificationCenterOpen && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-3 backdrop-blur-md sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsNotificationCenterOpen(false);
+            }
+          }}
+        >
+          <section
+            id="notification-center"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="notification-center-title"
+            className="relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-ide-border-strong bg-ide-workbench-bg shadow-[0_32px_100px_color-mix(in_srgb,var(--ide-color-shadow-color)_72%,transparent)] ring-1 ring-ide-border-subtle sm:max-h-[min(760px,calc(100dvh-3rem))]"
+          >
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-ide-accent/70 to-transparent" />
+            <header className="relative shrink-0 border-b border-ide-border-strong bg-gradient-to-b from-ide-panel/70 to-ide-workbench-bg px-5 pb-4 pt-5 sm:px-7 sm:pb-5 sm:pt-6">
+              <div className="pointer-events-none absolute -right-10 -top-20 h-48 w-48 rounded-full bg-ide-accent/[0.06] blur-3xl" />
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-ide-accent/20 bg-ide-accent/[0.08] text-ide-accent shadow-[0_8px_24px_color-mix(in_srgb,var(--ide-color-accent)_10%,transparent)]">
+                    <Bell className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h2
+                      id="notification-center-title"
+                      className="text-[17px] font-semibold tracking-tight text-ide-text-strong sm:text-lg"
+                    >
+                      Notification center
+                    </h2>
+                    <p className="mt-1.5 max-w-md text-[11px] leading-5 text-ide-text-soft sm:text-xs">
+                      Important updates from your workspace, all in one place.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsNotificationCenterOpen(false)}
+                  aria-label="Close notifications"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-ide-border-subtle bg-ide-panel/60 text-ide-text-soft transition hover:border-ide-border-strong hover:bg-ide-panel hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+
+              <div className="relative mt-5 flex items-center justify-between gap-3 border-t border-ide-border-subtle/70 pt-4">
+                <div className="flex items-center gap-1 rounded-xl border border-ide-border-subtle bg-ide-panel/80 p-1">
+                  {(["all", "unread"] as const).map((filter) => (
+                    <button
+                      key={filter}
+                      type="button"
+                      onClick={() => setNotificationFilter(filter)}
+                      aria-pressed={notificationFilter === filter}
+                      className={`rounded-lg px-3 py-1.5 text-[11px] font-medium capitalize transition ${
+                        notificationFilter === filter
+                          ? "bg-ide-surface-toolbar text-ide-text-strong shadow-sm ring-1 ring-inset ring-ide-border-subtle"
+                          : "text-ide-text-soft hover:text-ide-text-strong"
+                      }`}
+                    >
+                      {filter}
+                      {filter === "unread" && unreadNotificationCount > 0 && (
+                        <span className="ml-1.5 font-mono text-[9px] text-ide-accent">
+                          {unreadNotificationCount}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={markAllNotificationsRead}
+                  disabled={unreadNotificationCount === 0}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[10px] font-medium text-ide-text-soft transition hover:bg-ide-panel hover:text-ide-accent disabled:cursor-default disabled:opacity-40 sm:text-[11px]"
+                >
+                  <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                  Mark all read
+                </button>
+              </div>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4">
+              {visibleNotifications.length > 0 ? (
+                <div className="space-y-2.5">
+                  {visibleNotifications.map((notification) => {
+                    const isRead = readNotificationIds.includes(
+                      notification.id,
+                    );
+                    return (
+                      <button
+                        type="button"
+                        key={notification.id}
+                        onClick={() => {
+                          setReadNotificationIds((current) =>
+                            current.includes(notification.id)
+                              ? current
+                              : [...current, notification.id],
+                          );
+                          setIsNotificationCenterOpen(false);
+                          setPage(notification.page);
+                        }}
+                        className={`group flex w-full items-start gap-3 rounded-xl border p-3.5 text-left transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring sm:gap-4 sm:p-4 ${
+                          isRead
+                            ? "border-ide-border-subtle bg-ide-panel/45 hover:border-ide-border-strong hover:bg-ide-panel/80"
+                            : "border-ide-accent/20 bg-gradient-to-r from-ide-accent/[0.07] via-ide-panel/75 to-ide-panel/45 hover:border-ide-accent/35 hover:from-ide-accent/[0.1]"
+                        }`}
+                      >
+                        <span
+                          className={`relative mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ${notification.tone}`}
+                        >
+                          <notification.icon
+                            className="h-4 w-4"
+                            aria-hidden="true"
+                          />
+                          {!isRead && (
+                            <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-ide-workbench-bg bg-ide-accent" />
+                          )}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="rounded-md border border-ide-border-subtle bg-ide-workbench-bg/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.11em] text-ide-text-soft">
+                              {notification.category}
+                            </span>
+                            <span className="text-[10px] font-medium text-ide-muted">
+                              {notification.time}
+                            </span>
+                          </span>
+                          <span className="mt-2 block text-[13px] font-semibold leading-5 text-ide-text-strong">
+                            {notification.title}
+                          </span>
+                          <span className="mt-1 block text-[11px] leading-[1.65] text-ide-text-soft">
+                            {notification.description}
+                          </span>
+                        </span>
+                        <ArrowUpRight className="mt-1 h-4 w-4 shrink-0 text-ide-muted opacity-0 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-ide-text-soft group-hover:opacity-100" />
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-ide-border-strong bg-ide-panel text-ide-text-soft shadow-inner">
+                    <Bell className="h-5 w-5" aria-hidden="true" />
+                  </div>
+                  <h3 className="mt-4 text-sm font-semibold text-ide-text-strong">
+                    {notificationFilter === "unread"
+                      ? "You’re all caught up"
+                      : "No notifications"}
+                  </h3>
+                  <p className="mt-1.5 max-w-xs text-xs leading-5 text-ide-text-soft">
+                    {notificationFilter === "unread"
+                      ? "There are no unread updates right now. We’ll let you know when something needs your attention."
+                      : "Your workspace updates will appear here as they arrive."}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <footer className="flex shrink-0 items-center justify-between border-t border-ide-border-strong bg-ide-panel/50 px-5 py-3.5 sm:px-7">
+              <span className="text-[10px] font-medium text-ide-muted">
+                {visibleNotifications.length}{" "}
+                {visibleNotifications.length === 1
+                  ? "notification"
+                  : "notifications"}
+                {unreadNotificationCount > 0 &&
+                  ` · ${unreadNotificationCount} unread`}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setDismissedNotificationIds((current) => [
+                    ...new Set([
+                      ...current,
+                      ...notifications.map((notification) => notification.id),
+                    ]),
+                  ])
+                }
+                disabled={dismissedNotificationIds.length >= notifications.length}
+                className="text-[10px] font-medium text-ide-text-soft transition hover:text-ide-danger disabled:cursor-default disabled:opacity-40"
+              >
+                Clear all
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       {isMobileNavOpen && (
         <div
