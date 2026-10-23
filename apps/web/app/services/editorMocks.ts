@@ -356,8 +356,8 @@ export async function saveEditorPreview(
 
 export async function reconnectTerminalPreview(): Promise<TerminalReconnectResult> {
   return {
-    connected: true,
-    message: "Browser terminal ready. Local preview mode is passive; server execution remains unavailable until the Edge runtime is connected.",
+    connected: false,
+    message: "Shell service is not connected.",
   };
 }
 

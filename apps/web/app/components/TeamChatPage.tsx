@@ -32,6 +32,7 @@ interface ChatMessage {
   avatar: string;
   time: string;
   text: string;
+  richTextHtml?: string;
   hasCode?: boolean;
   codeFilename?: string;
   codeSnippet?: string;
@@ -43,6 +44,44 @@ interface ChatMessage {
   reactions?: { emoji: string; count: number }[];
 }
 
+const SEED_MESSAGES: ChatMessage[] = [
+  {
+    id: 1,
+    sender: "Sarah Lin",
+    role: "Design Lead",
+    roleColor: "semantic:secondary",
+    avatar: "S",
+    time: "9:42 AM",
+    text: "Just deployed the new Monaco theme. Looking sharp! 🎨",
+    richTextHtml: "<p>Just deployed the new Monaco theme. Looking sharp! 🎨</p>",
+    hasCode: false,
+    reactions: [
+      { emoji: "🚀", count: 3 },
+      { emoji: "✨", count: 2 },
+    ],
+  },
+  {
+    id: 2,
+    sender: "Marcus Vance",
+    role: "Backend Engineer",
+    roleColor: "semantic:primary",
+    avatar: "M",
+    time: "9:58 AM",
+    text: "Check this out — just fixed the auth flow.",
+    richTextHtml: "<p>Check this out — just fixed the auth flow.</p>",
+    hasCode: true,
+    codeFilename: "auth.ts",
+    codeSnippet: `export async function verifyToken(
+  token: string
+): Promise<UserPayload> {
+  const payload = jwt.verify(token, SECRET)
+  return payload as UserPayload
+}`,
+    reactions: [],
+    attachment: undefined,
+  },
+];
+
 export const TeamChatPage: React.FC = () => {
   const { theme, user } = useApp();
   const [services, setServices] = useState<DevpulseServices | null>(null);
@@ -53,54 +92,7 @@ export const TeamChatPage: React.FC = () => {
   const [chatLoadAttempt, setChatLoadAttempt] = useState(0);
   const [messageInput, setMessageInput] = useState("");
   const sentMessageIds = useRef(new Set<string>());
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 1,
-      sender: "Sarah Lin",
-      role: "Staff UI Engineer",
-      roleColor: "bg-violet-500/20 text-violet-300 border-violet-500/30",
-      avatar:
-        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=faces",
-      time: "10:24 AM",
-      text: "Hey team, pushed the new optimistic updates look for the cloud terminal. Can someone review before we merge into staging? Here's the core diff:",
-      hasCode: true,
-      codeFilename: "packages/hooks/useOptimisticMutation.ts",
-      codeSnippet: `export function useOptimisticMutation<TData, TVariables>(
-  mutationFn: (variables: TVariables) => Promise<TData>,
-  options?: OptimisticOptions<TData>
-) {
-  const [state, setState] = useState<OptimisticState<TData>>({ state: 'idle' });
-  
-  // Instant client-side reconciliation before edge dispatch
-  const trigger = useCallback(async (vars: TVariables) => {
-    dispatchOptimisticPayload(vars);
-    return await mutationFn(vars);
-  }, [mutationFn]);
-
-  return { trigger, state };
-}`,
-      reactions: [
-        { emoji: "🔥", count: 3 },
-        { emoji: "❤️", count: 2 },
-      ],
-    },
-    {
-      id: 2,
-      sender: "Marcus Vance",
-      role: "DevOps",
-      roleColor: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-      avatar:
-        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=faces",
-      time: "10:31 AM",
-      text: "Looks super clean @Sarah! Verified the edge cache invalidation latency. Also attaching the benchmark profile from the us-east cluster run:",
-      attachment: {
-        name: "edge-benchmarks-v2.4.json",
-        size: "142 KB",
-        sub: "p99 latency: 14.2ms",
-      },
-      reactions: [{ emoji: "🙌", count: 1 }],
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(SEED_MESSAGES);
 
   useEffect(() => {
     let active = true;
@@ -118,12 +110,16 @@ export const TeamChatPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    let active = true;
-    const startedAt = Date.now();
-    setActiveChannelId("");
     setIsChatLoading(true);
+    const timer = window.setTimeout(() => setIsChatLoading(false), 450);
+    return () => window.clearTimeout(timer);
+  }, [activeChannel]);
+
+  useEffect(() => {
+    let active = true;
+    setActiveChannelId("");
     setChatError("");
-     const loadMessages = async () => {
+    const loadMessages = async () => {
       try {
         const db = await getDB();
         const userId = sessionStorage.getItem("dp_user_id");
@@ -190,10 +186,6 @@ export const TeamChatPage: React.FC = () => {
             ? error.message
             : "Could not load chat messages. Please retry.",
         );
-      } finally {
-        const remaining = Math.max(0, 450 - (Date.now() - startedAt));
-        await new Promise((resolve) => window.setTimeout(resolve, remaining));
-        if (active) setIsChatLoading(false);
       }
     };
 
@@ -406,13 +398,19 @@ export const TeamChatPage: React.FC = () => {
         {/* Messages List */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5 select-text">
           {isChatLoading ? (
-            <div aria-busy="true" aria-label="Loading chat messages" className="flex-1 space-y-3 p-4">
-              {Array.from({ length: 5 }, (_, index) => (
-                <div key={index} className="flex animate-pulse gap-3">
-                  <div className="h-7 w-7 shrink-0 rounded-full bg-[var(--skeleton-strong)]" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-3 w-32 rounded bg-[var(--skeleton-strong)]" />
-                    <div className="h-4 w-64 max-w-full rounded bg-[var(--skeleton-mid)]" />
+            <div aria-busy="true" aria-label="Loading chat messages" className="flex-1 space-y-4 overflow-hidden p-4">
+              {[...Array(5)].map((_, index) => (
+                <div key={index} className="flex animate-pulse items-start gap-3">
+                  <div className="h-8 w-8 shrink-0 rounded-full bg-[var(--skeleton-strong)]" />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-3 w-24 rounded bg-[var(--skeleton-strong)]" />
+                      <div className="h-3 w-16 rounded bg-[var(--skeleton-mid)]" />
+                    </div>
+                    <div className="h-4 w-3/4 rounded bg-[var(--skeleton-mid)]" />
+                    {index % 2 === 0 && (
+                      <div className="h-4 w-1/2 rounded bg-[var(--skeleton-mid)]" />
+                    )}
                   </div>
                 </div>
               ))}
@@ -434,16 +432,28 @@ export const TeamChatPage: React.FC = () => {
 
           {messages.map((msg) => (
             <div key={msg.id} className="flex items-start gap-3 group">
-              <img
-                src={msg.avatar}
-                alt={msg.sender}
-                className="w-9 h-9 rounded-xl object-cover ring-1 ring-[#28283a] shrink-0 mt-0.5"
-              />
+              {msg.avatar.startsWith("http") ? (
+                <img
+                  src={msg.avatar}
+                  alt={msg.sender}
+                  className="w-9 h-9 rounded-xl object-cover ring-1 ring-[#28283a] shrink-0 mt-0.5"
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-xl ring-1 ring-[#28283a] shrink-0 mt-0.5 flex items-center justify-center bg-[var(--surface-control)] text-[var(--text)] text-sm font-semibold">
+                  {msg.avatar}
+                </div>
+              )}
               <div className="flex-1 space-y-1">
                 <div className="flex items-center gap-2 text-xs font-mono">
                   <span className="font-bold text-white">{msg.sender}</span>
                   <span
-                    className={`px-2 py-0.5 rounded text-[10px] border ${msg.roleColor}`}
+                    className={`px-2 py-0.5 rounded text-[10px] border ${
+                      msg.roleColor === "semantic:secondary"
+                        ? "bg-[var(--surface-control)] text-[var(--secondary-readable)] border-[var(--border)]"
+                        : msg.roleColor === "semantic:primary"
+                          ? "bg-[var(--surface-control)] text-[var(--accent-readable)] border-[var(--border)]"
+                          : msg.roleColor
+                    }`}
                   >
                     {msg.role}
                   </span>

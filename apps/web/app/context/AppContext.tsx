@@ -409,7 +409,7 @@ const INITIAL_DEPLOYMENTS: Deployment[] = [
   },
 ];
 
-const INITIAL_ENV_VARS: EnvVariable[] = [
+const LEGACY_ENV_VARS: EnvVariable[] = [
   {
     id: "env-1",
     key: "DATABASE_CLUSTER_URL",
@@ -420,27 +420,62 @@ const INITIAL_ENV_VARS: EnvVariable[] = [
   },
   {
     id: "env-2",
-    key: "OPENAI_API_KEY",
-    value: "sk-proj-783bfFq1982xLl409zAA91kmNp399812401",
-    scope: "Production, Preview",
+    key: "ANTHROPIC_API_KEY",
+    value: "sk-ant-[demo-placeholder]",
+    scope: "Production",
     updatedAt: "5d ago",
     isRevealed: false,
   },
   {
     id: "env-3",
     key: "JWT_SECRET_KEY",
-    value: "c8f76d41a99823f6e1003ba4128f77aa91bca772",
-    scope: "Global All Workspaces",
+    value: "[demo-jwt-secret-placeholder]",
+    scope: "All",
     updatedAt: "1w ago",
     isRevealed: false,
   },
   {
     id: "env-4",
     key: "VECTOR_EMBEDDING_MODEL",
-    value: "text-embedding-3-small",
-    scope: "Preview / Staging",
+    value: "text-embedding-demo-v1",
+    scope: "Production",
     updatedAt: "3h ago",
     isRevealed: true,
+  },
+];
+
+const INITIAL_ENV_VARS: EnvVariable[] = [
+  {
+    id: "env-1",
+    key: "DATABASE_CLUSTER_URL",
+    value: "postgresql://demo:***@demo.db/devpulse",
+    scope: "Production",
+    updatedAt: new Date().toISOString(),
+    isRevealed: false,
+  },
+  {
+    id: "env-2",
+    key: "ANTHROPIC_API_KEY",
+    value: "sk-ant-[demo-placeholder]",
+    scope: "Production",
+    updatedAt: new Date().toISOString(),
+    isRevealed: false,
+  },
+  {
+    id: "env-3",
+    key: "JWT_SECRET_KEY",
+    value: "[demo-jwt-secret-placeholder]",
+    scope: "All",
+    updatedAt: new Date().toISOString(),
+    isRevealed: false,
+  },
+  {
+    id: "env-4",
+    key: "VECTOR_EMBEDDING_MODEL",
+    value: "text-embedding-demo-v1",
+    scope: "Production",
+    updatedAt: new Date().toISOString(),
+    isRevealed: false,
   },
 ];
 
@@ -581,7 +616,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     useState<WorkspaceDevbox[]>(EMPTY_WORKSPACES);
   const [deployments, setDeployments] =
     useState<Deployment[]>(EMPTY_DEPLOYMENTS);
-  const [envVars, setEnvVars] = useState<EnvVariable[]>(EMPTY_ENV_VARS);
+  const [envVars, setEnvVars] = useState<EnvVariable[]>(INITIAL_ENV_VARS);
   const [revealAllEnvVars, setRevealAllEnvVars] = useState(false);
 
   const [deployOnPush, setDeployOnPush] = useState(true);

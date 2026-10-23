@@ -25,6 +25,7 @@ import {
   Cpu,
   Zap,
   Globe,
+  AlertTriangle,
 } from "lucide-react";
 
 export const DeploymentsPage: React.FC = () => {
@@ -137,6 +138,7 @@ export const DeploymentsPage: React.FC = () => {
 
             <button
               onClick={() => triggerNewRelease()}
+              title="Trigger a simulated deployment (no real infrastructure connected)"
               className="px-4 py-2 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-2 shadow-lg transition-transform hover:scale-[1.02] active:scale-98"
               style={{ backgroundColor: theme.primary }}
             >
@@ -280,6 +282,12 @@ export const DeploymentsPage: React.FC = () => {
                     <span className="text-xs font-bold font-mono text-white hover:underline cursor-pointer">
                       {dep.target}
                     </span>
+                    {dep.domain === "browser-preview.local" && (
+                      <span className="inline-flex items-center gap-1 rounded border border-[var(--warning)]/30 bg-[var(--warning)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
+                        <AlertTriangle className="h-2.5 w-2.5" />
+                        Simulated
+                      </span>
+                    )}
                     <a
                       href={`https://${dep.target}`}
                       target="_blank"
