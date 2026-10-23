@@ -50,7 +50,8 @@ const PAGE_COMPONENTS: Record<
 };
 
 function AppContent() {
-  const { page, isDataLoading } = useApp();
+  const { page, isDataLoading, servicesLoading, servicesError, retryServices } =
+    useApp();
   const pageOwnsLoadingState =
     page === "repositories" ||
     page === "workspaces" ||
@@ -103,9 +104,33 @@ function AppContent() {
   }
 
   return (
-    <div key={page} className="page-transition">
-      {content}
-    </div>
+    <>
+      {(servicesLoading || servicesError) && (
+        <div
+          role={servicesError ? "alert" : "status"}
+          aria-live="polite"
+          className="flex items-center justify-center gap-3 border-b border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)]"
+        >
+          <span>
+            {servicesLoading
+              ? "Starting the local browser database..."
+              : `Local browser services could not start: ${servicesError}`}
+          </span>
+          {servicesError && (
+            <button
+              type="button"
+              onClick={retryServices}
+              className="rounded border border-[var(--border)] px-2 py-1 text-[var(--text)] hover:bg-[var(--hover)]"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      <div key={page} className="page-transition">
+        {content}
+      </div>
+    </>
   );
 }
 

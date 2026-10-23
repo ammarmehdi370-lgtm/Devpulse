@@ -47,14 +47,18 @@ belongs only in the Worker environment, never in a `NEXT_PUBLIC_*` variable or
 the browser bundle. Browser authentication must provide a valid signed token;
 the local demo identity is not accepted as a production credential.
 
-### Static hosting and isolation headers
+### Static hosting and browser resource compatibility
 
 `pnpm build` exports the web app to `apps/web/out`. The repository includes
-Cloudflare Pages `_headers` and Vercel header configuration for COOP/COEP.
-These headers make `crossOriginIsolated` available to features that require
-`SharedArrayBuffer`; PGlite's current IndexedDB-backed browser setup does not
-itself require `SharedArrayBuffer`. COEP can restrict third-party embedded
-resources, so test external images, scripts, and iframes when adding them.
+Cloudflare Pages and Vercel configuration without COOP/COEP cross-origin
+isolation headers. The current IndexedDB-backed PGlite setup does not require
+`SharedArrayBuffer`; omitting COEP also avoids blocking external fonts, images,
+and scripts that do not opt in to cross-origin embedding.
+
+The app remains visible while PGlite initializes. If browser services fail to
+start, the app displays the error and a **Retry** action instead of blocking
+rendering. The database stays IndexedDB-backed; it does not silently switch to
+temporary in-memory storage that would lose data after a reload.
 
 On Vercel, set `NEXT_PUBLIC_AI_PROXY_URL` to the deployed Worker URL for the
 web build. Set `ANTHROPIC_API_KEY` and `JWT_PUBLIC_KEY` as secrets on the

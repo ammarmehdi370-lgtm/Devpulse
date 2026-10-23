@@ -130,6 +130,9 @@ interface AppContextType {
   user: UserProfile;
   login: (email?: string, name?: string) => Promise<void>;
   loginAndLoad: (email?: string, name?: string) => Promise<void>;
+  servicesLoading: boolean;
+  servicesError: string | null;
+  retryServices: () => void;
   isDataLoading: boolean;
   dataErrors: AppDataErrors;
   retryDataLoad: () => Promise<void>;
@@ -584,6 +587,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [services, setServices] = useState<BrowserServices | null>(null);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState<string | null>(null);
+  const [servicesRetryCount, setServicesRetryCount] = useState(0);
   const [page, setPageState] = useState<PageType>("login");
   const setPage = (newPage: PageType) => {
     setPageState(newPage);
@@ -673,6 +679,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     let active = true;
+    setServicesLoading(true);
+    setServicesError(null);
+
     void getServices().then((nextServices) => {
       if (!active) return;
       setServices(nextServices);
@@ -704,11 +713,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       }
     }).catch((error: unknown) => {
       console.error("[AppContext] Could not initialize browser services.", error);
+      if (active) {
+        setServicesError(
+          error instanceof Error
+            ? error.message
+            : "Browser database initialization failed.",
+        );
+      }
+    }).finally(() => {
+      if (active) setServicesLoading(false);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [servicesRetryCount]);
+
+  const retryServices = () => setServicesRetryCount((count) => count + 1);
 
   useEffect(() => {
     let active = true;
@@ -2111,6 +2131,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         user,
         login,
         loginAndLoad,
+        servicesLoading,
+        servicesError,
+        retryServices,
         isDataLoading,
         dataErrors,
         retryDataLoad,
