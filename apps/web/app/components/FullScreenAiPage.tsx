@@ -2,7 +2,6 @@
 
 import React, { useState } from "react";
 import { useApp } from "../context/AppContext";
-import { authenticatedFetch as fetch } from "../lib/apiClient";
 import {
   Sparkles,
   Send,
@@ -35,6 +34,7 @@ export const FullScreenAiPage: React.FC = () => {
   const [inputQuery, setInputQuery] = useState("");
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState("");
 
   const [chatMessages, setChatMessages] = useState([
     {
@@ -84,23 +84,32 @@ export const FullScreenAiPage: React.FC = () => {
 
     setChatMessages((previous) => [...previous, userMsg]);
     setInputQuery("");
+    setError("");
     setIsGenerating(true);
     try {
+      const token = sessionStorage.getItem("dp_access_token") ?? "dev-bypass";
+      const messages: Array<{
+        role: string;
+        text?: string;
+        content?: string;
+      }> = [
+        {
+          role: "user",
+          text: `Project: auth-service\nActive file: src/auth/login.js\nBranch: fix/jwt-expiry\nModel preference: ${selectedModel}\nTemperature: ${temperature}\nTop-p: ${topP}\nRequest: ${userMsg.text}`,
+        },
+      ];
       const response = await fetch("/api/ai/chat", {
         method: "POST",
-        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          Authorization: `Bearer ${sessionStorage.getItem("dp_access_token") ?? "dev-bypass"}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          messages: [
-            {
-              role: "user",
-              content: `Project: auth-service\nActive file: src/auth/login.js\nBranch: fix/jwt-expiry\nModel preference: ${selectedModel}\nTemperature: ${temperature}\nTop-p: ${topP}\nRequest: ${userMsg.text}`,
-            },
-          ],
+          messages: messages.map((message) => ({
+            role: message.role,
+            content: message.text ?? message.content,
+          })),
           model: selectedModel,
           context: {
             temperature,
@@ -108,6 +117,11 @@ export const FullScreenAiPage: React.FC = () => {
           },
         }),
       });
+      if (response.status === 401) {
+        setError("Session expired. Please sign in again.");
+        setPage("login");
+        return;
+      }
       if (!response.ok) {
         const result = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(result.error || "AI request failed");
@@ -401,6 +415,11 @@ export const FullScreenAiPage: React.FC = () => {
 
           {/* Prompt Form */}
           <form onSubmit={handleSend} className="relative">
+            {error && (
+              <p role="alert" className="mb-2 text-sm text-red-400">
+                {error}
+              </p>
+            )}
             <input
               type="text"
               value={inputQuery}

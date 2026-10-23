@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices } from "../../src/lib/services";
@@ -209,60 +209,149 @@ export async function runEditorPreview(request: EditorRunRequest): Promise<Edito
 
 export async function saveEditorPreview(
   request: EditorPreviewSaveRequest,
-): Promise<{ saved: true; version?: number }> {
-  const { path, content, projectId } = request;
-  const services = await getServices();
-  const db = await getDB();
+): Promise<{
+  saved: boolean;
+  error?: string;
+  version?: number;
+  revisionId?: string;
+}> {
+  const { content, projectId } = request;
+  const path = normalizePreviewPath(request.path);
 
-  const targetProjectId = await resolvePreviewProjectId(projectId);
-  if (!targetProjectId) {
-    return { saved: true };
+  try {
+    if (!path || path.split("/").some((segment) => segment === "." || segment === "..")) {
+      throw new Error("File path must contain valid path segments.");
+    }
+
+    const services = await getServices();
+    const db = await getDB();
+    let targetProjectId: string | null;
+    if (projectId) {
+      const [project] = await db
+        .select({ id: schema.projects.id })
+        .from(schema.projects)
+        .where(eq(schema.projects.id, projectId))
+        .limit(1);
+      if (!project) throw new Error("The editor project could not be found.");
+      targetProjectId = project.id;
+    } else {
+      targetProjectId = await resolvePreviewProjectId();
+    }
+
+    if (!targetProjectId) {
+      await services.storage.writeFile(`local/${path}`, content);
+      return { saved: true };
+    }
+
+    const [file] = await db
+      .select()
+      .from(schema.files)
+      .where(eq(schema.files.projectId, targetProjectId))
+      .then((rows) => rows.filter((row) => row.path === path));
+
+    if (!file) {
+      const storagePath = `projects/${targetProjectId}/${path}`;
+      let previousContent: string | undefined;
+      try {
+        previousContent = await services.storage.readFile(storagePath);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "NotFoundError")) {
+          throw error;
+        }
+      }
+      await services.storage.writeFile(storagePath, content);
+      try {
+        const [inserted] = await db.transaction((tx) =>
+          tx.insert(schema.files).values({
+            id: crypto.randomUUID(),
+            projectId: targetProjectId,
+            path,
+            content,
+            language: path.split(".").pop() ?? "plaintext",
+            sizeBytes: new TextEncoder().encode(content).byteLength,
+            version: 1,
+            updatedAt: new Date(),
+          }).returning(),
+        );
+        if (!inserted) throw new Error("File save did not create a database record.");
+        return { saved: true, version: inserted.version };
+      } catch (error) {
+        try {
+          if (previousContent === undefined) {
+            await services.storage.deleteFile(storagePath);
+          } else {
+            await services.storage.writeFile(storagePath, previousContent);
+          }
+        } catch (restoreError) {
+          throw new AggregateError(
+            [error, restoreError],
+            "File creation failed and its stored content could not be restored.",
+          );
+        }
+        throw error;
+      }
+    }
+
+    const storagePath = `projects/${file.projectId}/${path}`;
+    let previousContent = file.content;
+    try {
+      previousContent = await services.storage.readFile(storagePath);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "NotFoundError")) {
+        throw error;
+      }
+    }
+    await services.storage.writeFile(storagePath, content);
+    try {
+      const nextVersion = (file.version ?? 1) + 1;
+      const [updated, revision] = await db.transaction(async (tx) => {
+        const [updatedFile] = await tx.update(schema.files)
+          .set({
+            content,
+            version: nextVersion,
+            sizeBytes: new TextEncoder().encode(content).byteLength,
+            lastEditedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(schema.files.id, file.id),
+            eq(schema.files.version, file.version),
+          ))
+          .returning();
+        if (!updatedFile) throw new Error("File changed before it could be saved.");
+
+        const [newRevision] = await tx.insert(schema.fileRevisions).values({
+          id: crypto.randomUUID(),
+          fileId: file.id,
+          version: file.version,
+          content: file.content,
+          diffPatch: "Autosave",
+          appliedFromAI: false,
+        }).returning();
+        if (!newRevision) throw new Error("File revision was not recorded.");
+        return [updatedFile, newRevision] as const;
+      });
+      return {
+        saved: true,
+        version: updated.version,
+        revisionId: revision.id,
+      };
+    } catch (error) {
+      try {
+        await services.storage.writeFile(storagePath, previousContent);
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          "File save failed and its previous stored content could not be restored.",
+        );
+      }
+      throw error;
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Save failed";
+    console.error("[Save] Failed:", error);
+    return { saved: false, error: message };
   }
-
-  const fileRows = await db
-    .select()
-    .from(schema.files)
-    .where(eq(schema.files.projectId, targetProjectId));
-
-  const resolved = fileRows.find((file) => file.path === path) ?? fileRows[0];
-  if (!resolved) {
-    const inserted = await db.insert(schema.files).values({
-      id: crypto.randomUUID(),
-      projectId: targetProjectId,
-      path,
-      content,
-      language: path.split(".").pop() ?? "plaintext",
-      sizeBytes: new TextEncoder().encode(content).byteLength,
-      version: 1,
-      updatedAt: new Date(),
-    }).returning();
-
-    await services.storage.writeFile(`projects/${targetProjectId}/${path}`, content);
-    return { saved: true, version: inserted[0]?.version ?? 1 };
-  }
-
-  const nextVersion = (resolved.version ?? 1) + 1;
-  await db.update(schema.files)
-    .set({
-      content,
-      version: nextVersion,
-      sizeBytes: new TextEncoder().encode(content).byteLength,
-      lastEditedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.files.id, resolved.id));
-
-  await services.storage.writeFile(`projects/${resolved.projectId}/${resolved.path}`, content);
-  await db.insert(schema.fileRevisions).values({
-    id: crypto.randomUUID(),
-    fileId: resolved.id,
-    version: resolved.version,
-    content: resolved.content,
-    diffPatch: "Autosave",
-    appliedFromAI: false,
-  });
-
-  return { saved: true, version: nextVersion };
 }
 
 export async function reconnectTerminalPreview(): Promise<TerminalReconnectResult> {

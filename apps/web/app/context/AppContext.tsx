@@ -6,6 +6,8 @@ import { authenticatedFetch, setAccessToken } from "../lib/apiClient";
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices, type BrowserServices } from "../../src/lib/services";
+import { connectSocket, disconnectSocket } from "../../src/lib/socket-client";
+import { saveEditorPreview } from "../services/editorMocks";
 import { THEME_PRESETS, type ThemeConfig } from "./themeLibrary";
 import { ToastContainer, type ToastMessage } from "../components/ToastContainer";
 
@@ -834,8 +836,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       .from(schema.workspaceMembers)
       .where(eq(schema.workspaceMembers.userId, dbUser.id))
       .limit(1);
+    let workspaceId = memberships[0]?.workspaceId;
     if (memberships.length === 0) {
-      const workspaceId = crypto.randomUUID();
+      workspaceId = crypto.randomUUID();
       const slugBase = dbUser.name?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
       const [workspace] = await db.insert(schema.workspaces).values({
         id: workspaceId,
@@ -870,6 +873,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     initializedUserIdRef.current = dbUser.id;
     sessionStorage.setItem("auth:current-user-id", dbUser.id);
     sessionStorage.setItem("dp_user_id", dbUser.id);
+    const devToken = btoa(JSON.stringify({
+      sub: dbUser.id,
+      email: dbUser.email,
+      name: dbUser.name,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 86400,
+    }));
+    sessionStorage.setItem("dp_access_token", devToken);
+    if (workspaceId) connectSocket(workspaceId, dbUser.id);
     services.realtime.setUserId(dbUser.id);
     localStorage.setItem("devpulse_user_session", JSON.stringify(profile));
     localStorage.removeItem("devpulse_logged_out");
@@ -877,6 +889,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const logout = async () => {
     const userId = getCurrentUserId();
+    const workspaceId = workspaces[0]?.id;
+    if (workspaceId) disconnectSocket(workspaceId);
     if (services && userId) {
       services.realtime.emit("presence:update", {
         userId,
@@ -950,40 +964,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     >,
   ) => {
     if (services) {
-      const userId = getCurrentUserId();
-      if (!userId) return;
-      const db = await getDB();
-      const memberships = await db
-        .select()
-        .from(schema.workspaceMembers)
-        .where(eq(schema.workspaceMembers.userId, userId));
-      if (memberships.length === 0) return;
-      const workspaceId = memberships[0]!.workspaceId;
-      const [created] = await db.insert(schema.projects).values({
-        id: crypto.randomUUID(),
-        name: repoData.name,
-        workspaceId,
-        language: repoData.language ?? "TypeScript",
-        defaultBranch: repoData.branch || "main",
-        description: repoData.description ?? "",
-      }).returning();
-      if (!created) return;
-      const newRepo: Repository = {
-        id: created.id,
-        name: created.name,
-        description: created.description || repoData.description,
-        language: created.language ?? "TypeScript",
-        languageColor: getLanguageColor(created.language),
-        stars: created.stars ?? 0,
-        forks: created.forks ?? 0,
-        branch: created.defaultBranch ?? "main",
-        lastCommit: "Initial commit",
-        updatedAt: created.updatedAt?.toISOString() ?? new Date().toISOString(),
-        isStarred: created.isStarred ?? false,
-        deployStatus: (created.deployStatus as Repository["deployStatus"]) ?? "none",
-        devboxReady: created.devboxReady ?? true,
-      };
-      setRepositories((previous) => [newRepo, ...previous]);
+      try {
+        const userId = getCurrentUserId();
+        if (!userId) throw new Error("Sign in before adding a repository.");
+        const db = await getDB();
+        const memberships = await db
+          .select()
+          .from(schema.workspaceMembers)
+          .where(eq(schema.workspaceMembers.userId, userId));
+        if (memberships.length === 0) throw new Error("No workspace is available.");
+        const [created] = await db.insert(schema.projects).values({
+          id: crypto.randomUUID(),
+          name: repoData.name,
+          workspaceId: memberships[0]!.workspaceId,
+          language: repoData.language ?? "TypeScript",
+          defaultBranch: repoData.branch || "main",
+          description: repoData.description ?? "",
+        }).returning();
+        if (!created) throw new Error("Repository was not saved.");
+        const newRepo: Repository = {
+          id: created.id,
+          name: created.name,
+          description: created.description || repoData.description,
+          language: created.language ?? "TypeScript",
+          languageColor: getLanguageColor(created.language),
+          stars: created.stars ?? 0,
+          forks: created.forks ?? 0,
+          branch: created.defaultBranch ?? "main",
+          lastCommit: "Initial commit",
+          updatedAt: created.updatedAt?.toISOString() ?? new Date().toISOString(),
+          isStarred: created.isStarred ?? false,
+          deployStatus: (created.deployStatus as Repository["deployStatus"]) ?? "none",
+          devboxReady: created.devboxReady ?? true,
+        };
+        setRepositories((previous) => [newRepo, ...previous]);
+        addToast({
+          variant: "warning",
+          title: "Saved locally",
+          message: "Repository is saved in this browser; connect the API to persist it remotely.",
+          duration: 6000,
+        });
+      } catch (error) {
+        addToast({
+          variant: "error",
+          title: "Repository not saved",
+          message: error instanceof Error ? error.message : "Could not save repository.",
+          duration: 6000,
+        });
+      }
       return;
     }
 
@@ -1023,35 +1051,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         },
         ...previous,
       ]);
+      addToast({ variant: "success", title: "Repository created", message: "Repository was saved." });
       return;
-    } catch {
-      // Keep the prototype usable when the API is unavailable.
+    } catch (apiError) {
+      console.warn("[Repos] API unavailable, saving locally.", apiError);
     }
     const newRepo: Repository = {
       ...repoData,
-      id: `repo-${Date.now()}`,
+      id: crypto.randomUUID(),
       stars: 0,
       forks: 0,
       updatedAt: "Just now",
       isStarred: false,
-      devboxReady: true,
+      deployStatus: "none",
+      devboxReady: false,
     };
     setRepositories((previous) => [newRepo, ...previous]);
+    addToast({
+      variant: "warning",
+      title: "Saved locally",
+      message: "Repository saved to this browser. Connect the API to persist.",
+      duration: 6000,
+    });
   };
 
   const deleteRepository = async (id: string) => {
     if (services) {
-      const db = await getDB();
-      await db.delete(schema.projects).where(eq(schema.projects.id, id));
-      setRepositories((prev) => prev.filter((r) => r.id !== id));
+      try {
+        const db = await getDB();
+        await db.delete(schema.projects).where(eq(schema.projects.id, id));
+        setRepositories((prev) => prev.filter((r) => r.id !== id));
+      } catch (error) {
+        addToast({
+          variant: "error",
+          title: "Repository not deleted",
+          message: error instanceof Error ? error.message : "Could not delete repository.",
+          duration: 6000,
+        });
+      }
       return;
     }
     try {
       await apiJson(`/v1/repositories/${id}`, { method: "DELETE" });
-    } catch {
-      /* local fallback */
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Repository not deleted",
+        message: error instanceof Error ? error.message : "Could not delete repository.",
+        duration: 6000,
+      });
+      return;
     }
     setRepositories((prev) => prev.filter((r) => r.id !== id));
+    addToast({ variant: "success", title: "Repository deleted", message: "Repository was deleted." });
   };
 
   const toggleStarRepo = async (id: string) => {
@@ -1122,8 +1174,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       setWorkspaces((previous) => [response, ...previous]);
       return;
-    } catch {
-      // Keep the prototype usable when the API is unavailable.
+    } catch (apiError) {
+      console.warn("[Workspace] API unavailable, saving locally.", apiError);
     }
     const newWs: WorkspaceDevbox = {
       id: `ws-${Date.now()}`,
@@ -1142,6 +1194,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       url: `https://ws-boot-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`,
     };
     setWorkspaces((previous) => [newWs, ...previous]);
+    addToast({
+      variant: "warning",
+      title: "Workspace saved locally",
+      message: "Workspace is available in this browser only. Connect the API to persist it.",
+      duration: 6000,
+    });
   };
 
   const toggleWorkspaceStatus = async (id: string) => {
@@ -1170,10 +1228,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const deleteWorkspace = async (id: string) => {
     try {
       await apiJson(`/v1/devboxes/${id}`, { method: "DELETE" });
-    } catch {
-      /* local fallback */
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Workspace not deleted",
+        message: error instanceof Error ? error.message : "Could not delete workspace.",
+        duration: 6000,
+      });
+      return;
     }
     setWorkspaces((prev) => prev.filter((ws) => ws.id !== id));
+    addToast({ variant: "success", title: "Workspace deleted", message: "Workspace was deleted." });
   };
 
   const addLog = (tag: string, color: string, text: string) => {
@@ -1194,88 +1259,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const triggerNewRelease = async (customMessage?: string) => {
-    try {
-      const deployment = await apiJson<Deployment>("/v1/deployments", {
-        method: "POST",
-        body: JSON.stringify({
-          commitMessage: customMessage,
-          author: user.handle,
-        }),
-      });
-      setDeployments((previous) => [deployment, ...previous]);
-      addLog(
-        "[PIPELINE]",
-        "text-violet-400",
-        `Triggered release pipeline for target ${deployment.target}`,
-      );
-      return;
-    } catch {
-      // Keep the prototype usable when the API is unavailable.
-    }
-    const commitHashes = ["7fe32b1", "9c8821a", "e09a32c", "33fa89b"];
-    const randomHash =
-      commitHashes[Math.floor(Math.random() * commitHashes.length)];
-    const newDep: Deployment = {
-      id: `dep-${Date.now()}`,
-      target: `devpulse-core-prod-release-${Math.floor(Math.random() * 900) + 100}.cpnv.app`,
-      domain: "global-sub10ms-ingress",
+    const deployId = crypto.randomUUID();
+    const newDeploy: Deployment = {
+      id: deployId,
+      target: "preview",
+      domain: "browser-preview.local",
       status: "Building",
       branch: "main",
-      commitHash: randomHash || "c8ff3e8",
-      commitMessage:
-        customMessage ||
-        `release: deploy cluster v2.4.${Math.floor(Math.random() * 90) + 10}`,
+      commitHash: deployId.slice(0, 7),
+      commitMessage: customMessage ?? "Manual release",
       author: user.handle,
-      timestamp: "Just now",
-      duration: "In progress",
+      timestamp: new Date().toISOString(),
+      duration: "",
     };
 
-    setDeployments([newDep, ...deployments]);
-
-    addLog(
-      "[PIPELINE]",
-      "text-violet-400",
-      `Triggered release pipeline for target ${newDep.target}`,
-    );
-    addLog(
-      "[GIT]",
-      "text-cyan-400",
-      `Checking out commit ${newDep.commitHash} on branch ${newDep.branch}...`,
-    );
+    setDeployments((previous) => [newDeploy, ...previous]);
+    addToast({
+      variant: "info",
+      title: "Simulated deployment",
+      message: "No real deployment infrastructure connected. Showing local preview.",
+      duration: 5000,
+    });
 
     setTimeout(() => {
-      addLog(
-        "[BUILD]",
-        "text-amber-400",
-        "Turbo cache hit: 84% layers reused. Compiling optimized edge binaries...",
-      );
-    }, 1200);
-
-    setTimeout(() => {
-      addLog(
-        "[NETWORK]",
-        "text-pink-400",
-        "Warm container pool allocated. Associating TLS certificates...",
-      );
-    }, 2400);
-
-    setTimeout(() => {
-      addLog(
-        "[HEALTH]",
-        "text-emerald-400",
-        "Passed cluster synthetic probes in 12ms. Zero 5xx errors.",
-      );
-      addLog(
-        "[SUCCESS]",
-        "text-emerald-300 font-bold",
-        `✓ Release live at https://${newDep.target}`,
-      );
       setDeployments((prev) =>
         prev.map((d) =>
-          d.id === newDep.id ? { ...d, status: "Ready", duration: "28s" } : d,
+          d.id === deployId ? { ...d, status: "Ready", duration: "3s" } : d,
         ),
       );
-    }, 3800);
+      addLog("[SIM]", "text-yellow-400", "Simulated deployment complete");
+    }, 3000);
   };
 
   const rerunPipeline = async (id?: string) => {
@@ -1307,9 +1320,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         body: JSON.stringify({ key, value, scope }),
       });
       setEnvVars((previous) => [variable, ...previous]);
+      addToast({ variant: "success", title: "Variable added", message: "Environment variable was saved." });
       return;
-    } catch {
-      // Keep the prototype usable when the API is unavailable.
+    } catch (apiError) {
+      console.warn("[Env] API unavailable, saving locally.", apiError);
     }
     const newVar: EnvVariable = {
       id: `env-${Date.now()}`,
@@ -1320,15 +1334,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       isRevealed: false,
     };
     setEnvVars((previous) => [newVar, ...previous]);
+    addToast({
+      variant: "warning",
+      title: "Variable saved locally",
+      message: "Variable is saved in this browser only. Connect the API to persist it.",
+      duration: 6000,
+    });
   };
 
   const deleteEnvVar = async (id: string) => {
     try {
       await apiJson(`/v1/environment-variables/${id}`, { method: "DELETE" });
-    } catch {
-      /* local fallback */
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Variable not deleted",
+        message: error instanceof Error ? error.message : "Could not delete environment variable.",
+        duration: 6000,
+      });
+      return;
     }
     setEnvVars((prev) => prev.filter((v) => v.id !== id));
+    addToast({ variant: "success", title: "Variable deleted", message: "Environment variable was deleted." });
   };
 
   const toggleRevealEnvVar = (id: string) => {
@@ -1731,23 +1758,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     const savedAt = new Date();
 
     if (services && currentFile && currentFile.origin !== "new") {
-      try {
-        const targetId = currentFile.apiFileId || currentFile.id;
-        const saved = await services.files.saveFile(targetId, content, "Autosave");
-        setOpenFiles((prev) =>
-          prev.map((file) =>
-            file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.id, lastSavedAt: savedAt } : file,
-          ),
-        );
-        setTreeFiles((prev) =>
-          prev.map((file) =>
-            file.id === fileId ? { ...file, content, isDirty: false, modified: false, version: saved.version, apiVersion: saved.version, revisionId: saved.id, lastSavedAt: savedAt } : file,
-          ),
-        );
-        return;
-      } catch {
-        // Fall back to the REST-compatible path if a local file is not yet persisted.
-      }
+      const saved = await saveEditorPreview({
+        path: currentFile.path,
+        content,
+        projectId: editorProjectId || undefined,
+      });
+      if (!saved.saved) throw new Error(saved.error ?? "Save failed.");
+
+      const savedVersion = saved.version ?? currentFile.version;
+      setOpenFiles((prev) =>
+        prev.map((file) =>
+          file.id === fileId
+            ? {
+                ...file,
+                content,
+                isDirty: false,
+                modified: false,
+                version: savedVersion,
+                apiVersion: savedVersion,
+                revisionId: saved.revisionId ?? file.revisionId,
+                lastSavedAt: savedAt,
+              }
+            : file,
+        ),
+      );
+      setTreeFiles((prev) =>
+        prev.map((file) =>
+          file.id === fileId
+            ? {
+                ...file,
+                content,
+                isDirty: false,
+                modified: false,
+                version: savedVersion,
+                apiVersion: savedVersion,
+                revisionId: saved.revisionId ?? file.revisionId,
+                lastSavedAt: savedAt,
+              }
+            : file,
+        ),
+      );
+      return;
     }
 
     const saved = await apiJson<{ id: string; version: number; revisionId?: string }>(`/v1/files/${currentFile?.apiFileId || fileId}`, {

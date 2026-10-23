@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useApp, PageType } from "../context/AppContext";
+import { getSocket } from "../../src/lib/socket-client";
 import {
   Code2,
   Rocket,
@@ -106,6 +107,26 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
     loadedProjectName,
     workspaces,
   } = useApp();
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) {
+      setIsSocketConnected(false);
+      return;
+    }
+
+    const updateConnectionStatus = () =>
+      setIsSocketConnected(socket.connected);
+    socket.on("connect", updateConnectionStatus);
+    socket.on("disconnect", updateConnectionStatus);
+    updateConnectionStatus();
+
+    return () => {
+      socket.off("connect", updateConnectionStatus);
+      socket.off("disconnect", updateConnectionStatus);
+    };
+  }, []);
 
   if (minimal) {
     return (
@@ -657,8 +678,10 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
             </div>
             <div className="border-t border-[var(--border-subtle)] px-3 py-2">
               <div className="flex items-center gap-1.5">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--success)]" />
-                <span className="text-xs text-[var(--muted)]">Browser mode — all services local</span>
+                <span className={`h-2 w-2 rounded-full ${isSocketConnected ? "bg-[var(--success)]" : "animate-pulse bg-[var(--warning)]"}`} />
+                <span className="text-xs text-[var(--muted)]">
+                  {isSocketConnected ? "Connected" : "Browser mode — local only"}
+                </span>
               </div>
             </div>
           </aside>
@@ -713,8 +736,10 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
 
             <div className="border-t border-[var(--border-subtle)] px-3 py-2">
               <div className="flex items-center gap-1.5">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--success)]" />
-                <span className="text-xs text-[var(--muted)]">Browser mode — all services local</span>
+                <span className={`h-2 w-2 rounded-full ${isSocketConnected ? "bg-[var(--success)]" : "animate-pulse bg-[var(--warning)]"}`} />
+                <span className="text-xs text-[var(--muted)]">
+                  {isSocketConnected ? "Connected" : "Browser mode — local only"}
+                </span>
               </div>
             </div>
           </aside>
@@ -762,8 +787,10 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                 </button>
               </nav>
               <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-3">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--success)]" />
-                <span className="text-xs text-[var(--muted)]">Browser mode — all services local</span>
+                <span className={`h-2 w-2 rounded-full ${isSocketConnected ? "bg-[var(--success)]" : "animate-pulse bg-[var(--warning)]"}`} />
+                <span className="text-xs text-[var(--muted)]">
+                  {isSocketConnected ? "Connected" : "Browser mode — local only"}
+                </span>
               </div>
             </aside>
           </div>

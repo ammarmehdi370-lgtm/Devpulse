@@ -606,7 +606,7 @@ const ConflictModal: React.FC<{ file: EditorFile; projectId: string; mine: strin
 };
 
 export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ projectId }) => {
-  const { user, isEditorProjectOpen, setIsEditorProjectOpen, editorProjectId, isEditorLoading, editorError, loadEditorProject, loadedProjectName, treeFiles, openFiles, activeFileId, setActiveFileId, fileContents, updateFileContent, updateOpenFileMetadata, saveFileContent, saveLocalFileToProject, openFileInEditor, closeFileFromEditor, createNewFile, deleteFile, loadUserLocalFiles, loadSingleLocalFile, isAiDrawerOpen, setIsAiDrawerOpen, applyDiffToActiveFile: applyDiffToActiveFileRemote, setIsCommandPaletteOpen } = useApp();
+  const { user, isEditorProjectOpen, setIsEditorProjectOpen, editorProjectId, isEditorLoading, editorError, loadEditorProject, loadedProjectName, treeFiles, openFiles, activeFileId, setActiveFileId, fileContents, updateFileContent, updateOpenFileMetadata, saveFileContent, saveLocalFileToProject, openFileInEditor, closeFileFromEditor, createNewFile, deleteFile, loadUserLocalFiles, loadSingleLocalFile, isAiDrawerOpen, setIsAiDrawerOpen, applyDiffToActiveFile: applyDiffToActiveFileRemote, setIsCommandPaletteOpen, addToast } = useApp();
   const editorRef = useRef<EditorHandle | null>(null);
   const realtimeRef = useRef<RealtimeService | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -951,7 +951,7 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     if (activeFile.origin === FileOrigin.NEW) { setSavePromptName(activeFile.name); setSavePromptFolder(activeFile.path.includes("/") ? `${activeFile.path.slice(0, activeFile.path.lastIndexOf("/") + 1)}` : "/"); setNewFilePromptId(activeFile.id); return; }
     setSaveState("saving");
     try { await saveFileContent(activeFile.id); setSaveState("saved"); setRunOutput(`Saved ${activeFile.path} and created a new file revision.`); window.setTimeout(() => setSaveState("idle"), 2000); }
-    catch (error) { setSaveState("error"); if (error instanceof ApiRequestError && error.status === 409) { setConflictedFileIds((previous) => previous.includes(activeFile.id) ? previous : [...previous, activeFile.id]); setConflict({ fileId: activeFile.id, mine: activeContent, details: error.details as ConflictDetails }); } setRunOutput(error instanceof Error ? error.message : "Save failed"); }
+    catch (error) { const message = error instanceof Error ? error.message : "Could not save file"; setSaveState("error"); if (error instanceof ApiRequestError && error.status === 409) { setConflictedFileIds((previous) => previous.includes(activeFile.id) ? previous : [...previous, activeFile.id]); setConflict({ fileId: activeFile.id, mine: activeContent, details: error.details as ConflictDetails }); } setRunOutput(message); addToast({ variant: "error", title: "Save failed", message, duration: 5000 }); }
   };
   const promoteFile = async (fileId: string) => { setSaveDialogFileId(null); setSaveState("saving"); try { await saveLocalFileToProject(fileId); setSaveState("saved"); window.setTimeout(() => setSaveState("idle"), 2000); } catch (error) { setSaveState("error"); setRunOutput(error instanceof Error ? error.message : "Save failed"); } };
   const saveNewFile = async () => {
