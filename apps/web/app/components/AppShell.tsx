@@ -5,10 +5,10 @@ import { useApp, PageType } from "../context/AppContext";
 import { getSocket } from "../../src/lib/socket-client";
 import {
   Code2,
+  Activity,
   Rocket,
   Database,
   MessageSquare,
-  Settings,
   Search,
   Layers,
   ChevronDown,
@@ -16,7 +16,7 @@ import {
   LogOut,
   Terminal,
   Sparkles,
-  Monitor,
+  MonitorPlay,
   CreditCard,
   Radio,
   GitBranch,
@@ -39,16 +39,22 @@ const PLATFORM_PAGES: Array<{
   label: string;
   icon: LucideIcon;
   shortcut?: string;
+  inSidebar: boolean;
 }> = [
-  { id: "workspaces", label: "Workspaces", icon: Server, shortcut: "Alt+W" },
-  { id: "repositories", label: "Repositories", icon: GitBranch, shortcut: "Alt+R" },
-  { id: "editor", label: "Editor", icon: Code2, shortcut: "Alt+E" },
-  { id: "deployments", label: "Deployments", icon: Rocket, shortcut: "Alt+D" },
-  { id: "chat", label: "Team Chat", icon: MessageSquare, shortcut: "Alt+C" },
-  { id: "ai-studio", label: "AI Studio", icon: Sparkles, shortcut: "Alt+A" },
-  { id: "remote-control", label: "Remote Control", icon: Monitor },
-  { id: "pricing", label: "Plans", icon: CreditCard, shortcut: "Alt+P" },
+  { id: "workspaces", label: "Workspaces", icon: Server, shortcut: "Alt+W", inSidebar: true },
+  { id: "repositories", label: "Repositories", icon: GitBranch, shortcut: "Alt+R", inSidebar: true },
+  { id: "editor", label: "Editor", icon: Code2, shortcut: "Alt+E", inSidebar: true },
+  { id: "deployments", label: "Deployments", icon: Rocket, shortcut: "Alt+D", inSidebar: true },
+  { id: "chat", label: "Team Chat", icon: MessageSquare, shortcut: "Alt+C", inSidebar: true },
+  { id: "ai-studio", label: "AI Studio", icon: Sparkles, shortcut: "Alt+A", inSidebar: true },
+  { id: "remote-control", label: "Remote Control", icon: MonitorPlay, inSidebar: true },
+  { id: "activity", label: "Activity", icon: Activity, shortcut: "Alt+Y", inSidebar: true },
+  { id: "pricing", label: "Plans", icon: CreditCard, shortcut: "Alt+P", inSidebar: true },
+  { id: "settings", label: "Settings", icon: Settings2, inSidebar: false },
+  { id: "payment-methods", label: "Payment Methods", icon: CreditCard, inSidebar: false },
 ];
+
+const sidebarItems = PLATFORM_PAGES.filter((item) => item.inSidebar);
 
 function SidebarNavItem({
   item,
@@ -214,6 +220,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
       c: "chat",
       a: "ai-studio",
       p: "pricing",
+      y: "activity",
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -494,7 +501,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                   <p className="text-[10px] text-[var(--muted)]">{user.role}</p>
                 </div>
                 {[
-                  { label: "Settings", icon: Settings2, action: () => navigate("theme") },
+                  { label: "Settings", icon: Settings2, action: () => navigate("settings") },
                   { label: "Theme", icon: Palette, action: () => navigate("theme") },
                   {
                     label: "Keyboard shortcuts",
@@ -667,8 +674,8 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                   onClick={() => setPage("theme")}
                   className="hover:text-white flex items-center gap-1.5 text-xs"
                 >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Settings</span>
+                  <Palette className="w-3.5 h-3.5" />
+                  <span>Theme</span>
                 </button>
                 <div className="flex items-center gap-2">
                   <Split className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
@@ -695,7 +702,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                   PLATFORM
                 </div>
                 <nav className="space-y-1">
-                  {PLATFORM_PAGES.map((item) => (
+                  {sidebarItems.map((item) => (
                     <SidebarNavItem
                       key={item.id}
                       item={item}
@@ -716,8 +723,8 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                     onClick={() => setPage("theme")}
                     className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors"
                   >
-                    <Settings className="w-4 h-4" />
-                    <span>Settings & Theme</span>
+                    <Palette className="w-4 h-4" />
+                    <span>Theme</span>
                   </button>
                 </div>
 
@@ -769,7 +776,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                 </button>
               </div>
               <nav aria-label="Platform" className="flex-1 space-y-1 overflow-y-auto p-3">
-                {PLATFORM_PAGES.map((item) => (
+                {sidebarItems.map((item) => (
                   <SidebarNavItem
                     key={item.id}
                     item={item}
@@ -782,8 +789,8 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                   onClick={() => navigate("theme")}
                   className="group flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]"
                 >
-                  <Settings aria-hidden="true" className="h-4 w-4 text-[var(--muted)]" />
-                  Settings &amp; Theme
+                  <Palette aria-hidden="true" className="h-4 w-4 text-[var(--muted)]" />
+                  Theme
                 </button>
               </nav>
               <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-3">

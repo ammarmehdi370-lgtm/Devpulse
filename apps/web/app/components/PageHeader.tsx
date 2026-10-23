@@ -47,6 +47,22 @@ export const PAGE_META: Record<
     title: "Site Settings",
     subtitle: "Preferences and account",
   },
+  "payment-methods": {
+    title: "Payment Methods",
+    subtitle: "Manage billing payment methods",
+  },
+  "custom-plan": {
+    title: "Custom Plan",
+    subtitle: "Configure a plan for your workspace",
+  },
+  "cloud-core": {
+    title: "Cloud Core",
+    subtitle: "Cloud infrastructure overview",
+  },
+  "api-sandbox": {
+    title: "API Sandbox",
+    subtitle: "Explore the Devpulse API",
+  },
   login: {
     title: "Sign in to Devpulse",
     subtitle: "Access your development workspace",

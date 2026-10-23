@@ -14,14 +14,20 @@ import { ToastContainer, type ToastMessage } from "../components/ToastContainer"
 export type PageType =
   | "login"
   | "theme"
-  | "repositories"
   | "workspaces"
+  | "repositories"
+  | "editor"
   | "deployments"
   | "chat"
-  | "editor"
   | "remote-control"
   | "ai-studio"
-  | "pricing";
+  | "pricing"
+  | "activity"
+  | "settings"
+  | "payment-methods"
+  | "custom-plan"
+  | "cloud-core"
+  | "api-sandbox";
 
 export type { ThemeConfig } from "./themeLibrary";
 export interface UserProfile {
@@ -539,7 +545,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [services, setServices] = useState<BrowserServices | null>(null);
-  const [page, setPage] = useState<PageType>("login");
+  const [page, setPageState] = useState<PageType>("login");
+  const setPage = (newPage: PageType) => {
+    setPageState(newPage);
+    if (newPage !== "login" && newPage !== "theme") {
+      localStorage.setItem("devpulse_active_page", newPage);
+    }
+  };
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isClientStorageHydrated, setIsClientStorageHydrated] = useState(false);
   const [dataErrors, setDataErrors] =

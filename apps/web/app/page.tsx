@@ -12,11 +12,28 @@ import { EditorWorkbench } from "./components/EditorWorkbench";
 import { RemoteControlPage } from "./components/RemoteControlPage";
 import { FullScreenAiPage } from "./components/FullScreenAiPage";
 import { PricingPage } from "./components/PricingPage";
+import { ActivityPage } from "./components/ActivityPage";
+import { PageHeader } from "./components/PageHeader";
 import { AppShell } from "./components/AppShell";
 import { CommandPalette } from "./components/CommandPalette";
 import { ListSkeleton, PageHeaderSkeleton } from "./components/SkeletonLoaders";
+import type { PageType } from "./context/AppContext";
 
-const PLATFORM_PAGES: Record<string, React.ReactNode> = {
+function UnavailablePage({ page }: { page: PageType }) {
+  return (
+    <main className="mx-auto max-w-5xl p-6 sm:p-8">
+      <PageHeader page={page} />
+      <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-card)] p-5 text-sm text-[var(--muted)]">
+        This page is not available in this build.
+      </p>
+    </main>
+  );
+}
+
+const PAGE_COMPONENTS: Record<
+  Exclude<PageType, "login" | "theme" | "editor">,
+  React.ReactNode
+> = {
   repositories: <RepositoriesPage />,
   workspaces: <WorkspacesPage />,
   deployments: <DeploymentsPage />,
@@ -24,6 +41,12 @@ const PLATFORM_PAGES: Record<string, React.ReactNode> = {
   "remote-control": <RemoteControlPage />,
   "ai-studio": <FullScreenAiPage />,
   pricing: <PricingPage />,
+  activity: <ActivityPage />,
+  settings: <ThemePalettePage />,
+  "payment-methods": <UnavailablePage page="payment-methods" />,
+  "custom-plan": <UnavailablePage page="custom-plan" />,
+  "cloud-core": <UnavailablePage page="cloud-core" />,
+  "api-sandbox": <UnavailablePage page="api-sandbox" />,
 };
 
 function AppContent() {
@@ -67,7 +90,7 @@ function AppContent() {
       </AppShell>
     );
   } else {
-    const currentPage = PLATFORM_PAGES[page];
+    const currentPage = PAGE_COMPONENTS[page];
     content = (
       <AppShell>
         {currentPage ?? (

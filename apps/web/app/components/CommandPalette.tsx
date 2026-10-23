@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   Bot,
   Code2,
   CreditCard,
@@ -210,7 +211,7 @@ export const CommandPalette: React.FC = () => {
         description: "Pulse Pilot",
         category: "navigation",
         icon: MonitorPlay,
-        keywords: ["remote", "control", "huddle", "pilot"],
+        keywords: ["remote", "control", "pilot", "huddle", "pair"],
         action: () => navigate("remote-control"),
       },
       {
@@ -222,6 +223,16 @@ export const CommandPalette: React.FC = () => {
         shortcut: "⌥P",
         keywords: ["plan", "billing", "price", "upgrade"],
         action: () => navigate("pricing"),
+      },
+      {
+        id: "nav:activity",
+        label: "Go to Activity",
+        description: "Your Activity",
+        category: "navigation",
+        icon: Activity,
+        shortcut: "⌥Y",
+        keywords: ["activity", "log", "history", "events", "timeline"],
+        action: () => navigate("activity"),
       },
     ];
 
@@ -311,7 +322,7 @@ export const CommandPalette: React.FC = () => {
         category: "account",
         icon: Settings2,
         keywords: ["settings", "preferences"],
-        action: () => navigate("theme"),
+        action: () => navigate("settings"),
       },
       {
         id: "account:shortcuts",
