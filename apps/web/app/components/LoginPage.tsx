@@ -73,7 +73,7 @@ function isMagicLinkResponse(value: unknown): value is MagicLinkResponse {
 }
 
 export const LoginPage: React.FC = () => {
-  const { loginAndLoad, isDataLoading } = useApp();
+  const { loginAndLoad, isDataLoading, setPage } = useApp();
   const [email, setEmail] = useState("");
   const [latency, setLatency] = useState(14);
   const [instances, setInstances] = useState(1482);
@@ -177,6 +177,14 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  const handleLoginSuccess = async () => {
+    setPage(
+      localStorage.getItem("devpulse_theme_selected") === "true"
+        ? "repositories"
+        : "theme",
+    );
+  };
+
   const handleTokenVerify = async (token: string) => {
     setIsLoading(true);
     setLoginMethod("email");
@@ -198,6 +206,7 @@ export const LoginPage: React.FC = () => {
       }
       setAccessToken(result.accessToken);
       await loginAndLoad(result.user.email, result.user.name);
+      await handleLoginSuccess();
     } catch (error) {
       setEmailLoginState({
         status: "error",
@@ -223,13 +232,18 @@ export const LoginPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleDevBypass = async (provider: "github" | "gitlab" | "sso") => {
+  const handleDevBypass = async (
+    provider: "github" | "google" | "gitlab" | "sso",
+  ) => {
     setAuthError("");
 
     if (process.env.NODE_ENV !== "development") {
-      const startUrl = provider === "github"
-        ? `${apiUrl}/api/auth/github`
-        : `${apiUrl}/api/auth/${provider}/start`;
+      const startUrl =
+        provider === "github"
+          ? `${apiUrl}/api/auth/github`
+          : provider === "google"
+            ? `${apiUrl}/api/auth/google`
+            : `${apiUrl}/api/auth/${provider}/start`;
       window.location.assign(startUrl);
       return;
     }
@@ -238,6 +252,7 @@ export const LoginPage: React.FC = () => {
     setLoginMethod(provider);
     try {
       await loginAndLoad("demo@devpulse.local", "Demo User");
+      await handleLoginSuccess();
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Unable to sign in. Please try again.");
       setIsLoading(false);
@@ -305,8 +320,8 @@ export const LoginPage: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => { window.location.href = `${apiUrl}/api/auth/google`; }}
-              disabled={!oauthProviders?.google}
+              onClick={() => void handleDevBypass("google")}
+              disabled={isLoading || isDataLoading || (process.env.NODE_ENV !== "development" && !oauthProviders?.google)}
               title={oauthProviders?.google ? undefined : oauthProviders ? "Google login is not available" : oauthProviderError ? "Unable to check Google login availability" : "Checking Google login availability"}
               className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#161622]"
             >

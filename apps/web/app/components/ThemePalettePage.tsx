@@ -53,9 +53,9 @@ export const ThemePalettePage: React.FC = () => {
     setTheme(t);
   };
 
-  const handleApplyAndContinue = () => {
-    localStorage.setItem('devpulse_theme_selected', 'true');
+  const handleContinue = () => {
     setTheme(theme);
+    localStorage.setItem('devpulse_theme_selected', 'true');
     setPage('repositories');
   };
 
@@ -185,7 +185,7 @@ export const ThemePalettePage: React.FC = () => {
 
             {/* Next Button */}
             <button
-              onClick={handleApplyAndContinue}
+              onClick={handleContinue}
               className="ml-2 px-5 py-2 rounded-xl text-xs font-semibold text-[#09090e] flex items-center gap-2 shadow-lg transition-all hover:brightness-110 active:scale-95"
               style={{ backgroundColor: customPrimary, color: '#0e0e14' }}
             >

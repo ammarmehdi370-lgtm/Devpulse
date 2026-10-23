@@ -539,6 +539,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [services, setServices] = useState<BrowserServices | null>(null);
   const [page, setPage] = useState<PageType>("login");
   const [isDataLoading, setIsDataLoading] = useState(false);
+  const [isClientStorageHydrated, setIsClientStorageHydrated] = useState(false);
   const [dataErrors, setDataErrors] =
     useState<AppDataErrors>(EMPTY_DATA_ERRORS);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -657,29 +658,121 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
-    if (!services) return;
-    void authenticatedFetch(`${API_BASE}/v1/me`, { credentials: "include" })
-      .then(async (response) =>
-        response.ok
-          ? (response.json() as Promise<{
-              email: string;
-              name?: string;
-              avatarUrl?: string;
-            }>)
-          : null,
-      )
-      .then((currentUser) =>
-        currentUser
-          ? loginAndLoad(currentUser.email, currentUser.name || "Devpulse User")
-          : undefined,
-      )
-      .catch((error: unknown) => {
-        console.error("[AppContext] Could not restore the authenticated session.", error);
-      });
-  }, [services]);
+    let active = true;
+
+    const restoreSession = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/v1/me`, {
+          credentials: "include",
+          signal: AbortSignal.timeout(3000),
+        });
+
+        if (response.ok) {
+          const data: unknown = await response.json();
+          if (
+            typeof data === "object"
+            && data !== null
+            && "email" in data
+            && typeof data.email === "string"
+          ) {
+            const serverUser: UserProfile = {
+              name: "name" in data && typeof data.name === "string"
+                ? data.name
+                : "Demo User",
+              email: data.email,
+              handle: "handle" in data && typeof data.handle === "string"
+                ? data.handle
+                : data.email.split("@")[0] ?? "",
+              role: "role" in data && typeof data.role === "string"
+                ? data.role
+                : "Platform Engineer",
+              avatar: "avatarUrl" in data && typeof data.avatarUrl === "string"
+                ? data.avatarUrl
+                : "",
+              isAuthenticated: true,
+            };
+            if (!active) return;
+            setUser(serverUser);
+            localStorage.setItem(
+              "devpulse_user_session",
+              JSON.stringify(serverUser),
+            );
+            return;
+          }
+          console.warn("[AppContext] The server session response did not contain a valid user.");
+        } else {
+          console.warn(
+            `[AppContext] Server session check failed (${response.status}); trying the local session.`,
+          );
+        }
+      } catch (error: unknown) {
+        if (active) {
+          console.warn(
+            "[AppContext] Server session is unavailable; trying the local session.",
+            error,
+          );
+        }
+      }
+
+      if (!active || localStorage.getItem("devpulse_logged_out") === "true") {
+        return;
+      }
+
+      const saved = localStorage.getItem("devpulse_user_session");
+      if (!saved) return;
+
+      try {
+        const parsed: unknown = JSON.parse(saved);
+        if (
+          typeof parsed === "object"
+          && parsed !== null
+          && "name" in parsed
+          && typeof parsed.name === "string"
+          && "email" in parsed
+          && typeof parsed.email === "string"
+          && "handle" in parsed
+          && typeof parsed.handle === "string"
+          && "role" in parsed
+          && typeof parsed.role === "string"
+          && "avatar" in parsed
+          && typeof parsed.avatar === "string"
+          && "isAuthenticated" in parsed
+          && parsed.isAuthenticated === true
+        ) {
+          setUser({
+            name: parsed.name,
+            email: parsed.email,
+            handle: parsed.handle,
+            role: parsed.role,
+            avatar: parsed.avatar,
+            isAuthenticated: true,
+          });
+        } else {
+          console.warn("[AppContext] The saved local user session is invalid.");
+        }
+      } catch (error: unknown) {
+        console.warn("[AppContext] Could not read the saved local user session.", error);
+      }
+    };
+
+    const initializeApp = async () => {
+      try {
+        await restoreSession();
+      } catch (error: unknown) {
+        console.warn("[AppContext] Initialization completed with partial state.", error);
+      } finally {
+        if (active) setIsClientStorageHydrated(true);
+      }
+    };
+
+    void initializeApp();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!services || !user.isAuthenticated) return;
+    if (!services || !isClientStorageHydrated || !user.isAuthenticated) return;
     const userId = getCurrentUserId();
     if (!userId) return;
 
@@ -699,7 +792,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     };
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);
-  }, [services, user.isAuthenticated, user.name]);
+  }, [services, isClientStorageHydrated, user.isAuthenticated, user.name]);
 
   // Listen for keyboard shortcut Ctrl+K
   useEffect(() => {
@@ -1408,7 +1501,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setToasts((previous) => previous.filter((toast) => toast.id !== id));
   };
   useEffect(() => {
-    if (!services || !user.isAuthenticated) return;
+    if (!services || !isClientStorageHydrated || !user.isAuthenticated) return;
     const userId = getCurrentUserId();
     if (!userId || initializedUserIdRef.current === userId) return;
 
@@ -1434,7 +1527,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         if (page === "login") setPage(getPostLoginPage());
       })
       .finally(() => setIsDataLoading(false));
-  }, [services, user.isAuthenticated, page]);
+  }, [services, isClientStorageHydrated, user.isAuthenticated, page]);
 
   const editorFileFromApi = (file: {
     id: string;
