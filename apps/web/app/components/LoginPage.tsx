@@ -2,19 +2,18 @@
 
 import React, { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
+import { BrandLogo } from "./BrandLogo";
 import {
   Terminal,
   KeyRound,
   Mail,
   ArrowRight,
-  Layers,
   Loader2,
   Cloud,
   Code2,
   GitBranch,
 } from "lucide-react";
 import { z } from "zod";
-import { LOGO_COLORS } from "../logoColors";
 
 const emailSchema = z
   .string()
@@ -132,23 +131,7 @@ export const LoginPage: React.FC = () => {
       <div className="mx-auto grid min-h-[min(820px,calc(100vh-3rem))] w-full max-w-[1120px] overflow-hidden rounded-xl border border-[var(--ide-color-login-border)] bg-[var(--ide-color-login-panel)] shadow-2xl shadow-ide-shadow-color lg:grid-cols-[0.92fr_1.08fr]">
         <section className="flex flex-col justify-center px-6 py-8 sm:px-10 lg:px-12 lg:py-12">
           <div className="mb-10 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div
-                className="flex h-10 w-10 items-center justify-center rounded-lg"
-                style={{
-                  backgroundColor: LOGO_COLORS.background,
-                  color: LOGO_COLORS.foreground,
-                }}
-              >
-                <Layers className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <span
-                className="text-xl font-semibold tracking-tight"
-                style={{ color: LOGO_COLORS.wordmarkStrong }}
-              >
-                Devpulse
-              </span>
-            </div>
+            <BrandLogo size="large" />
             <span className="rounded-md border border-[var(--ide-color-login-border-soft)] bg-ide-surface px-2.5 py-1.5 font-mono text-[10px] text-ide-muted">
               CLOUD WORKSPACE
             </span>

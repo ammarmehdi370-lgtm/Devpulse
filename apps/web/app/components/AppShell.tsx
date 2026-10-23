@@ -1,14 +1,21 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
 import { useApp, PageType } from "../context/AppContext";
 import { ToastContainer } from "./ToastContainer";
+import { BrandLogo } from "./BrandLogo";
 import { friendlyAlert } from "./FriendlyHelpers";
 import { OnboardingTour } from "./OnboardingTour";
-import { LOGO_COLORS } from "../logoColors";
 import { prefetchPage } from "../pagePrefetch";
 import { formatShortcut, getShortcut } from "../editor/shortcuts";
+
+const GlobalHuddleBar = dynamic(
+  () =>
+    import("./GlobalHuddleBar").then((module) => module.GlobalHuddleBar),
+  { ssr: false },
+);
 import {
   Box,
   GitFork,
@@ -18,7 +25,6 @@ import {
   MessageSquare,
   Settings,
   Search,
-  Layers,
   ChevronDown,
   Palette,
   LogOut,
@@ -534,21 +540,8 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
               onClick={() => setPage("workspaces")}
               className="flex shrink-0 cursor-pointer items-center gap-2 group"
             >
-              <div
-                className="flex h-7 w-7 items-center justify-center rounded-lg transition-transform group-hover:scale-105"
-                style={{
-                  backgroundColor: LOGO_COLORS.background,
-                  color: LOGO_COLORS.foreground,
-                  boxShadow: LOGO_COLORS.shadow,
-                }}
-              >
-                <Layers className="h-4 w-4" />
-              </div>
-              <span
-                className="text-[13px] font-semibold tracking-tight"
-                style={{ color: LOGO_COLORS.wordmark }}
-              >
-                Devpulse
+              <span className="transition-transform group-hover:scale-[1.03]">
+                <BrandLogo />
               </span>
             </div>
 
@@ -1311,19 +1304,22 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({
 
         {/* Main Content Pane */}
         <main
-          className={`${page === "editor" ? "flex flex-col overflow-hidden" : isAiStudio ? "overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-ide-app-content-bg`}
+          className={`${page === "editor" || isAiStudio ? "flex flex-col overflow-hidden" : "overflow-y-auto"} min-h-0 flex-1 bg-ide-app-content-bg`}
         >
           <div
             className={
               page === "editor"
                 ? "min-h-0 flex-1 overflow-hidden"
-                : "min-h-full"
+                : isAiStudio
+                  ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+                  : "min-h-full"
             }
           >
             {children}
           </div>
         </main>
       </div>
+      <GlobalHuddleBar />
       {/* Global Notifications */}
       <ToastContainer />
       {/* First-run Onboarding Tour */}

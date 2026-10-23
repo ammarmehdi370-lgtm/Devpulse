@@ -264,6 +264,9 @@ interface AppContextType {
   closeOtherFilesFromEditor: (fileId: string) => void;
   closeAllFilesFromEditor: () => void;
   renameEditorFile: (fileId: string, nextName: string) => void;
+  moveEditorFile: (fileId: string, nextPath: string) => void;
+  renameEditorFolder: (folderPath: string, nextPath: string) => void;
+  deleteEditorFolder: (folderPath: string) => Promise<void>;
   createNewFile: (
     name: string,
     path?: string,
@@ -2131,6 +2134,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     setOpenFiles((previous) => previous.map(update));
   };
 
+  const moveEditorFile = (fileId: string, nextPath: string) => {
+    const update = (file: EditorFile): EditorFile => {
+      if (file.id !== fileId) return file;
+      const name = nextPath.split("/").pop() ?? file.name;
+      return {
+        ...file,
+        name,
+        path: nextPath,
+        language: file.languageOverride
+          ? file.language
+          : getEditorLanguageForPath(nextPath) || file.language,
+        iconType: getIconType(name),
+      };
+    };
+    setTreeFiles((previous) => previous.map(update));
+    setOpenFiles((previous) => previous.map(update));
+    setTreeFolders((previous) =>
+      Array.from(new Set([...previous, ...getParentFolderPaths([nextPath])])),
+    );
+  };
+
+  const renameEditorFolder = (folderPath: string, nextPath: string) => {
+    const updatePath = (path: string) =>
+      path === folderPath || path.startsWith(`${folderPath}/`)
+        ? `${nextPath}${path.slice(folderPath.length)}`
+        : path;
+    const updateFile = (file: EditorFile): EditorFile => {
+      if (file.path !== folderPath && !file.path.startsWith(`${folderPath}/`)) {
+        return file;
+      }
+      const path = updatePath(file.path);
+      const name = path.split("/").pop() ?? file.name;
+      return {
+        ...file,
+        name,
+        path,
+        language: file.languageOverride
+          ? file.language
+          : getEditorLanguageForPath(path) || file.language,
+        iconType: getIconType(name),
+      };
+    };
+    setTreeFiles((previous) => previous.map(updateFile));
+    setOpenFiles((previous) => previous.map(updateFile));
+    setTreeFolders((previous) =>
+      Array.from(new Set(previous.map(updatePath))),
+    );
+  };
+
+  const deleteEditorFolder = async (folderPath: string) => {
+    const removedFiles = treeFiles.filter(
+      (file) => file.path.startsWith(`${folderPath}/`),
+    );
+    const removedIds = new Set(removedFiles.map((file) => file.id));
+    const remainingOpenFiles = openFiles.filter((file) => !removedIds.has(file.id));
+    setTreeFiles((previous) => previous.filter((file) => !removedIds.has(file.id)));
+    setOpenFiles(remainingOpenFiles);
+    if (removedIds.has(activeFileId)) {
+      setActiveFileId(remainingOpenFiles[remainingOpenFiles.length - 1]?.id ?? "");
+    }
+    setTreeFolders((previous) =>
+      previous.filter(
+        (path) => path !== folderPath && !path.startsWith(`${folderPath}/`),
+      ),
+    );
+    setFileContents((previous) => {
+      const next = { ...previous };
+      removedIds.forEach((id) => delete next[id]);
+      return next;
+    });
+    setSavedFileContents((previous) => {
+      const next = { ...previous };
+      removedIds.forEach((id) => delete next[id]);
+      return next;
+    });
+    addActivityEvent({
+      category: "Code",
+      title: "Folder deleted",
+      detail: `Deleted ${folderPath}.`,
+      project: loadedProjectName || "Editor",
+    });
+  };
+
   const createNewFile = async (
     name: string,
     path?: string,
@@ -2177,8 +2263,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const deleteFile = async (fileId: string) => {
     const file = treeFiles.find((item) => item.id === fileId);
+    const remainingOpenFiles = openFiles.filter((item) => item.id !== fileId);
     setTreeFiles((prev) => prev.filter((f) => f.id !== fileId));
-    closeFileFromEditor(fileId);
+    setOpenFiles(remainingOpenFiles);
+    if (activeFileId === fileId) {
+      setActiveFileId(remainingOpenFiles[remainingOpenFiles.length - 1]?.id ?? "");
+    }
     setFileContents((prev) => {
       const copy = { ...prev };
       delete copy[fileId];
@@ -2348,6 +2438,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         closeOtherFilesFromEditor,
         closeAllFilesFromEditor,
         renameEditorFile,
+        moveEditorFile,
+        renameEditorFolder,
+        deleteEditorFolder,
         createNewFile,
         deleteFile,
         loadUserLocalFiles,

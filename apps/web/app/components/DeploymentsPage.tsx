@@ -349,39 +349,55 @@ export const DeploymentsPage: React.FC = () => {
       </div>
 
       {/* Tabs Navigation Bar (Pixel-Perfect to Screenshot 4) */}
-      <div className="border-b border-ide-border-control flex items-center justify-between overflow-x-auto">
-        <div className="flex items-center gap-6 text-xs font-mono">
-          {[
-            { id: "overview", label: "Overview" },
-            { id: "deployments", label: "Deployments (Active)" },
-            { id: "env", label: "Environment Variables" },
-            { id: "branches", label: "Preview Branches" },
-            { id: "pipelines", label: "Build Pipelines" },
-            { id: "audit", label: "Access & Audit" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`pb-3 font-medium transition-all relative ${
-                activeTab === tab.id
-                  ? "text-ide-text-strong font-semibold"
-                  : "text-ide-muted hover:text-ide-text-secondary"
-              }`}
-            >
-              <span>{tab.label}</span>
-              {activeTab === tab.id && (
-                <span
-                  className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full"
-                  style={{ backgroundColor: theme.primary }}
-                />
-              )}
-            </button>
-          ))}
+      <div className="flex flex-col gap-2 border-b border-ide-border-control sm:flex-row sm:items-end">
+        <div className="relative min-w-0 flex-1">
+          <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex w-max min-w-full items-center gap-2 text-xs font-sans sm:gap-4">
+              {[
+                { id: "overview", label: "Overview" },
+                { id: "deployments", label: "Deployments (Active)" },
+                { id: "env", label: "Environment Variables" },
+                { id: "branches", label: "Preview Branches" },
+                { id: "pipelines", label: "Build Pipelines" },
+                { id: "audit", label: "Access & Audit" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`relative h-11 shrink-0 whitespace-nowrap px-3 font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ide-focus-ring ${
+                    activeTab === tab.id
+                      ? "text-ide-text-strong font-semibold"
+                      : "text-ide-text-secondary hover:text-ide-text-strong"
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  {activeTab === tab.id && (
+                    <span className="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-ide-accent" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-0 w-4 bg-gradient-to-r from-ide-bg to-transparent"
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 w-4 bg-gradient-to-l from-ide-bg to-transparent"
+          />
         </div>
 
-        <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-ide-muted pb-2">
-          <span>● 98 commits</span>
-          <span>● auto-sync on</span>
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2 pb-2 text-[11px] font-sans sm:pl-3">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-ide-border-strong bg-ide-panel px-2.5 py-1 text-ide-text-secondary">
+            <span className="h-1.5 w-1.5 rounded-full bg-ide-text-secondary" />
+            98 commits
+          </span>
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-ide-success/30 bg-ide-success/10 px-2.5 py-1 text-[var(--ide-color-success-readable)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-ide-success" />
+            auto-sync on
+          </span>
         </div>
       </div>
 
@@ -389,17 +405,19 @@ export const DeploymentsPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left: Active Deployments List (8 Cols) */}
         <div className="lg:col-span-8 bg-ide-workbench-bg border border-ide-border-control rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-ide-border-control">
-            <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center justify-between gap-3 border-b border-ide-border-control pb-3">
+            <div className="flex min-w-0 items-start gap-2">
               <Rocket className="w-4 h-4 text-ide-text-soft" />
-              <h3 className="text-sm font-bold text-ide-text-strong">
-                Active Deployments
-              </h3>
-              <span className="text-[11px] text-ide-muted font-mono">
-                Current production routing and staged ephemeral workloads
-              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-ide-text-strong">
+                  Active Deployments
+                </h3>
+                <p className="mt-0.5 text-xs leading-5 text-ide-text-secondary">
+                  Current production routing and staged ephemeral workloads
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-1 text-[11px] text-ide-success font-mono">
+            <div className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-ide-success">
               <span className="w-1.5 h-1.5 rounded-full bg-ide-success animate-pulse" />
               Routing
             </div>
@@ -471,20 +489,20 @@ export const DeploymentsPage: React.FC = () => {
 
         {/* Right: CI/CD Automation Card (4 Cols) */}
         <div className="lg:col-span-4 bg-ide-workbench-bg border border-ide-border-control rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-ide-border-control">
-            <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-start justify-between gap-3 border-b border-ide-border-control pb-3">
+            <div className="flex min-w-0 items-start gap-2">
               <Zap className="w-4 h-4 text-ide-success" />
-              <h3 className="text-sm font-bold text-ide-text-strong">CI/CD Automation</h3>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-ide-text-strong">CI/CD Automation</h3>
+                <p className="mt-0.5 text-xs leading-5 text-ide-text-secondary">
+                  Trigger build workers on pushes and release milestones.
+                </p>
+              </div>
             </div>
-            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-ide-success/10 text-[var(--ide-color-success-readable)] border border-ide-success/30">
+            <span className="shrink-0 whitespace-nowrap rounded border border-ide-success/30 bg-ide-success/10 px-2 py-0.5 text-[10px] font-mono text-[var(--ide-color-success-readable)]">
               AUTO-ENABLED
             </span>
           </div>
-
-          <p className="text-xs text-ide-text-soft leading-relaxed">
-            Trigger build workers instantly upon remote ref pushes to the
-            default branch or tagged release milestones.
-          </p>
 
           <div className="space-y-4 pt-2">
             {/* Toggle 1 */}
@@ -614,22 +632,23 @@ export const DeploymentsPage: React.FC = () => {
       </div>
 
       {/* Bottom Row: Environment Variables Vault + Edge Topology (Pixel-Perfect to Screenshot 4) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className="grid min-w-0 grid-cols-1 gap-5 min-[1100px]:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
         {/* Environment Variables Manager (8 Cols) */}
-        <div className="lg:col-span-8 bg-ide-workbench-bg border border-ide-border-control rounded-2xl p-5 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-ide-border-control">
-            <div>
-              <h3 className="text-sm font-bold text-ide-text-strong flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-ide-info" />
+        <div className="min-w-0 bg-ide-workbench-bg border border-ide-border-control rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-ide-border-control pb-3">
+            <div className="min-w-0 flex-1">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-ide-text-strong">
+                <ShieldCheck className="h-4 w-4 shrink-0 text-ide-info" />
                 Environment Variables
               </h3>
-              <p className="text-[11px] text-ide-muted font-mono mt-0.5">
+              <p className="mt-0.5 text-xs leading-5 text-ide-text-secondary">
                 Encrypted runtime secrets and build-time arguments.
               </p>
             </div>
 
-            <div className="flex items-center gap-2 text-xs font-mono">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
               <button
+                type="button"
                 onClick={async () => {
                   if (
                     !revealAllEnvVars &&
@@ -640,7 +659,7 @@ export const DeploymentsPage: React.FC = () => {
                     return;
                   toggleRevealAllEnvVars();
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-ide-panel hover:bg-ide-surface-toolbar border border-ide-border-strong text-ide-text-tertiary hover:text-ide-text-strong flex items-center gap-1.5 transition-colors"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-ide-border-strong bg-ide-panel px-3 text-ide-text-strong transition-colors duration-150 hover:bg-ide-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
               >
                 {revealAllEnvVars ? (
                   <EyeOff className="w-3.5 h-3.5" />
@@ -651,20 +670,22 @@ export const DeploymentsPage: React.FC = () => {
               </button>
 
               <button
+                type="button"
                 onClick={() =>
                   void friendlyAlert("Synced latest secret values from HashiCorp Vault.")
                 }
-                className="px-2.5 py-1.5 rounded-lg bg-ide-panel hover:bg-ide-surface-toolbar border border-ide-border-strong text-ide-text-tertiary hover:text-ide-text-strong transition-colors"
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-ide-border-strong bg-ide-panel px-3 text-ide-text-strong transition-colors duration-150 hover:bg-ide-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
               >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                 Sync from Vault
               </button>
 
               <button
+                type="button"
                 onClick={() => setIsAddingEnv(true)}
-                className="px-3 py-1.5 rounded-lg font-semibold text-ide-accent-fg flex items-center gap-1.5 shadow"
-                style={{ backgroundColor: theme.primary }}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-ide-accent px-3 font-semibold text-ide-accent-fg shadow transition-colors duration-150 hover:bg-ide-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
               >
-                <Plus className="w-3.5 h-3.5 text-ide-accent-fg" />
+                <Plus className="h-3.5 w-3.5" />
                 <span>Add Variable</span>
               </button>
             </div>
@@ -677,7 +698,8 @@ export const DeploymentsPage: React.FC = () => {
               placeholder="Filter variables by name, scope, or target environment..."
               value={envSearch}
               onChange={(e) => setEnvSearch(e.target.value)}
-              className="w-full px-3 py-2 bg-ide-panel border border-ide-border-strong rounded-xl text-xs font-mono text-ide-text-strong placeholder-[var(--ide-color-info)] focus:outline-none focus:border-ide-info"
+              aria-label="Filter environment variables"
+              className="w-full rounded-xl border border-ide-border-strong bg-ide-panel px-3 py-2 text-xs font-mono text-ide-text-strong placeholder:text-ide-text-secondary focus:outline-none focus:border-ide-focus-ring focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
             />
           </div>
 
@@ -686,10 +708,13 @@ export const DeploymentsPage: React.FC = () => {
             {filteredEnvVars.map((item) => (
               <div
                 key={item.id}
-                className="bg-ide-panel border border-ide-border-control rounded-xl p-3 flex items-center justify-between gap-3 text-xs font-mono"
+                className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-ide-border-control bg-ide-panel p-3 text-xs font-mono"
               >
-                <div className="space-y-0.5">
-                  <div className="font-bold text-ide-text-strong tracking-wide">
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <div
+                    title={item.key}
+                    className="truncate font-bold tracking-wide text-ide-text-strong"
+                  >
                     {item.key}
                     {item.key === "VECTOR_EMBEDDING_MODEL" && (
                       <span className="ml-2 text-[10px] font-normal text-ide-text-soft">
@@ -697,19 +722,20 @@ export const DeploymentsPage: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-ide-muted">
-                    Scope: {item.scope}
+                  <div className="truncate text-[10px] text-ide-text-secondary" title={`Scope: ${item.scope}`}>
+                    Scope: <span className="inline-block max-w-[min(48vw,20rem)] truncate align-bottom">{item.scope}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="bg-ide-workbench-bg px-3 py-1.5 rounded-lg border border-ide-border-control text-ide-text-soft min-w-[200px] text-right truncate">
+                <div className="flex min-w-0 items-center gap-2">
+                  <div title={item.isRevealed ? item.value : undefined} className="min-w-0 max-w-[min(42vw,200px)] flex-1 truncate rounded-lg border border-ide-border-control bg-ide-workbench-bg px-3 py-1.5 text-right text-ide-text-secondary">
                     {item.isRevealed ? item.value : "••••••••••••••••••••••••"}
                   </div>
 
                   <button
                     onClick={() => toggleRevealEnvVar(item.id)}
-                    className="text-ide-muted hover:text-ide-text-strong p-1"
+                    aria-label={item.isRevealed ? `Mask ${item.key}` : `Reveal ${item.key}`}
+                    className="rounded p-1 text-ide-text-secondary transition-colors duration-150 hover:bg-ide-surface-hover hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
                     title={item.isRevealed ? "Mask value" : "Reveal value"}
                   >
                     {item.isRevealed ? (
@@ -721,7 +747,8 @@ export const DeploymentsPage: React.FC = () => {
 
                   <button
                     onClick={() => handleCopyEnv(item.id, item.value)}
-                    className="text-ide-muted hover:text-ide-text-strong p-1"
+                    aria-label={`Copy ${item.key}`}
+                    className="rounded p-1 text-ide-text-secondary transition-colors duration-150 hover:bg-ide-surface-hover hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
                     title="Copy value"
                   >
                     {copiedKey === item.id ? (
@@ -734,7 +761,7 @@ export const DeploymentsPage: React.FC = () => {
                   <button
                     onClick={() => void handleDeleteEnv(item.id, item.key)}
                     disabled={deletingEnvId === item.id}
-                    className="text-ide-muted hover:text-ide-danger p-1 disabled:opacity-50"
+                    className="rounded p-1 text-ide-text-secondary transition-colors duration-150 hover:bg-ide-surface-hover hover:text-ide-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring disabled:opacity-50"
                     title="Delete variable"
                     aria-label={`Delete ${item.key}`}
                   >
@@ -809,53 +836,52 @@ export const DeploymentsPage: React.FC = () => {
         </div>
 
         {/* Edge Topology Visualizer (4 Cols matching Screenshot 4) */}
-        <div className="lg:col-span-4 bg-ide-workbench-bg border border-ide-border-control rounded-2xl p-5 shadow-xl space-y-4 font-mono text-xs">
-          <div className="flex items-center justify-between pb-3 border-b border-ide-border-control">
-            <div className="flex items-center gap-2">
-              <Globe className="w-4 h-4 text-ide-success" />
-              <h3 className="text-sm font-bold text-ide-text-strong">Edge Topology</h3>
+        <div className="min-w-[320px] w-full shrink-0 overflow-visible space-y-4 rounded-2xl border border-ide-border-control bg-ide-workbench-bg p-5 shadow-xl">
+          <div className="flex min-w-0 items-center justify-between gap-3 border-b border-ide-border-control pb-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <Globe className="h-4 w-4 shrink-0 text-ide-success" />
+              <h3 className="whitespace-nowrap text-sm font-semibold text-ide-text-strong">Edge Topology</h3>
             </div>
-            <span className="px-2 py-0.5 rounded text-[10px] bg-ide-success/15 text-[var(--ide-color-success-readable)] border border-ide-success/30">
+            <span className="shrink-0 whitespace-nowrap rounded border border-ide-success/30 bg-ide-success/15 px-2 py-0.5 text-[10px] font-mono text-[var(--ide-color-success-readable)]">
               32/32 POPs
             </span>
           </div>
 
-          <p className="text-ide-muted text-[11px] leading-relaxed">
+          <p className="w-full break-normal [overflow-wrap:normal] text-xs leading-5 text-ide-text-secondary">
             Active POP edge gateways distributing ingress traffic across primary
             and preview pools.
           </p>
 
           {/* Topology Node Graph */}
-          <div className="h-36 bg-ide-workbench-bg border border-ide-border-control rounded-xl p-3 flex flex-col items-center justify-between relative overflow-hidden">
+          <div className="relative flex aspect-[2/1] min-h-36 w-full flex-col items-center justify-between rounded-xl border border-ide-border-control bg-ide-workbench-bg p-3">
             {/* Top Root Node */}
-            <div className="px-3 py-1 rounded bg-ide-surface-toolbar border border-ide-border-strong text-ide-text-soft text-[10px] z-10">
+            <div className="z-20 rounded border border-ide-border-strong bg-ide-panel px-3 py-1 font-mono text-[10px] text-ide-text-strong">
               INGRESS ROOT
             </div>
 
             {/* Middle Edge Gateways */}
-            <div className="flex justify-around w-full z-10">
-              <div className="px-2 py-0.5 rounded bg-ide-success/15 border border-ide-success/40 text-[var(--ide-color-success-readable)] text-[10px]">
+            <div className="z-20 flex w-full justify-around">
+              <div className="rounded border border-ide-success/40 bg-ide-panel px-2 py-0.5 font-mono text-[10px] text-[var(--ide-color-success-readable)]">
                 POP_US
               </div>
-              <div className="px-2 py-0.5 rounded bg-ide-success/15 border border-ide-success/40 text-[var(--ide-color-success-readable)] text-[10px]">
+              <div className="rounded border border-ide-success/40 bg-ide-panel px-2 py-0.5 font-mono text-[10px] text-[var(--ide-color-success-readable)]">
                 POP_EU
               </div>
-              <div className="px-2 py-0.5 rounded bg-ide-success/15 border border-ide-success/40 text-ide-text-strong text-[10px]">
+              <div className="rounded border border-ide-success/40 bg-ide-panel px-2 py-0.5 font-mono text-[10px] text-ide-text-strong">
                 POP_AP
               </div>
             </div>
 
             {/* Bottom Target */}
             <div
-              className="px-4 py-1 rounded text-ide-accent-fg font-bold text-[10px] z-10"
-              style={{ backgroundColor: theme.primary }}
+              className="z-20 rounded bg-ide-accent px-4 py-1 font-mono text-[10px] font-bold text-ide-accent-fg"
             >
               WARM DEVBOX MESH
             </div>
 
             {/* Connecting lines */}
             <svg
-              className="absolute inset-0 w-full h-full pointer-events-none stroke-ide-border-strong"
+              className="pointer-events-none absolute inset-0 z-0 h-full w-full stroke-ide-border-strong"
               strokeWidth="1"
             >
               <line
@@ -903,18 +929,21 @@ export const DeploymentsPage: React.FC = () => {
             </svg>
           </div>
 
-          <div className="space-y-1.5 pt-1 text-[11px] text-ide-muted">
-            <div className="flex justify-between">
-              <span>BGP Routing</span>
-              <strong className="text-ide-text-strong">Tier 1 Autonomous Sys</strong>
+          <div className="space-y-2 pt-1 text-xs">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <span className="min-w-0 flex-1 text-ide-text-secondary">BGP Routing</span>
+              <strong className="max-w-[58%] text-right font-medium leading-5 text-ide-text-strong">Tier 1 Autonomous Sys</strong>
             </div>
-            <div className="flex justify-between">
-              <span>SSL/TLS Termination</span>
-              <strong className="text-ide-text-strong">TLS 1.3 - ChaCha20</strong>
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <span className="min-w-0 flex-1 text-ide-text-secondary">SSL/TLS Termination</span>
+              <strong className="max-w-[58%] whitespace-nowrap text-right font-mono text-[11px] font-medium text-ide-text-strong">TLS 1.3 - ChaCha20</strong>
             </div>
-            <div className="flex justify-between pt-1 border-t border-ide-border-control">
-              <span className="text-ide-success">● 396k Users Active</span>
-              <span>0 Shards / 20k</span>
+            <div className="flex min-w-0 items-center justify-between gap-3 border-t border-ide-border-control pt-2">
+              <span className="inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap text-ide-success">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ide-success" />
+                396k Users Active
+              </span>
+              <span className="shrink-0 whitespace-nowrap font-mono tabular-nums text-ide-text-secondary">0 Shards / 20k</span>
             </div>
           </div>
         </div>

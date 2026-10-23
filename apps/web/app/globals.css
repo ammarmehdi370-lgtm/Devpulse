@@ -2421,6 +2421,33 @@ html[data-theme-mode="light"] .bg-dot-subtle {
 }
 
 /* Custom sleek scrollbar */
+.ai-studio-messages-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.ai-studio-messages-scrollbar:hover {
+  scrollbar-color: var(--ide-color-scrollbar) transparent;
+}
+
+.ai-studio-messages-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ai-studio-messages-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-studio-messages-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 4px;
+  transition: background-color 150ms ease;
+}
+
+.ai-studio-messages-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: var(--ide-color-scrollbar);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

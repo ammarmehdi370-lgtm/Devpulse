@@ -3,9 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
-  ArrowDownRight,
   Camera,
   CameraOff,
+  ChevronDown,
   Check,
   Headphones,
   Info,
@@ -13,6 +13,7 @@ import {
   MicOff,
   Monitor,
   MonitorOff,
+  Move,
   Users,
   X,
 } from "lucide-react";
@@ -27,12 +28,14 @@ interface HuddlePanelProps {
   minimized: boolean;
   onMinimize: () => void;
   onExpand: () => void;
+  containerRef: React.RefObject<HTMLElement>;
 }
 
 export const HuddlePanel: React.FC<HuddlePanelProps> = ({
   minimized,
   onMinimize,
   onExpand,
+  containerRef,
 }) => {
   const {
     startedAt,
@@ -54,6 +57,17 @@ export const HuddlePanel: React.FC<HuddlePanelProps> = ({
   const permissionTriggerRef = useRef<HTMLButtonElement>(null);
   const viewOnlyInputRef = useRef<HTMLInputElement>(null);
   const permissionDialogRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    pointerX: number;
+    pointerY: number;
+    positionX: number;
+    positionY: number;
+  } | null>(null);
+  const [isFloating, setIsFloating] = useState(false);
+  const [floatingPosition, setFloatingPosition] = useState({ x: 0, y: 0 });
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
   const localParticipant = participants.find((participant) => participant.isLocal);
   const sharingParticipant = participants.find(
     (participant) => participant.id === sharerId,
@@ -66,6 +80,155 @@ export const HuddlePanel: React.FC<HuddlePanelProps> = ({
   const hiddenParticipantCount = Math.max(0, participants.length - 4);
   const localIsSharing = sharerId === localParticipant?.id;
   const canShare = !sharerId || localIsSharing;
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("devpulse-huddle-panel");
+      if (saved) {
+        const preferences = JSON.parse(saved) as {
+          floating?: unknown;
+          position?: { x?: unknown; y?: unknown };
+        };
+        if (typeof preferences.floating === "boolean") {
+          setIsFloating(preferences.floating);
+        }
+        if (
+          typeof preferences.position?.x === "number" &&
+          Number.isFinite(preferences.position.x) &&
+          typeof preferences.position?.y === "number" &&
+          Number.isFinite(preferences.position.y)
+        ) {
+          setFloatingPosition({
+            x: preferences.position.x,
+            y: preferences.position.y,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Unable to restore huddle panel preferences.", error);
+    } finally {
+      setPreferencesLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesLoaded) return;
+    try {
+      window.localStorage.setItem(
+        "devpulse-huddle-panel",
+        JSON.stringify({ floating: isFloating, position: floatingPosition }),
+      );
+    } catch (error) {
+      console.error("Unable to save huddle panel preferences.", error);
+    }
+  }, [floatingPosition, isFloating, preferencesLoaded]);
+
+  useEffect(() => {
+    if (!isFloating) return;
+    const clampToViewport = () => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const rect = panel.getBoundingClientRect();
+      const nextX = Math.max(0, Math.min(rect.left, window.innerWidth - rect.width));
+      const nextY = Math.max(0, Math.min(rect.top, window.innerHeight - rect.height));
+      if (nextX !== rect.left || nextY !== rect.top) {
+        setFloatingPosition((position) => ({
+          x: position.x + nextX - rect.left,
+          y: position.y + nextY - rect.top,
+        }));
+      }
+    };
+    const frame = window.requestAnimationFrame(clampToViewport);
+    window.addEventListener("resize", clampToViewport);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", clampToViewport);
+    };
+  }, [isFloating, minimized]);
+
+  const popOutPanel = () => {
+    const area = containerRef.current?.getBoundingClientRect();
+    const width = Math.min(448, window.innerWidth - 16);
+    const x = area
+      ? Math.max(8, Math.min(area.right - width - 24, window.innerWidth - width - 8))
+      : Math.max(8, window.innerWidth - width - 24);
+    const y = area
+      ? Math.max(8, Math.min(area.top + 72, window.innerHeight - 120))
+      : 72;
+    setFloatingPosition({ x, y });
+    setIsFloating(true);
+  };
+
+  const onHeaderPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isFloating || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button")) return;
+    event.preventDefault();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      positionX: floatingPosition.x,
+      positionY: floatingPosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onHeaderPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? Math.min(448, window.innerWidth - 16);
+    const height = rect?.height ?? 56;
+    setFloatingPosition({
+      x: Math.max(
+        0,
+        Math.min(
+          drag.positionX + event.clientX - drag.pointerX,
+          window.innerWidth - width,
+        ),
+      ),
+      y: Math.max(
+        0,
+        Math.min(
+          drag.positionY + event.clientY - drag.pointerY,
+          window.innerHeight - height,
+        ),
+      ),
+    });
+  };
+
+  const onHeaderPointerEnd = (event: React.PointerEvent<HTMLElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const onHeaderKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!isFloating || !event.key.startsWith("Arrow")) return;
+    const direction = event.key === "ArrowLeft"
+      ? [-1, 0]
+      : event.key === "ArrowRight"
+        ? [1, 0]
+        : event.key === "ArrowUp"
+          ? [0, -1]
+          : [0, 1];
+    const distance = event.shiftKey ? 32 : 8;
+    const rect = panelRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? Math.min(448, window.innerWidth - 16);
+    const height = rect?.height ?? 56;
+    event.preventDefault();
+    setFloatingPosition((position) => ({
+      x: Math.max(0, Math.min(position.x + direction[0]! * distance, window.innerWidth - width)),
+      y: Math.max(0, Math.min(position.y + direction[1]! * distance, window.innerHeight - height)),
+    }));
+  };
+
+  const resetToDocked = () => {
+    setIsFloating(false);
+    setFloatingPosition({ x: 0, y: 0 });
+  };
 
   useEffect(() => {
     if (!startedAt) return;
@@ -162,19 +325,85 @@ export const HuddlePanel: React.FC<HuddlePanelProps> = ({
     </button>
   );
 
+  const renderCompactCameraButton = () => (
+    <button
+      type="button"
+      aria-label={localParticipant?.isCameraOn ? "Turn camera off" : "Turn camera on"}
+      title={localParticipant?.isCameraOn ? "Turn camera off" : "Turn camera on"}
+      onClick={toggleCamera}
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring ${
+        localParticipant?.isCameraOn
+          ? "border-ide-border-strong bg-ide-panel text-ide-text-secondary hover:border-ide-border hover:bg-ide-surface hover:text-ide-text-strong"
+          : "border-ide-warning/35 bg-ide-warning/10 text-ide-warning hover:bg-ide-warning/15"
+      }`}
+    >
+      {localParticipant?.isCameraOn
+        ? <Camera className="h-4 w-4" aria-hidden="true" />
+        : <CameraOff className="h-4 w-4" aria-hidden="true" />}
+    </button>
+  );
+
+  const renderCompactShareButton = () => localIsSharing ? (
+    <button
+      type="button"
+      aria-label="Stop sharing screen"
+      title="Stop sharing screen"
+      onClick={() => localParticipant && stopScreenShare(localParticipant.id)}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ide-accent/35 bg-ide-accent/10 text-ide-accent transition hover:bg-ide-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+    >
+      <MonitorOff className="h-4 w-4" aria-hidden="true" />
+    </button>
+  ) : (
+    <button
+      type="button"
+      aria-label="Share screen"
+      title={canShare ? "Share screen" : `${sharingParticipant?.name ?? "A participant"} is sharing`}
+      disabled={!canShare}
+      onClick={() => localParticipant && startScreenShare(localParticipant.id)}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ide-border-strong bg-ide-panel text-ide-text-secondary transition hover:border-ide-accent/40 hover:bg-ide-accent/10 hover:text-ide-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      <Monitor className="h-4 w-4" aria-hidden="true" />
+    </button>
+  );
+
   return (
     <>
       <section
+        ref={panelRef}
         aria-label="Team huddle"
         style={{
           maxHeight: minimized ? "3.5rem" : "40%",
           opacity: minimized ? 0.96 : 1,
+          ...(isFloating
+            ? {
+                position: "fixed" as const,
+                left: 0,
+                top: 0,
+                width: "min(28rem, calc(100vw - 1rem))",
+                maxHeight: "40vh",
+                transform: `translate3d(${floatingPosition.x}px, ${floatingPosition.y}px, 0)`,
+                zIndex: 50,
+              }
+            : {}),
         }}
-        className="huddle-panel-motion relative mx-3 mb-3 flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-ide-border-strong bg-ide-panel shadow-[0_12px_34px_color-mix(in_srgb,var(--ide-color-shadow-color)_22%,transparent)] ring-1 ring-inset ring-ide-border-subtle sm:mx-6 lg:mx-8"
+        className={`huddle-panel-motion relative ${isFloating ? "m-0 shadow-[0_18px_46px_color-mix(in_srgb,var(--ide-color-shadow-color)_35%,transparent)]" : "mx-3 mb-3 sm:mx-6 lg:mx-8"} flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-ide-border-strong bg-ide-panel shadow-[0_12px_34px_color-mix(in_srgb,var(--ide-color-shadow-color)_22%,transparent)] ring-1 ring-inset ring-ide-border-subtle`}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-ide-accent/50 to-transparent" />
 
-        <header className="flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-ide-border-subtle bg-ide-workbench-bg/70 px-3.5 py-2.5 sm:px-4">
+        <header
+          tabIndex={0}
+          onPointerDown={onHeaderPointerDown}
+          onPointerMove={onHeaderPointerMove}
+          onPointerUp={onHeaderPointerEnd}
+          onPointerCancel={onHeaderPointerEnd}
+          onKeyDown={onHeaderKeyDown}
+          onDoubleClick={(event) => {
+            if (!(event.target as HTMLElement).closest("button")) resetToDocked();
+          }}
+          className={`flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-ide-border-subtle bg-ide-workbench-bg/70 px-3.5 py-2.5 sm:px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ide-focus-ring ${
+            isFloating ? "cursor-grab touch-none active:cursor-grabbing" : ""
+          }`}
+        >
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-ide-accent/20 bg-ide-accent/10 text-ide-accent">
               <Headphones className="h-4 w-4" aria-hidden="true" />
@@ -227,28 +456,40 @@ export const HuddlePanel: React.FC<HuddlePanelProps> = ({
                 )}
               </div>
               {renderMuteButton(true)}
+              {renderCompactCameraButton()}
+              {renderCompactShareButton()}
               {leaveButton(true)}
-              <button
-                type="button"
-                aria-label="Expand huddle"
-                title="Expand huddle"
-                onClick={onExpand}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ide-text-secondary transition hover:bg-ide-surface hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
-              >
-                <ArrowDownRight className="h-4 w-4" aria-hidden="true" />
-              </button>
             </div>
-          ) : (
+          ) : null}
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
-              aria-label="Minimize"
-              title="Minimize"
-              onClick={onMinimize}
+              aria-expanded={!minimized}
+              aria-label={minimized ? "Expand" : "Minimize"}
+              title={minimized ? "Expand" : "Minimize"}
+              onClick={minimized ? onExpand : onMinimize}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ide-text-secondary transition hover:bg-ide-surface hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
             >
-              <ArrowDownRight className="h-4 w-4" aria-hidden="true" />
+              <ChevronDown
+                className={`h-4 w-4 transition-transform duration-150 motion-reduce:transition-none ${
+                  minimized ? "" : "rotate-180"
+                }`}
+                aria-hidden="true"
+              />
             </button>
-          )}
+            <button
+              type="button"
+              aria-label={isFloating ? "Dock huddle" : "Pop out huddle"}
+              title={isFloating ? "Dock" : "Pop out"}
+              onClick={() => {
+                if (isFloating) setIsFloating(false);
+                else popOutPanel();
+              }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ide-text-secondary transition hover:bg-ide-surface hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+            >
+              <Move className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         </header>
 
         {!minimized && (

@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from "react";
 import dynamic from "next/dynamic";
+import Image from "next/image";
 import type { Monaco, OnMount } from "@monaco-editor/react";
 import { emmetCSS, emmetHTML, emmetJSX } from "emmet-monaco-es";
 import { useApp, EditorFile, type ThemeConfig } from "../context/AppContext";
@@ -80,7 +81,9 @@ type PendingNativeOperation =
   | { kind: "file"; fileId: string }
   | { kind: "folder"; path: string }
   | { kind: "rename"; fileId: string; oldPath: string; newPath: string }
-  | { kind: "delete"; fileId: string; path: string };
+  | { kind: "delete"; fileId: string; path: string }
+  | { kind: "folder-rename"; oldPath: string; newPath: string }
+  | { kind: "folder-delete"; path: string };
 
 type WritablePermissionHandle = FileSystemHandle & {
   queryPermission?: (descriptor: { mode: "readwrite" }) => Promise<PermissionState>;
@@ -144,6 +147,12 @@ const sameNativeOperation = (
   }
   if (left.kind === "delete" && right.kind === "delete") {
     return left.fileId === right.fileId;
+  }
+  if (left.kind === "folder-rename" && right.kind === "folder-rename") {
+    return left.oldPath === right.oldPath;
+  }
+  if (left.kind === "folder-delete" && right.kind === "folder-delete") {
+    return left.path === right.path;
   }
   return false;
 };
@@ -530,6 +539,21 @@ const removeFileFromDirectory = async (
   return true;
 };
 
+const removeDirectoryFromDirectory = async (
+  root: FileSystemDirectoryHandle,
+  directoryPath: string,
+) => {
+  if (!(await ensureWritePermission(root))) return false;
+  const parts = directoryPath.split("/").filter(Boolean);
+  const parent = await getDirectoryForPath(
+    root,
+    parts.slice(0, -1).join("/"),
+    false,
+  );
+  await parent.removeEntry(parts[parts.length - 1]!, { recursive: true });
+  return true;
+};
+
 export const EditorWorkbench: React.FC = () => {
   const {
     theme,
@@ -562,6 +586,9 @@ export const EditorWorkbench: React.FC = () => {
     closeOtherFilesFromEditor,
     closeAllFilesFromEditor,
     renameEditorFile,
+    moveEditorFile,
+    renameEditorFolder,
+    deleteEditorFolder,
     createNewFile,
     deleteFile,
     loadUserLocalFiles,
@@ -613,6 +640,21 @@ export const EditorWorkbench: React.FC = () => {
     x: number;
     y: number;
   } | null>(null);
+  const [explorerMenu, setExplorerMenu] = useState<{
+    type: "file" | "folder" | "root";
+    fileId?: string;
+    path?: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const explorerMenuRef = useRef<HTMLDivElement>(null);
+  const [treeClipboard, setTreeClipboard] = useState<{
+    type: "file" | "folder";
+    path: string;
+    operation: "copy" | "cut";
+  } | null>(null);
+  const [renamingFolderPath, setRenamingFolderPath] = useState<string | null>(null);
+  const [terminalWorkingFolder, setTerminalWorkingFolder] = useState("");
   const [renameValue, setRenameValue] = useState("");
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
   const [isSplitEditor, setIsSplitEditor] = useState(false);
@@ -1473,6 +1515,347 @@ export const EditorWorkbench: React.FC = () => {
       .map((folder) => folder.split("/").pop() ?? folder),
   ];
 
+  useEffect(() => {
+    if (!explorerMenu) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!explorerMenuRef.current?.contains(event.target as Node)) {
+        setExplorerMenu(null);
+      }
+    };
+    const closeOnEscapeOrScroll = (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event instanceof KeyboardEvent) event.preventDefault();
+      setExplorerMenu(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("scroll", closeOnEscapeOrScroll, true);
+    window.addEventListener("keydown", closeOnEscapeOrScroll);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("scroll", closeOnEscapeOrScroll, true);
+      window.removeEventListener("keydown", closeOnEscapeOrScroll);
+    };
+  }, [explorerMenu]);
+
+  useEffect(() => {
+    if (!explorerMenu || !explorerMenuRef.current) return;
+    const menu = explorerMenuRef.current;
+    const firstItem = menu.querySelector<HTMLButtonElement>(
+      'button[role="menuitem"]:not(:disabled)',
+    );
+    firstItem?.focus();
+    const bounds = menu.getBoundingClientRect();
+    setExplorerMenu((current) => {
+      if (!current) return current;
+      const x = Math.max(8, Math.min(current.x, window.innerWidth - bounds.width - 8));
+      const y = Math.max(8, Math.min(current.y, window.innerHeight - bounds.height - 8));
+      return x === current.x && y === current.y ? current : { ...current, x, y };
+    });
+  }, [explorerMenu]);
+
+  const openExplorerMenu = (
+    event: React.MouseEvent,
+    type: "file" | "folder" | "root",
+    target?: { fileId?: string; path?: string },
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setExplorerMenu({ type, ...target, x: event.clientX, y: event.clientY });
+  };
+
+  const copyExplorerPath = async (path: string, relative: boolean) => {
+    const value = relative ? path : [loadedProjectName, path].filter(Boolean).join("/");
+    try {
+      await navigator.clipboard.writeText(value);
+      addToast({ type: "success", title: relative ? "Relative path copied" : "Path copied" });
+    } catch (error) {
+      console.error("Unable to copy the workspace path.", error);
+      addToast({
+        type: "error",
+        title: "Could not copy path",
+        description: "Clipboard access is unavailable.",
+      });
+    }
+  };
+
+  const createWorkspaceFile = async (path: string, content: string) => {
+    const name = path.split("/").pop() ?? path;
+    const file = await createNewFile(name, path, content);
+    if (nativeHandle?.kind === "directory") {
+      try {
+        if (!(await writeFileToDirectory(nativeHandle.handle, path, content))) {
+          markFileAsDraft(file.id);
+          queueNativeOperation({ kind: "file", fileId: file.id });
+        }
+      } catch (error) {
+        console.error("Unable to create the local file.", error);
+        markFileAsDraft(file.id);
+        queueNativeOperation({ kind: "file", fileId: file.id });
+      }
+    } else if (nativeHandle?.kind === "file") {
+      markFileAsDraft(file.id);
+      queueNativeOperation({ kind: "file", fileId: file.id });
+    } else if (
+      editorProjectId === "local-folder" ||
+      editorProjectId === "local-file"
+    ) {
+      markFileAsDraft(file.id);
+      queueNativeOperation({ kind: "file", fileId: file.id });
+    }
+    return file;
+  };
+
+  const createWorkspaceFolder = async (path: string) => {
+    createNewFolder(path);
+    if (nativeHandle?.kind === "directory") {
+      try {
+        if (!(await createDirectoryPath(nativeHandle.handle, path))) {
+          queueNativeOperation({ kind: "folder", path });
+        }
+      } catch (error) {
+        console.error("Unable to create the local folder.", error);
+        queueNativeOperation({ kind: "folder", path });
+      }
+    } else if (
+      nativeHandle?.kind === "file" ||
+      editorProjectId === "local-folder" ||
+      editorProjectId === "local-file"
+    ) {
+      queueNativeOperation({ kind: "folder", path });
+    }
+  };
+
+  const uniqueCopyName = (
+    name: string,
+    parentPath: string,
+    isFile = true,
+  ) => {
+    const dot = name.lastIndexOf(".");
+    const extension = isFile && dot > 0 ? name.slice(dot) : "";
+    const base = extension ? name.slice(0, -extension.length) : name;
+    let candidate = `${base} copy${extension}`;
+    let suffix = 2;
+    while (siblingNames(parentPath).some((sibling) => sibling.toLowerCase() === candidate.toLowerCase())) {
+      candidate = `${base} copy ${suffix++}${extension}`;
+    }
+    return candidate;
+  };
+
+  const persistFolderMove = async (
+    oldPath: string,
+    newPath: string,
+    files: EditorFile[],
+    folders: string[],
+  ) => {
+    if (nativeHandle?.kind !== "directory") {
+      if (
+        editorProjectId === "local-folder" ||
+        editorProjectId === "local-file"
+      ) {
+        files.forEach((file) => markFileAsDraft(file.id));
+        queueNativeOperation({ kind: "folder-rename", oldPath, newPath });
+      }
+      return;
+    }
+    try {
+      let copied = await createDirectoryPath(nativeHandle.handle, newPath);
+      for (const folder of folders) {
+        if (folder === oldPath || folder.startsWith(`${oldPath}/`)) {
+          const target = `${newPath}${folder.slice(oldPath.length)}`;
+          copied = (await createDirectoryPath(nativeHandle.handle, target)) && copied;
+        }
+      }
+      for (const file of files) {
+        const target = `${newPath}${file.path.slice(oldPath.length)}`;
+        copied =
+          (await writeFileToDirectory(
+            nativeHandle.handle,
+            target,
+            fileContents[file.id] ?? "",
+          )) && copied;
+      }
+      if (!copied) {
+        files.forEach((file) => markFileAsDraft(file.id));
+        queueNativeOperation({ kind: "folder-rename", oldPath, newPath });
+        return;
+      }
+      if (!(await removeDirectoryFromDirectory(nativeHandle.handle, oldPath))) {
+        files.forEach((file) => markFileAsDraft(file.id));
+        queueNativeOperation({ kind: "folder-rename", oldPath, newPath });
+      } else {
+        setDraftFileIds((current) => {
+          const next = new Set(current);
+          files.forEach((file) => next.delete(file.id));
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error("Unable to move the local folder.", error);
+      files.forEach((file) => markFileAsDraft(file.id));
+      queueNativeOperation({ kind: "folder-rename", oldPath, newPath });
+    }
+  };
+
+  const pasteWorkspaceItem = async (
+    destination = selectedFolder,
+    clipboard = treeClipboard,
+  ) => {
+    if (!clipboard) return;
+    const source = clipboard;
+    const sourceName = source.path.split("/").pop() ?? source.path;
+    const parentPath = destination;
+    const name =
+      source.operation === "copy"
+        ? uniqueCopyName(sourceName, parentPath, source.type === "file")
+        : sourceName;
+    const targetPath = [parentPath, name].filter(Boolean).join("/");
+    if (targetPath === source.path || targetPath.startsWith(`${source.path}/`)) return;
+    if (
+      source.operation === "cut" &&
+      siblingNames(parentPath).some(
+        (sibling) => sibling.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      addToast({ type: "error", title: "An item with that name already exists" });
+      return;
+    }
+    if (source.type === "file") {
+      const file = treeFiles.find((item) => item.path === source.path);
+      if (!file) return;
+      const nextPath = targetPath;
+      if (source.operation === "copy") {
+        await createWorkspaceFile(nextPath, fileContents[file.id] ?? "");
+      } else {
+        moveEditorFile(file.id, nextPath);
+        if (nativeHandle?.kind === "directory") {
+          try {
+            if (
+              !(await writeFileToDirectory(
+                nativeHandle.handle,
+                nextPath,
+                fileContents[file.id] ?? "",
+              ))
+            ) {
+              markFileAsDraft(file.id);
+              queueNativeOperation({ kind: "rename", fileId: file.id, oldPath: source.path, newPath: nextPath });
+            } else {
+              const parts = source.path.split("/").filter(Boolean);
+              const oldParent = await getDirectoryForPath(
+                nativeHandle.handle,
+                parts.slice(0, -1).join("/"),
+                false,
+              );
+              await oldParent.removeEntry(parts[parts.length - 1]!);
+              setDraftFileIds((current) => {
+                const next = new Set(current);
+                next.delete(file.id);
+                return next;
+              });
+            }
+          } catch (error) {
+            console.error("Unable to move the local file.", error);
+            markFileAsDraft(file.id);
+            queueNativeOperation({ kind: "rename", fileId: file.id, oldPath: source.path, newPath: nextPath });
+          }
+        } else if (
+          editorProjectId === "local-folder" ||
+          editorProjectId === "local-file"
+        ) {
+          markFileAsDraft(file.id);
+          queueNativeOperation({ kind: "rename", fileId: file.id, oldPath: source.path, newPath: nextPath });
+        }
+        setTreeClipboard(null);
+      }
+      return;
+    }
+
+    const sourceFiles = treeFiles.filter(
+      (file) => file.path.startsWith(`${source.path}/`),
+    );
+    const sourceFolders = treeFolders.filter(
+      (folder) => folder === source.path || folder.startsWith(`${source.path}/`),
+    );
+    if (source.operation === "cut") {
+      renameEditorFolder(source.path, targetPath);
+      void persistFolderMove(source.path, targetPath, sourceFiles, sourceFolders);
+      setTreeClipboard(null);
+      return;
+    }
+    for (const folder of sourceFolders) {
+      await createWorkspaceFolder(`${targetPath}${folder.slice(source.path.length)}`);
+    }
+    if (sourceFolders.length === 0) await createWorkspaceFolder(targetPath);
+    for (const file of sourceFiles) {
+      const target = `${targetPath}${file.path.slice(source.path.length)}`;
+      await createWorkspaceFile(target, fileContents[file.id] ?? "");
+    }
+  };
+
+  const deleteExplorerFile = async (file: EditorFile) => {
+    const dirty = Boolean(file.isDirty || fileContents[file.id] !== savedFileContents[file.id]);
+    const message = dirty
+      ? `Delete ${file.name}? It has unsaved changes. This cannot be undone.`
+      : `Delete ${file.name}? This cannot be undone.`;
+    if (!(await friendlyConfirm(message))) return;
+    if (nativeHandle?.kind === "directory") {
+      try {
+        if (!(await removeFileFromDirectory(nativeHandle.handle, file.path))) {
+          queueNativeOperation({ kind: "delete", fileId: file.id, path: file.path });
+        }
+      } catch (error) {
+        console.error("Unable to delete the local file.", error);
+        queueNativeOperation({ kind: "delete", fileId: file.id, path: file.path });
+      }
+    } else if (nativeHandle?.kind === "file" || editorProjectId === "local-folder" || editorProjectId === "local-file") {
+      queueNativeOperation({ kind: "delete", fileId: file.id, path: file.path });
+    }
+    await deleteFile(file.id);
+    setDraftFileIds((current) => {
+      const next = new Set(current);
+      next.delete(file.id);
+      return next;
+    });
+    addToast({ type: "success", title: "Deleted" });
+  };
+
+  const deleteExplorerFolder = async (folderPath: string) => {
+    const contents = treeFiles.filter((file) => file.path.startsWith(`${folderPath}/`));
+    const hasDirty = contents.some(
+      (file) => file.isDirty || fileContents[file.id] !== savedFileContents[file.id],
+    );
+    if (
+      !(await friendlyConfirm(
+        hasDirty
+          ? `Delete ${folderPath.split("/").pop()} and its contents? Some files have unsaved changes. This cannot be undone.`
+          : `Delete ${folderPath.split("/").pop()} and its contents? This cannot be undone.`,
+      ))
+    ) return;
+    if (nativeHandle?.kind === "directory") {
+      try {
+        if (!(await removeDirectoryFromDirectory(nativeHandle.handle, folderPath))) {
+          queueNativeOperation({ kind: "folder-delete", path: folderPath });
+        }
+      } catch (error) {
+        console.error("Unable to delete the local folder.", error);
+        queueNativeOperation({ kind: "folder-delete", path: folderPath });
+      }
+    } else if (nativeHandle?.kind === "file" || editorProjectId === "local-folder" || editorProjectId === "local-file") {
+      queueNativeOperation({ kind: "folder-delete", path: folderPath });
+    }
+    await deleteEditorFolder(folderPath);
+    setDraftFileIds((current) => {
+      const next = new Set(current);
+      contents.forEach((file) => next.delete(file.id));
+      return next;
+    });
+    setSelectedFolder((path) =>
+      path === folderPath || path.startsWith(`${folderPath}/`)
+        ? folderPath.split("/").slice(0, -1).join("/")
+        : path,
+    );
+    addToast({ type: "success", title: "Deleted" });
+  };
+
   const queueNativeOperation = (operation: PendingNativeOperation) => {
     setPendingNativeOperations((pending) => {
       const existingIndex = pending.findIndex((item) =>
@@ -1684,6 +2067,44 @@ export const EditorWorkbench: React.FC = () => {
     }
   };
 
+  const commitFolderRename = async (
+    oldPath: string,
+    requestedName: string,
+  ) => {
+    const name = requestedName.trim();
+    const parentPath = oldPath.split("/").slice(0, -1).join("/");
+    const currentName = oldPath.split("/").pop() ?? oldPath;
+    const validationError = validateEntryName(
+      name,
+      siblingNames(parentPath),
+      currentName,
+    );
+    if (validationError) {
+      setRenameError(validationError);
+      return;
+    }
+    setRenameError("");
+    if (name === currentName) {
+      setRenamingFolderPath(null);
+      return;
+    }
+    const newPath = [parentPath, name].filter(Boolean).join("/");
+    const descendants = treeFiles.filter((file) =>
+      file.path.startsWith(`${oldPath}/`),
+    );
+    const folders = treeFolders.filter(
+      (folder) => folder === oldPath || folder.startsWith(`${oldPath}/`),
+    );
+    renameEditorFolder(oldPath, newPath);
+    setSelectedFolder((path) =>
+      path === oldPath || path.startsWith(`${oldPath}/`)
+        ? `${newPath}${path.slice(oldPath.length)}`
+        : path,
+    );
+    setRenamingFolderPath(null);
+    await persistFolderMove(oldPath, newPath, descendants, folders);
+  };
+
   const renderExplorerContents = (parentPath = "", depth = 0) => {
     if (parentPath && collapsedFolders.has(parentPath)) return null;
 
@@ -1705,6 +2126,35 @@ export const EditorWorkbench: React.FC = () => {
               <div
                 className={`flex items-center rounded transition-colors ${selectedFolder === folderPath ? "bg-ide-surface-hover-strong text-ide-text-strong" : "text-ide-muted hover:bg-ide-surface hover:text-ide-text-strong"}`}
                 style={{ paddingLeft: `${depth * 12}px` }}
+                tabIndex={0}
+                role="treeitem"
+                aria-selected={selectedFolder === folderPath}
+                aria-expanded={!isCollapsed}
+                onContextMenu={(event) =>
+                  openExplorerMenu(event, "folder", { path: folderPath })
+                }
+                onKeyDown={(event) => {
+                  if (isTypingTarget(event.target)) return;
+                  if (event.key === "F2") {
+                    event.preventDefault();
+                    setRenameValue(folderName ?? "");
+                    setRenameError("");
+                    setRenamingFolderPath(folderPath);
+                  } else if (event.key === "Delete") {
+                    event.preventDefault();
+                    void deleteExplorerFolder(folderPath);
+                  } else if (event.ctrlKey && event.key.toLowerCase() === "c") {
+                    event.preventDefault();
+                    setTreeClipboard({ type: "folder", path: folderPath, operation: "copy" });
+                  } else if (event.ctrlKey && event.key.toLowerCase() === "x") {
+                    event.preventDefault();
+                    setTreeClipboard({ type: "folder", path: folderPath, operation: "cut" });
+                  } else if (event.ctrlKey && event.key.toLowerCase() === "v") {
+                    event.preventDefault();
+                    setSelectedFolder(folderPath);
+                    void pasteWorkspaceItem(folderPath);
+                  }
+                }}
               >
                 <button
                   type="button"
@@ -1724,15 +2174,49 @@ export const EditorWorkbench: React.FC = () => {
                     className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "" : "rotate-90"}`}
                   />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedFolder(folderPath)}
-                  className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
-                  title={folderPath}
-                >
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-ide-warm-accent" />
-                  <span className="truncate">{folderName}</span>
-                </button>
+                {renamingFolderPath === folderPath ? (
+                  <div className="min-w-0 flex-1 py-1.5 pr-2">
+                    <div className="flex items-center gap-2">
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-ide-warm-accent" />
+                      <input
+                        autoFocus
+                        aria-label={`Rename ${folderName}`}
+                        className="ide-input min-w-0 w-full py-0"
+                        value={renameValue}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          setRenameValue(event.target.value);
+                          setRenameError("");
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void commitFolderRename(folderPath, renameValue);
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            setRenameError("");
+                            setRenamingFolderPath(null);
+                          }
+                        }}
+                      />
+                    </div>
+                    {renameError && (
+                      <span role="alert" className="block text-[9px] text-ide-danger">
+                        {renameError}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedFolder(folderPath)}
+                    className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
+                    title={folderPath}
+                  >
+                    <Folder className="h-3.5 w-3.5 shrink-0 text-ide-warm-accent" />
+                    <span className="truncate">{folderName}</span>
+                  </button>
+                )}
               </div>
               {renderExplorerContents(folderPath, depth + 1)}
             </React.Fragment>
@@ -1744,8 +2228,35 @@ export const EditorWorkbench: React.FC = () => {
             className={`group flex items-center justify-between rounded py-1.5 pr-2 text-left transition-colors cursor-pointer ${activeFile?.id === file.id ? "editor-explorer-active" : "text-ide-muted hover:bg-ide-surface hover:text-ide-text-strong"}`}
             style={{ paddingLeft: `${depth * 12 + 24}px` }}
             onClick={() => openFileInEditor(file)}
+            tabIndex={0}
+            role="treeitem"
+            aria-selected={activeFile?.id === file.id}
+            onContextMenu={(event) =>
+              openExplorerMenu(event, "file", { fileId: file.id })
+            }
+            onKeyDown={(event) => {
+              if (isTypingTarget(event.target)) return;
+              if (event.key === "F2") {
+                event.preventDefault();
+                setRenameValue(file.name);
+                setRenameError("");
+                setRenamingFileId(file.id);
+              } else if (event.key === "Delete") {
+                event.preventDefault();
+                void deleteExplorerFile(file);
+              } else if (event.ctrlKey && event.key.toLowerCase() === "c") {
+                event.preventDefault();
+                setTreeClipboard({ type: "file", path: file.path, operation: "copy" });
+              } else if (event.ctrlKey && event.key.toLowerCase() === "x") {
+                event.preventDefault();
+                setTreeClipboard({ type: "file", path: file.path, operation: "cut" });
+              } else if (event.ctrlKey && event.key.toLowerCase() === "v") {
+                event.preventDefault();
+                void pasteWorkspaceItem(file.path.split("/").slice(0, -1).join("/"));
+              }
+            }}
           >
-            <div className="flex min-w-0 items-center gap-2 truncate">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               <span
                 className={`shrink-0 text-[10px] px-1 rounded font-bold uppercase ${
                   file.iconType === "ts"
@@ -1766,14 +2277,23 @@ export const EditorWorkbench: React.FC = () => {
                     aria-label={`Rename ${file.name}`}
                     className="ide-input min-w-0 w-full py-0"
                     value={renameValue}
+                    onFocus={(event) => {
+                      const dot = file.name.lastIndexOf(".");
+                      event.currentTarget.setSelectionRange(
+                        0,
+                        dot > 0 ? dot : file.name.length,
+                      );
+                    }}
                     onClick={(event) => event.stopPropagation()}
                     onChange={(event) => {
                       setRenameValue(event.target.value);
                       setRenameError("");
                     }}
-                    onBlur={() => void commitRename(file, renameValue)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void commitRename(file, renameValue);
+                      }
                       if (event.key === "Escape") {
                         event.preventDefault();
                         setRenameValue(file.name);
@@ -1783,13 +2303,13 @@ export const EditorWorkbench: React.FC = () => {
                     }}
                   />
                   {renameError && (
-                    <span className="block text-[9px] text-ide-danger">
+                    <span role="alert" className="block text-[9px] text-ide-danger">
                       {renameError}
                     </span>
                   )}
                 </div>
               ) : (
-                <span className="truncate" title={file.name}>{file.name}</span>
+                <span className="min-w-0 flex-1 truncate" title={file.name}>{file.name}</span>
               )}
               {file.isDirty && (
                 <span
@@ -1809,53 +2329,7 @@ export const EditorWorkbench: React.FC = () => {
               aria-label={`Delete ${file.name}`}
               onClick={(event) => {
                 event.stopPropagation();
-                void (async () => {
-                  if (
-                    await friendlyConfirm(
-                      `Delete ${file.name}? This cannot be undone.`,
-                    )
-                  ) {
-                    try {
-                      if (nativeHandle?.kind === "directory") {
-                        if (!(await removeFileFromDirectory(nativeHandle.handle, file.path))) {
-                          queueNativeOperation({
-                            kind: "delete",
-                            fileId: file.id,
-                            path: file.path,
-                          });
-                        }
-                      } else if (nativeHandle?.kind === "file") {
-                        queueNativeOperation({
-                          kind: "delete",
-                          fileId: file.id,
-                          path: file.path,
-                        });
-                      } else if (
-                        editorProjectId === "local-folder" ||
-                        editorProjectId === "local-file"
-                      ) {
-                        queueNativeOperation({
-                          kind: "delete",
-                          fileId: file.id,
-                          path: file.path,
-                        });
-                      }
-                    } catch (error) {
-                      console.error("Unable to delete the local file.", error);
-                      queueNativeOperation({
-                        kind: "delete",
-                        fileId: file.id,
-                        path: file.path,
-                      });
-                    }
-                    await deleteFile(file.id);
-                    setDraftFileIds((current) => {
-                      const next = new Set(current);
-                      next.delete(file.id);
-                      return next;
-                    });
-                  }
-                })();
+                void deleteExplorerFile(file);
               }}
               className="shrink-0 rounded p-0.5 opacity-0 hover:text-ide-danger group-hover:opacity-100"
               title="Delete file"
@@ -2288,7 +2762,43 @@ export const EditorWorkbench: React.FC = () => {
             if (!(await removeFileFromDirectory(grantedDirectory, operation.path))) {
               remaining.push(operation);
             }
-          } else {
+          } else if (operation.kind === "folder-delete") {
+            if (!(await removeDirectoryFromDirectory(grantedDirectory, operation.path))) {
+              remaining.push(operation);
+            }
+          } else if (operation.kind === "folder-rename") {
+            let copied = await createDirectoryPath(grantedDirectory, operation.newPath);
+            for (const folderPath of treeFolders.filter(
+              (path) => path === operation.newPath || path.startsWith(`${operation.newPath}/`),
+            )) {
+              copied =
+                (await createDirectoryPath(grantedDirectory, folderPath)) && copied;
+            }
+            for (const file of treeFiles.filter(
+              (item) => item.path.startsWith(`${operation.newPath}/`),
+            )) {
+              const content = fileContents[file.id] ?? "";
+              copied =
+                (await writeFileToDirectory(grantedDirectory, file.path, content)) &&
+                copied;
+            }
+            if (!copied) {
+              remaining.push(operation);
+            } else if (
+              !(await removeDirectoryFromDirectory(grantedDirectory, operation.oldPath))
+            ) {
+              remaining.push(operation);
+            } else {
+              const movedIds = treeFiles
+                .filter((file) => file.path.startsWith(`${operation.newPath}/`))
+                .map((file) => file.id);
+              setDraftFileIds((current) => {
+                const next = new Set(current);
+                movedIds.forEach((id) => next.delete(id));
+                return next;
+              });
+            }
+          } else if (operation.kind === "rename") {
             const file = treeFiles.find((item) => item.id === operation.fileId);
             if (!file) continue;
             const content = fileContents[file.id] ?? "";
@@ -2775,10 +3285,15 @@ export const EditorWorkbench: React.FC = () => {
             <header className="editor-welcome-header flex flex-col gap-2 border-b border-ide-border-subtle pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5 lg:pb-7">
               <div className="flex min-w-0 items-center gap-4">
                 <div
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-[0_10px_26px_color-mix(in_srgb,var(--ide-color-accent)_20%,transparent),inset_0_1px_0_color-mix(in_srgb,var(--ide-color-text-strong)_35%,transparent)] lg:h-14 lg:w-14"
-                  style={{ backgroundColor: theme.ui.accent }}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-[#0D1117] shadow-[0_10px_26px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.14)] lg:h-14 lg:w-14"
                 >
-                  <Code2 className="h-7 w-7 text-ide-accent-fg" />
+                  <Image
+                    src="/devpulse-synapse-mark.svg"
+                    alt="Devpulse logo"
+                    width={48}
+                    height={48}
+                    className="h-10 w-10 lg:h-12 lg:w-12"
+                  />
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -3063,7 +3578,7 @@ export const EditorWorkbench: React.FC = () => {
           onClose={() => setIsTerminalOpen(false)}
           onFocusChange={setIsTerminalFocused}
           terminalTheme={theme.terminal}
-          projectName={loadedProjectName}
+          projectName={terminalWorkingFolder || loadedProjectName}
         />
       </div>
     );
@@ -3368,6 +3883,11 @@ export const EditorWorkbench: React.FC = () => {
         {isFileTreeOpen && (
           <div
             className="editor-explorer-pane relative bg-ide-sidebar-bg border-r border-ide-elevated flex flex-col justify-between shrink-0 font-mono text-xs overflow-y-auto"
+            onContextMenu={(event) => {
+              if (!(event.target as HTMLElement).closest('[role="treeitem"]')) {
+                openExplorerMenu(event, "root");
+              }
+            }}
           >
             {searchMode === "workspace" && (
               <section className="absolute inset-0 z-10 flex flex-col overflow-hidden border-r border-[color-mix(in_srgb,var(--ide-color-secondary)_15%,transparent)] bg-gradient-to-b from-ide-surface-raised via-ide-tab-inactive to-ide-panel shadow-[18px_0_45px_color-mix(in_srgb,var(--ide-color-shadow-color)_80%,transparent),inset_-1px_0_0_color-mix(in_srgb,var(--ide-color-secondary)_8%,transparent)]">
@@ -3486,7 +4006,7 @@ export const EditorWorkbench: React.FC = () => {
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded bg-ide-accent shrink-0" />
                   <span
-                    className="min-w-0 flex-1 truncate font-bold text-ide-text-strong text-xs"
+                    className="block min-w-0 flex-1 truncate font-bold text-ide-text-strong text-xs"
                     title={loadedProjectName || "Local workspace"}
                   >
                     {loadedProjectName || "Local workspace"}
@@ -3522,7 +4042,14 @@ export const EditorWorkbench: React.FC = () => {
               </div>
 
               {/* Dynamic File List */}
-              <div className="editor-explorer-tree space-y-1">
+              <div
+                className="editor-explorer-tree space-y-1"
+                onContextMenu={(event) => {
+                  if (event.target === event.currentTarget) {
+                    openExplorerMenu(event, "root");
+                  }
+                }}
+              >
                 <div className="flex items-center justify-between text-[10px] text-ide-text-dim uppercase tracking-wider px-1">
                   <span>WORKSPACE FILES ({treeFiles.length})</span>
                 </div>
@@ -3540,6 +4067,15 @@ export const EditorWorkbench: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedFolder("")}
+                  onContextMenu={(event) => openExplorerMenu(event, "root")}
+                  onKeyDown={(event) => {
+                    if (event.key === "F2" || event.key === "Delete") {
+                      event.preventDefault();
+                    } else if (event.ctrlKey && event.key.toLowerCase() === "v") {
+                      event.preventDefault();
+                      void pasteWorkspaceItem("");
+                    }
+                  }}
                   className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors ${selectedFolder === "" ? "bg-ide-surface-hover-strong text-ide-text-strong" : "text-ide-text-tertiary hover:bg-ide-surface hover:text-ide-text-strong"}`}
                 >
                   <Folder className="h-3.5 w-3.5 text-ide-accent" />
@@ -4224,7 +4760,7 @@ export const EditorWorkbench: React.FC = () => {
             onClose={() => setIsTerminalOpen(false)}
             onFocusChange={setIsTerminalFocused}
             terminalTheme={theme.terminal}
-            projectName={loadedProjectName}
+            projectName={terminalWorkingFolder || loadedProjectName}
           />
 
           {/* Bottom Editor Status Bar */}
@@ -4561,6 +5097,164 @@ export const EditorWorkbench: React.FC = () => {
           </div>
         )}
       </div>
+      {explorerMenu && (() => {
+        const targetFile = explorerMenu.fileId
+          ? treeFiles.find((file) => file.id === explorerMenu.fileId)
+          : undefined;
+        const targetPath = targetFile?.path ?? explorerMenu.path ?? "";
+        const targetName = targetPath.split("/").pop() ?? "";
+        const parentPath = targetPath.split("/").slice(0, -1).join("/");
+        const menuItem = (
+          label: string,
+          action: () => void,
+          shortcut?: string,
+        ) => ({ label, action, shortcut });
+        const separator = { separator: true as const };
+        const items = explorerMenu.type === "root"
+          ? [
+              menuItem("New File", () => {
+                setSelectedFolder("");
+                setNewFileNameInput("");
+                setNewFileNameError("");
+                setIsCreatingFile(true);
+              }),
+              menuItem("New Folder", () => {
+                setSelectedFolder("");
+                setNewFolderNameInput("");
+                setNewFolderNameError("");
+                setIsCreatingFolder(true);
+              }),
+              separator,
+              menuItem("Paste", () => void pasteWorkspaceItem(""), "Ctrl+V"),
+            ]
+          : explorerMenu.type === "folder"
+            ? [
+                menuItem("New File", () => {
+                  setSelectedFolder(targetPath);
+                  setNewFileNameInput("");
+                  setNewFileNameError("");
+                  setIsCreatingFile(true);
+                }),
+                menuItem("New Folder", () => {
+                  setSelectedFolder(targetPath);
+                  setNewFolderNameInput("");
+                  setNewFolderNameError("");
+                  setIsCreatingFolder(true);
+                }),
+                separator,
+                menuItem("Open in Integrated Terminal", () => {
+                  setTerminalWorkingFolder(targetPath);
+                  setIsTerminalOpen(true);
+                }),
+                separator,
+                menuItem("Cut", () => setTreeClipboard({ type: "folder", path: targetPath, operation: "cut" }), "Ctrl+X"),
+                menuItem("Copy", () => setTreeClipboard({ type: "folder", path: targetPath, operation: "copy" }), "Ctrl+C"),
+                menuItem("Paste", () => {
+                  setSelectedFolder(targetPath);
+                  void pasteWorkspaceItem(targetPath);
+                }, "Ctrl+V"),
+                separator,
+                menuItem("Copy Path", () => void copyExplorerPath(targetPath, false)),
+                menuItem("Copy Relative Path", () => void copyExplorerPath(targetPath, true)),
+                separator,
+                menuItem("Rename", () => {
+                  setSelectedFolder(parentPath);
+                  setRenameValue(targetName);
+                  setRenameError("");
+                  setRenamingFolderPath(targetPath);
+                }, "F2"),
+                menuItem("Delete", () => void deleteExplorerFolder(targetPath), "Del"),
+              ]
+            : [
+                menuItem("Open", () => targetFile && openFileInEditor(targetFile)),
+                menuItem("Open to the Side", () => {
+                  if (targetFile) {
+                    openFileInEditor(targetFile);
+                    setIsSplitEditor(true);
+                  }
+                }),
+                separator,
+                menuItem("Cut", () => setTreeClipboard({ type: "file", path: targetPath, operation: "cut" }), "Ctrl+X"),
+                menuItem("Copy", () => setTreeClipboard({ type: "file", path: targetPath, operation: "copy" }), "Ctrl+C"),
+                menuItem("Duplicate", () => {
+                  void pasteWorkspaceItem(parentPath, {
+                    type: "file",
+                    path: targetPath,
+                    operation: "copy",
+                  });
+                }),
+                separator,
+                menuItem("Copy Path", () => void copyExplorerPath(targetPath, false)),
+                menuItem("Copy Relative Path", () => void copyExplorerPath(targetPath, true)),
+                separator,
+                menuItem("Rename", () => {
+                  if (targetFile) {
+                    setRenameValue(targetFile.name);
+                    setRenameError("");
+                    setRenamingFileId(targetFile.id);
+                    setSelectedFolder(parentPath);
+                  }
+                }, "F2"),
+                menuItem("Delete", () => targetFile && void deleteExplorerFile(targetFile), "Del"),
+              ];
+        return (
+          <div
+            ref={explorerMenuRef}
+            role="menu"
+            aria-label="Explorer actions"
+            className="fixed z-[120] min-w-56 rounded-lg border border-ide-border-strong bg-ide-panel p-1.5 text-xs text-ide-text-strong shadow-[0_12px_34px_color-mix(in_srgb,var(--ide-color-shadow-color)_32%,transparent)]"
+            style={{ left: explorerMenu.x, top: explorerMenu.y }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setExplorerMenu(null);
+                return;
+              }
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const buttons = Array.from(
+                explorerMenuRef.current?.querySelectorAll<HTMLButtonElement>(
+                  'button[role="menuitem"]:not(:disabled)',
+                ) ?? [],
+              );
+              if (buttons.length === 0) return;
+              const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+              const next = event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? buttons.length - 1
+                  : (current + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+              buttons[next]?.focus();
+            }}
+          >
+            {items.map((item, index) =>
+              "separator" in item ? (
+                <div
+                  key={`separator-${index}`}
+                  role="separator"
+                  className="my-1 border-t border-ide-border-subtle"
+                />
+              ) : (
+                <button
+                  key={item.label}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    item.action();
+                    setExplorerMenu(null);
+                  }}
+                  className="flex w-full items-center justify-between gap-6 rounded px-2.5 py-1.5 text-left text-ide-text-secondary transition-colors hover:bg-ide-surface-hover hover:text-ide-text-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ide-focus-ring"
+                >
+                  <span>{item.label}</span>
+                  {item.shortcut && (
+                    <span className="shrink-0 text-[10px] text-ide-muted">{item.shortcut}</span>
+                  )}
+                </button>
+              ),
+            )}
+          </div>
+        );
+      })()}
       {tabMenu && (
         <div
           className="editor-tab-menu"
@@ -4593,16 +5287,14 @@ export const EditorWorkbench: React.FC = () => {
               action: () => {
                 const file = openFiles.find((item) => item.id === tabMenu.fileId);
                 if (!file) return;
-                void navigator.clipboard
-                  .writeText(file.path)
-                  .then(() => addToast({ type: "success", title: "Path copied" }))
-                  .catch((error: unknown) =>
-                    addToast({
-                      type: "error",
-                      title: "Could not copy path",
-                      description: error instanceof Error ? error.message : "Clipboard access denied.",
-                    }),
-                  );
+                void copyExplorerPath(file.path, false);
+              },
+            },
+            {
+              label: "Copy relative path",
+              action: () => {
+                const file = openFiles.find((item) => item.id === tabMenu.fileId);
+                if (file) void copyExplorerPath(file.path, true);
               },
             },
             {
@@ -4622,16 +5314,12 @@ export const EditorWorkbench: React.FC = () => {
               action: () => {
                 const file = openFiles.find((item) => item.id === tabMenu.fileId);
                 if (!file) return;
-                const extension = file.name.includes(".")
-                  ? `.${file.name.split(".").pop()}`
-                  : "";
-                const baseName = extension ? file.name.slice(0, -extension.length) : file.name;
                 const parent = file.path.split("/").slice(0, -1).join("/");
-                void createNewFile(
-                  `${baseName}.copy${extension}`,
-                  [parent, `${baseName}.copy${extension}`].filter(Boolean).join("/"),
-                  fileContents[file.id] || "",
-                );
+                void pasteWorkspaceItem(parent, {
+                  type: "file",
+                  path: file.path,
+                  operation: "copy",
+                });
               },
             },
           ].map((item) => (
