@@ -335,6 +335,10 @@ const INITIAL_REPOSITORIES: Repository[] = [
   },
 ];
 
+const REPO_SEED_DATA: Record<string, Partial<Repository>> = Object.fromEntries(
+  INITIAL_REPOSITORIES.map((repository) => [repository.name, repository]),
+);
+
 const INITIAL_WORKSPACES: WorkspaceDevbox[] = [
   {
     id: "ws-1",
@@ -950,21 +954,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       .from(schema.projects)
       .where(eq(schema.projects.workspaceId, workspaceMemberships[0]!.workspaceId));
 
-    const repos: Repository[] = rows.map((project) => ({
-      id: project.id,
-      name: project.name,
-      description: project.description || "Browser-local project",
-      language: project.language ?? "TypeScript",
-      languageColor: getLanguageColor(project.language),
-      stars: project.stars ?? 0,
-      forks: project.forks ?? 0,
-      branch: project.defaultBranch ?? "main",
-      lastCommit: "Initial commit",
-      updatedAt: project.updatedAt?.toISOString() ?? new Date().toISOString(),
-      isStarred: project.isStarred ?? false,
-      deployStatus: (project.deployStatus as Repository["deployStatus"]) ?? "none",
-      devboxReady: project.devboxReady ?? true,
-    }));
+    const repos: Repository[] = rows.map((project) => {
+      const seed = REPO_SEED_DATA[project.name];
+      const language = project.language === "TypeScript" && seed?.language
+        ? seed.language
+        : project.language ?? "TypeScript";
+
+      return {
+        id: project.id,
+        name: project.name,
+        description: project.description || seed?.description || "Browser-local project",
+        language,
+        languageColor: getLanguageColor(language),
+        stars: project.stars || seed?.stars || 0,
+        forks: project.forks || seed?.forks || 0,
+        branch: project.defaultBranch === "main" && seed?.branch
+          ? seed.branch
+          : project.defaultBranch ?? "main",
+        lastCommit: seed?.lastCommit ?? "Initial commit",
+        updatedAt: seed?.updatedAt ?? project.updatedAt?.toISOString() ?? new Date().toISOString(),
+        isStarred: project.isStarred,
+        deployStatus: (project.deployStatus === "none" && seed?.deployStatus
+          ? seed.deployStatus
+          : project.deployStatus as Repository["deployStatus"]) ?? "none",
+        devboxReady: project.devboxReady ?? seed?.devboxReady ?? true,
+      };
+    });
 
     setRepositories(repos);
   };

@@ -275,7 +275,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
       label: "Source Control",
       icon: GitBranch,
       badge: "main",
-      badgeColor: "bg-[#0DF5C4]/15 text-[#0DF5C4] border-[#0DF5C4]/30",
+      badgeColor: "bg-[var(--secondary)]/15 text-[var(--secondary)] border-[var(--secondary)]/30",
       action: () => setPage("repositories"),
     },
     {
@@ -306,9 +306,9 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
   ];
 
   return (
-    <div className="min-h-screen bg-[#09090e] text-[#ededf5] flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-[var(--shell-bg)] text-[var(--text)] flex flex-col font-sans select-none">
       {/* Top Navigation Bar */}
-      <header className="h-14 border-b border-[#1f1f2e] bg-[#0c0c13] px-4 flex items-center justify-between z-30 sticky top-0 font-sans">
+      <header className="h-14 border-b border-[var(--border-subtle)] bg-[var(--topbar-bg)] px-4 flex items-center justify-between z-30 sticky top-0 font-sans">
         {/* Left: Brand + Info String matching screenshots */}
         <div className="flex items-center gap-3">
           <button
@@ -318,35 +318,35 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
             className="group flex items-center gap-2"
           >
             <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center shadow-md transition-transform group-hover:scale-105 text-[#09090e]"
+              className="w-7 h-7 rounded-lg flex items-center justify-center shadow-md transition-transform group-hover:scale-105 text-[var(--accent-fg)]"
               style={{ backgroundColor: theme.primary }}
             >
               <Layers className="w-4 h-4" />
             </div>
-            <span className="font-bold text-white text-sm tracking-tight hidden sm:inline">
+            <span className="font-bold text-[var(--text)] text-sm tracking-tight hidden sm:inline">
               Devpulse
             </span>
           </button>
 
           {/* Token String displayed in header (Screenshots 3 & 4) */}
-          <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#13131e] border border-[#222234] text-[11px] font-mono text-[#8b8ba8]">
+          <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[var(--surface-toolbar)] border border-[var(--border)] text-[11px] font-mono text-[var(--muted)]">
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{ backgroundColor: theme.primary }}
             />
             <span>
               Primary color:{" "}
-              <strong className="text-white">{theme.primary}</strong>
+              <strong className="text-[var(--text)]">{theme.primary}</strong>
             </span>
             <span>
-              - Font: <strong className="text-white">{theme.font}</strong>
+              - Font: <strong className="text-[var(--text)]">{theme.font}</strong>
             </span>
             <span>
-              - Mode: <strong className="text-white">{theme.mode}</strong>
+              - Mode: <strong className="text-[var(--text)]">{theme.mode}</strong>
             </span>
             <span>
               - Roundness:{" "}
-              <strong className="text-white">{theme.roundness}</strong>
+              <strong className="text-[var(--text)]">{theme.roundness}</strong>
             </span>
           </div>
 
@@ -422,7 +422,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
           <button
             onClick={() => setPage("theme")}
             title="Theme Palette"
-            className="p-1.5 rounded-lg bg-[#141420] hover:bg-[#1e1e2d] border border-[#242436] text-[#9a9ab8] hover:text-white transition-colors flex items-center gap-1.5 text-xs font-mono"
+            className="p-1.5 rounded-lg bg-[var(--surface-control)] hover:bg-[var(--surface-control-hover)] border border-[var(--border-control)] text-[var(--muted)] hover:text-[var(--text)] transition-colors flex items-center gap-1.5 text-xs font-mono"
           >
             <Palette className="w-3.5 h-3.5" style={{ color: theme.primary }} />
             <span className="hidden md:inline">Theme</span>
@@ -431,11 +431,11 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
           {/* Search or jump to... Ctrl+K */}
           <button
             onClick={() => setIsCommandPaletteOpen(true)}
-            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#13131e] hover:bg-[#1b1b2a] border border-[#222234] text-xs text-[#7c7c98] transition-colors font-mono"
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface-toolbar)] hover:bg-[var(--surface-hover)] border border-[var(--border)] text-xs text-[var(--muted)] transition-colors font-mono"
           >
             <Search className="w-3.5 h-3.5" />
             <span>Search or jump to...</span>
-            <kbd className="px-1.5 py-0.5 rounded bg-[#1c1c2b] text-[10px] text-[#9b9bb6] border border-[#2c2c40]">
+            <kbd className="px-1.5 py-0.5 rounded bg-[var(--surface-raised)] text-[10px] text-[var(--text-secondary)] border border-[var(--border-control)]">
               Ctrl+K
             </kbd>
           </button>
@@ -578,13 +578,13 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
 
         {/* 1. WORKBENCH MODE SIDEBAR (Matches Screenshot 1 & Screenshot 3 Left Sidebar) */}
         {isWorkbenchMode ? (
-          <aside className="w-56 bg-[#0c0c14] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
+          <aside className="w-56 bg-[var(--sidebar-bg)] border-r border-[var(--border-subtle)] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
             <div className="p-3 space-y-5">
               {/* Top Header */}
               <div>
-                <div className="flex items-center justify-between px-2 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
+                <div className="flex items-center justify-between px-2 pb-2 text-[10px] font-mono uppercase tracking-wider text-[var(--subtle)]">
                   <span>WORKBENCH</span>
-                  <span className="cursor-pointer hover:text-white">•••</span>
+                  <span className="cursor-pointer hover:text-[var(--text)]">•••</span>
                 </div>
 
                 <nav className="space-y-1">
@@ -601,8 +601,8 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                         }}
                         className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
                           isSelected
-                            ? "text-[#09090e] font-bold shadow-md"
-                            : "text-[#8e8ea6] hover:text-[#d0d0e2] hover:bg-[#141422]"
+                            ? "text-[var(--accent-fg)] font-bold shadow-md"
+                            : "text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--hover)]"
                         }`}
                         style={
                           isSelected ? { backgroundColor: theme.primary } : {}
@@ -615,14 +615,14 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
 
                         {item.badge && (
                           <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${item.badgeColor || (isSelected ? "bg-black/20 text-[#09090e]" : "bg-[#181826] text-[#71718c]")}`}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${item.badgeColor || (isSelected ? "bg-[var(--surface-hover)] text-[var(--text)]" : "bg-[var(--surface-card-alt)] text-[var(--muted)]")}`}
                           >
                             {item.badge}
                           </span>
                         )}
 
                         {item.dot && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
                         )}
                       </button>
                     );
@@ -633,7 +633,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
               {/* Return to Platform Link */}
               <button
                 onClick={() => setPage("workspaces")}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-mono text-[#787896] hover:text-white hover:bg-[#151522] transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-mono text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 <span>Exit Workbench</span>
@@ -641,45 +641,45 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
             </div>
 
             {/* Bottom Telemetry Gauges (Pixel-Perfect to Screenshot 1 & 3) */}
-            <div className="p-3 border-t border-[#1a1a28] space-y-3 font-mono text-xs">
-              <div className="text-[10px] text-[#63637e] uppercase tracking-wider">
+            <div className="p-3 border-t border-[var(--border-subtle)] space-y-3 font-mono text-xs">
+              <div className="text-[10px] text-[var(--subtle)] uppercase tracking-wider">
                 TELEMETRY
               </div>
 
               {/* CPU gauge */}
               <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-[#8e8ea6]">
+                <div className="flex justify-between text-[11px] text-[var(--text-secondary)]">
                   <span>CPU (8 Cores)</span>
-                  <span className="text-[#0DF5C4] font-bold">18.4%</span>
+                  <span className="text-[var(--success)] font-bold">18.4%</span>
                 </div>
-                <div className="h-1.5 w-full bg-[#161624] rounded-full overflow-hidden">
-                  <div className="h-full bg-[#0DF5C4] rounded-full w-[18.4%]" />
+                <div className="h-1.5 w-full bg-[var(--surface-control)] rounded-full overflow-hidden">
+                  <div className="h-full bg-[var(--success)] rounded-full w-[18.4%]" />
                 </div>
               </div>
 
               {/* Memory gauge */}
               <div className="space-y-1">
-                <div className="flex justify-between text-[11px] text-[#8e8ea6]">
+                <div className="flex justify-between text-[11px] text-[var(--text-secondary)]">
                   <span>Memory</span>
-                  <span className="text-white font-bold">1.42 / 4 GB</span>
+                  <span className="text-[var(--text)] font-bold">1.42 / 4 GB</span>
                 </div>
-                <div className="h-1.5 w-full bg-[#161624] rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-[#6C63FF] to-[#8b82ff] rounded-full w-[35.5%]" />
+                <div className="h-1.5 w-full bg-[var(--surface-control)] rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-[var(--accent)] to-[var(--accent-hover)] rounded-full w-[35.5%]" />
                 </div>
               </div>
 
               {/* Settings Footer */}
-              <div className="pt-2 border-t border-[#1a1a28] flex items-center justify-between text-[#787896]">
+              <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-[var(--muted)]">
                 <button
                   onClick={() => setPage("theme")}
-                  className="hover:text-white flex items-center gap-1.5 text-xs"
+                  className="hover:text-[var(--text)] flex items-center gap-1.5 text-xs"
                 >
                   <Palette className="w-3.5 h-3.5" />
                   <span>Theme</span>
                 </button>
                 <div className="flex items-center gap-2">
-                  <Split className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
-                  <Columns className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
+                  <Split className="w-3.5 h-3.5 hover:text-[var(--text)] cursor-pointer" />
+                  <Columns className="w-3.5 h-3.5 hover:text-[var(--text)] cursor-pointer" />
                 </div>
               </div>
             </div>
@@ -694,11 +694,11 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
           </aside>
         ) : (
           /* 2. PLATFORM MODE SIDEBAR (Screenshots 3, 4, 5) */
-          <aside className="w-56 bg-[#0b0b12] border-r border-[#1e1e2d] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
+          <aside className="w-56 bg-[var(--sidebar-bg)] border-r border-[var(--border-subtle)] flex flex-col justify-between shrink-0 hidden md:flex font-sans">
             <div className="p-3 space-y-6">
               {/* Platform Section */}
               <div>
-                <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
+                <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[var(--subtle)]">
                   PLATFORM
                 </div>
                 <nav className="space-y-1">
@@ -715,13 +715,13 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
 
               {/* System Section */}
               <div>
-                <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[#63637e]">
+                <div className="px-3 pb-2 text-[10px] font-mono uppercase tracking-wider text-[var(--subtle)]">
                   SYSTEM
                 </div>
                 <div className="space-y-1">
                   <button
                     onClick={() => setPage("theme")}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[#8c8ca5] hover:text-[#d0d0e2] hover:bg-[#141420] transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text)] hover:bg-[var(--hover)] transition-colors"
                   >
                     <Palette className="w-4 h-4" />
                     <span>Theme</span>
@@ -729,13 +729,13 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
                 </div>
 
                 {/* Memory usage bar */}
-                <div className="mt-4 px-3 py-2 rounded-xl bg-[#12121d] border border-[#202030] text-[11px] font-mono">
-                  <div className="flex justify-between text-[#8b8ba8] mb-1.5">
+                <div className="mt-4 px-3 py-2 rounded-xl bg-[var(--sidebar-surface)] border border-[var(--border)] text-[11px] font-mono">
+                  <div className="flex justify-between text-[var(--muted)] mb-1.5">
                     <span>Memory usage</span>
-                    <span className="text-white font-bold">64%</span>
+                    <span className="text-[var(--text)] font-bold">64%</span>
                   </div>
-                  <div className="h-1.5 w-full bg-[#1b1b2a] rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-[#0DF5C4] to-[#6C63FF] rounded-full w-[64%]" />
+                  <div className="h-1.5 w-full bg-[var(--surface-control)] rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[var(--secondary)] to-[var(--accent)] rounded-full w-[64%]" />
                   </div>
                 </div>
               </div>
@@ -804,7 +804,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
         )}
 
         {/* Main Content Pane */}
-        <main className="flex-1 overflow-y-auto bg-[#08080d]">{children}</main>
+        <main className="flex-1 overflow-y-auto bg-[var(--app-content-bg)]">{children}</main>
       </div>
     </div>
   );

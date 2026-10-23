@@ -260,40 +260,40 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-8 bg-[#09090e] bg-grid-pattern relative overflow-hidden font-sans">
+    <div className="min-h-screen w-full flex items-center justify-center p-4 sm:p-8 bg-[var(--login-bg)] bg-grid-pattern relative overflow-hidden font-sans">
       {/* Background ambient lighting */}
-      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-[#6C63FF]/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-[#0DF5C4]/5 rounded-full blur-[100px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-[var(--login-glow)] rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-[var(--login-glow-secondary)] rounded-full blur-[100px] pointer-events-none" />
 
       <div className="w-full max-w-[1080px] grid grid-cols-1 lg:grid-cols-12 gap-8 items-center z-10">
         {/* Left Card: Login Form */}
-        <div className="lg:col-span-7 bg-[#111118]/90 backdrop-blur-xl border border-[#232334] rounded-2xl p-8 sm:p-10 shadow-2xl shadow-black/80 relative">
+        <div className="lg:col-span-7 bg-[var(--login-panel)] backdrop-blur-xl border border-[var(--login-border)] rounded-2xl p-8 sm:p-10 shadow-[var(--login-shadow)] relative">
           {/* Top Brand Header */}
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-[#6C63FF] to-[#8F87FF] flex items-center justify-center shadow-lg shadow-[#6C63FF]/30">
-                <Layers className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-[var(--accent)] to-[var(--accent-hover)] flex items-center justify-center shadow-[var(--shadow-panel)]">
+                <Layers className="w-5 h-5 text-[var(--accent-fg)]" />
               </div>
-              <span className="text-xl font-bold tracking-tight text-white">
+              <span className="text-xl font-bold tracking-tight text-[var(--text)]">
                 Devpulse
               </span>
             </div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#0DF5C4]/10 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[11px] font-mono font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-control)] border border-[var(--login-border-soft)] text-[var(--secondary-readable)] text-[11px] font-mono font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--secondary)] animate-pulse" />
               DEV PREVIEW v2.4
             </div>
           </div>
 
           {/* Headline & Description */}
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight mb-3">
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-[var(--text-high)] tracking-tight leading-tight mb-3">
             Build at the speed of thought.
           </h1>
-          <p className="text-[#8c8ca5] text-sm sm:text-base mb-8 leading-relaxed">
+          <p className="text-[var(--login-muted)] text-sm sm:text-base mb-8 leading-relaxed">
             Sign in to access your cloud workspaces, ephemeral devboxes, and
             neural coding agents.
           </p>
           {authError && (
-            <div role="alert" className="mb-5 flex items-center gap-2 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+            <div role="alert" className="mb-5 flex items-center gap-2 rounded-xl border border-[var(--login-error)] bg-[var(--surface-danger)] px-4 py-3 text-xs text-[var(--login-error)]">
               <AlertCircle className="h-4 w-4 shrink-0" />
               {authError}
             </div>
@@ -306,7 +306,7 @@ export const LoginPage: React.FC = () => {
               onClick={() => void handleDevBypass("github")}
               disabled={isLoading || isDataLoading || (process.env.NODE_ENV !== "development" && !oauthProviders?.github)}
               title={oauthProviders?.github ? undefined : oauthProviders ? "GitHub login is not available" : oauthProviderError ? "Unable to check GitHub login availability" : "Checking GitHub login availability"}
-              className="w-full py-3.5 px-4 rounded-xl bg-[#c4c0ff] hover:bg-[#b5afff] active:scale-[0.99] text-[#111118] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-md shadow-[#6C63FF]/20 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#c4c0ff]"
+              className="w-full py-3.5 px-4 rounded-xl bg-[var(--accent-readable)] hover:bg-[var(--login-accent-hover)] active:scale-[0.99] text-[var(--accent-fg)] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-[var(--shadow-card)] disabled:cursor-not-allowed disabled:opacity-45"
             >
               <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
                 <path
@@ -323,9 +323,9 @@ export const LoginPage: React.FC = () => {
               onClick={() => void handleDevBypass("google")}
               disabled={isLoading || isDataLoading || (process.env.NODE_ENV !== "development" && !oauthProviders?.google)}
               title={oauthProviders?.google ? undefined : oauthProviders ? "Google login is not available" : oauthProviderError ? "Unable to check Google login availability" : "Checking Google login availability"}
-              className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-[#161622]"
+              className="w-full py-3 px-4 rounded-xl bg-[var(--login-input-bg)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--body-text)] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45"
             >
-              <span aria-hidden="true" className="text-lg font-bold text-[#8ab4f8]">G</span>
+              <span aria-hidden="true" className="text-lg font-bold text-[var(--login-code-function)]">G</span>
               <span>Continue with Google</span>
             </button>
 
@@ -333,10 +333,10 @@ export const LoginPage: React.FC = () => {
             <button
               onClick={() => void handleDevBypass("gitlab")}
               disabled={isLoading || isDataLoading}
-              className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
+              className="w-full py-3 px-4 rounded-xl bg-[var(--login-input-bg)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--body-text)] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
               <svg
-                className="w-5 h-5 text-[#FC6D26]"
+                className="w-5 h-5 text-[var(--login-brand-orange)]"
                 viewBox="0 0 24 24"
                 fill="currentColor"
               >
@@ -353,9 +353,9 @@ export const LoginPage: React.FC = () => {
             <button
               onClick={() => void handleDevBypass("sso")}
               disabled={isLoading || isDataLoading}
-              className="w-full py-3 px-4 rounded-xl bg-[#161622] hover:bg-[#1c1c2b] border border-[#2b2b3f] text-[#e0e0ec] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
+              className="w-full py-3 px-4 rounded-xl bg-[var(--login-input-bg)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--body-text)] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
-              <KeyRound className="w-4 h-4 text-[#8c8ca5]" />
+              <KeyRound className="w-4 h-4 text-[var(--login-muted)]" />
               <span>
                 {isLoading && loginMethod === "sso"
                   ? "Handshaking SAML..."
@@ -366,8 +366,8 @@ export const LoginPage: React.FC = () => {
 
           {/* Divider */}
           <div className="relative flex items-center justify-center my-6">
-            <div className="border-t border-[#232334] w-full" />
-            <span className="bg-[#111118] px-3 font-mono text-[11px] uppercase tracking-wider text-[#666682] absolute">
+            <div className="border-t border-[var(--login-divider)] w-full" />
+            <span className="bg-[var(--login-panel)] px-3 font-mono text-[11px] uppercase tracking-wider text-[var(--login-code-muted)] absolute">
               OR CONTINUE WITH WORK EMAIL
             </span>
           </div>
@@ -375,41 +375,41 @@ export const LoginPage: React.FC = () => {
           {/* Email Input & Send Magic Link */}
           <div className="space-y-3">
             {emailLoginState.status === "sent" && (
-              <div role="status" className="rounded-xl border border-[#0DF5C4]/30 bg-[#0DF5C4]/10 p-5 text-sm text-[#9cebdc]">
-                <div className="flex items-center gap-2 font-semibold text-white">
-                  <CheckCircle2 className="h-5 w-5 text-[#0DF5C4]" />
+              <div role="status" className="rounded-xl border border-[var(--login-border-soft)] bg-[var(--surface-control)] p-5 text-sm text-[var(--login-success-text)]">
+                <div className="flex items-center gap-2 font-semibold text-[var(--text)]">
+                  <CheckCircle2 className="h-5 w-5 text-[var(--login-success)]" />
                   Check your email
                 </div>
-                <p className="mt-3 text-[#9cebdc]">We sent a sign-in link to</p>
-                <p className="mt-1 break-all font-mono text-white">{emailLoginState.email}</p>
-                <p className="mt-3 text-xs text-[#8c8ca5]">Link expires in 15 minutes.</p>
+                <p className="mt-3 text-[var(--login-success-text)]">We sent a sign-in link to</p>
+                <p className="mt-1 break-all font-mono text-[var(--text)]">{emailLoginState.email}</p>
+                <p className="mt-3 text-xs text-[var(--login-muted)]">Link expires in 15 minutes.</p>
                 <button
                   type="button"
                   onClick={() => setEmailLoginState({ status: "idle" })}
-                  className="mt-4 text-xs font-medium text-[#b5afff] hover:text-white"
+                  className="mt-4 text-xs font-medium text-[var(--accent-readable)] hover:text-[var(--text)]"
                 >
                   ← Try a different email
                 </button>
               </div>
             )}
             {emailLoginState.status === "dev-token" && (
-              <div role="status" className="rounded-xl border border-[#6C63FF]/40 bg-[#6C63FF]/10 p-5 text-sm">
-                <p className="font-semibold text-white">🛠 Dev mode</p>
-                <p className="mt-3 text-[#c4c0ff]">Click the link to sign in:</p>
+              <div role="status" className="rounded-xl border border-[var(--login-border-strong)] bg-[var(--login-panel)] p-5 text-sm">
+                <p className="font-semibold text-[var(--text)]">🛠 Dev mode</p>
+                <p className="mt-3 text-[var(--accent-readable)]">Click the link to sign in:</p>
                 <a
                   href={emailLoginState.url}
                   onClick={(event) => {
                     event.preventDefault();
                     void handleTokenVerify(emailLoginState.token);
                   }}
-                  className="mt-3 inline-flex items-center gap-2 font-medium text-[#b5afff] hover:text-white"
+                  className="mt-3 inline-flex items-center gap-2 font-medium text-[var(--accent-readable)] hover:text-[var(--text)]"
                 >
                   Sign in now <ArrowRight className="h-4 w-4" />
                 </a>
                 <button
                   type="button"
                   onClick={() => setEmailLoginState({ status: "idle" })}
-                  className="mt-4 block text-xs font-medium text-[#8c8ca5] hover:text-white"
+                  className="mt-4 block text-xs font-medium text-[var(--login-muted)] hover:text-[var(--text)]"
                 >
                   ← Try a different email
                 </button>
@@ -420,13 +420,13 @@ export const LoginPage: React.FC = () => {
               || emailLoginState.status === "error") && (
               <>
                 {emailLoginState.status === "error" && (
-                  <div role="alert" className="flex items-center gap-2 rounded-xl border border-[#f87171]/40 bg-[#f87171]/10 px-4 py-3 text-xs text-[#fca5a5]">
+                  <div role="alert" className="flex items-center gap-2 rounded-xl border border-[var(--login-error)] bg-[var(--surface-danger)] px-4 py-3 text-xs text-[var(--login-error)]">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     {emailLoginState.message}
                   </div>
                 )}
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#666682]">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[var(--login-code-muted)]">
                     <Mail className="w-4 h-4" />
                   </div>
                   <input
@@ -441,14 +441,14 @@ export const LoginPage: React.FC = () => {
                     onKeyDown={(event) => event.key === "Enter" && void handleEmailSubmit()}
                     placeholder="dev@company.com"
                     autoComplete="email"
-                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#0b0b10] border border-[#27273a] text-white placeholder-[#585870] text-sm focus:outline-none focus:border-[#6C63FF] focus:ring-1 focus:ring-[#6C63FF] transition-all font-mono"
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-[var(--login-input-bg)] border border-[var(--login-input-border)] text-[var(--text)] placeholder:text-[var(--text-placeholder)] text-sm focus:outline-none focus:border-[var(--repository-focus)] focus:ring-1 focus:ring-[var(--focus-ring)] transition-all font-mono"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => void handleEmailSubmit()}
                   disabled={emailLoginState.status === "submitting"}
-                  className="w-full py-3 px-4 rounded-xl bg-[#1c1c28] hover:bg-[#252538] border border-[#31314a] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all group disabled:cursor-wait disabled:opacity-60"
+                  className="w-full py-3 px-4 rounded-xl bg-[var(--surface-control)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--text)] font-medium text-sm flex items-center justify-center gap-2 transition-all group disabled:cursor-wait disabled:opacity-60"
                 >
                   <span>
                     {emailLoginState.status === "submitting" ? "Sending sign-in link..." : "Send Magic Link"}
@@ -460,17 +460,17 @@ export const LoginPage: React.FC = () => {
           </div>
 
           {/* Footer Security Badges */}
-          <div className="mt-8 pt-6 border-t border-[#1d1d2c] flex flex-wrap items-center justify-center gap-6 text-[12px] font-mono text-[#777794]">
+          <div className="mt-8 pt-6 border-t border-[var(--login-divider)] flex flex-wrap items-center justify-center gap-6 text-[12px] font-mono text-[var(--login-text-secondary)]">
             <div className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-[#0DF5C4]" />
+              <ShieldCheck className="w-4 h-4 text-[var(--login-success)]" />
               <span>SOC2 Type II</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <Lock className="w-4 h-4 text-[#0DF5C4]" />
+              <Lock className="w-4 h-4 text-[var(--login-success)]" />
               <span>HIPAA Compliant</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#6C63FF]" />
+              <CheckCircle2 className="w-4 h-4 text-[var(--accent)]" />
               <span>Zero Query Retention</span>
             </div>
           </div>
@@ -479,20 +479,20 @@ export const LoginPage: React.FC = () => {
         {/* Right Column: Telemetry Daemon & Feature Badges */}
         <div className="lg:col-span-5 space-y-6">
           {/* Telemetry Daemon Box */}
-          <div className="bg-[#0b0b12] border border-[#222234] rounded-2xl p-6 font-mono text-xs shadow-2xl terminal-card relative overflow-hidden">
+          <div className="bg-[var(--login-aside)] border border-[var(--login-border)] rounded-2xl p-6 font-mono text-xs shadow-[var(--login-terminal-shadow)] terminal-card relative overflow-hidden">
             {/* Header */}
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[#1c1c2c]">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-[var(--login-border-soft)]">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
-                <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
-                <span className="ml-2 text-[#8b8ba8] flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-full bg-[var(--danger)]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[var(--warning)]" />
+                <span className="w-2.5 h-2.5 rounded-full bg-[var(--success)]" />
+                <span className="ml-2 text-[var(--login-muted)] flex items-center gap-1">
                   <Terminal className="w-3.5 h-3.5" />
                   telemetry.daemon
                 </span>
               </div>
-              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#0DF5C4]/10 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[10px] font-semibold tracking-wider">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-ping" />
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[var(--surface-control)] border border-[var(--login-border-soft)] text-[var(--secondary-readable)] text-[10px] font-semibold tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--secondary)] animate-ping" />
                 LIVE
               </div>
             </div>
@@ -500,28 +500,28 @@ export const LoginPage: React.FC = () => {
             {/* Terminal Lines */}
             <div className="space-y-2.5 leading-relaxed">
               <div className="flex justify-between">
-                <span className="text-[#6C63FF]">[HOST]</span>
-                <span className="text-[#a4a4c4]">node-alpha-71</span>
-                <span className="text-[#FF9E64] font-semibold">READY</span>
+                <span className="text-[var(--login-code-keyword)]">[HOST]</span>
+                <span className="text-[var(--login-code-foreground)]">node-alpha-71</span>
+                <span className="text-[var(--login-code-number)] font-semibold">READY</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#6C63FF]">[AUTH]</span>
-                <span className="text-[#a4a4c4]">handshake protocol:</span>
-                <span className="text-white font-medium">mTLS-v1.3</span>
+                <span className="text-[var(--login-code-keyword)]">[AUTH]</span>
+                <span className="text-[var(--login-code-foreground)]">handshake protocol:</span>
+                <span className="text-[var(--text)] font-medium">mTLS-v1.3</span>
               </div>
-              <div className="text-[#0DF5C4] pt-1">
+              <div className="text-[var(--login-code-return)] pt-1">
                 ☁ Connecting to cluster:{" "}
                 <span className="underline">us-east-1a</span>
               </div>
-              <div className="flex items-center justify-between text-[#8c8ca5] bg-[#13131f] p-2 rounded-lg border border-[#1f1f30]">
+              <div className="flex items-center justify-between text-[var(--login-muted)] bg-[var(--login-code-bg)] p-2 rounded-lg border border-[var(--login-border-soft)]">
                 <span>round-trip latency:</span>
-                <span className="text-[#0DF5C4] font-bold text-sm font-mono">
+                <span className="text-[var(--login-code-string)] font-bold text-sm font-mono">
                   {latency}ms
                 </span>
               </div>
-              <div className="text-[#b5afff] pt-1 flex items-center gap-2">
+              <div className="text-[var(--login-code-function)] pt-1 flex items-center gap-2">
                 <span>λ orchestrator ephemeral instances available:</span>
-                <span className="text-white font-bold">
+                <span className="text-[var(--text)] font-bold">
                   {instances.toLocaleString()}
                 </span>
               </div>
@@ -529,41 +529,41 @@ export const LoginPage: React.FC = () => {
           </div>
 
           {/* Sub-Second Spinup Card */}
-          <div className="bg-[#12121c] border border-[#222232] rounded-2xl p-5 flex items-start gap-4">
-            <div className="w-10 h-10 rounded-xl bg-[#6C63FF]/15 border border-[#6C63FF]/30 flex items-center justify-center shrink-0">
-              <Zap className="w-5 h-5 text-[#6C63FF]" />
+          <div className="bg-[var(--login-panel)] border border-[var(--login-border)] rounded-2xl p-5 flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-[var(--surface-control)] border border-[var(--login-border-soft)] flex items-center justify-center shrink-0">
+              <Zap className="w-5 h-5 text-[var(--accent)]" />
             </div>
             <div>
-              <h4 className="text-white text-sm font-semibold mb-1">
+              <h4 className="text-[var(--text)] text-sm font-semibold mb-1">
                 Sub-second Spinup
               </h4>
-              <p className="text-[#8c8ca5] text-xs leading-relaxed">
+              <p className="text-[var(--login-muted)] text-xs leading-relaxed">
                 Warm pre-provisioned Linux kernels resume in &lt;350ms globally.
               </p>
             </div>
           </div>
 
           {/* System Footer Links */}
-          <div className="flex items-center justify-between text-xs text-[#5e5e78] font-mono px-2">
+          <div className="flex items-center justify-between text-xs text-[var(--login-text-subtle)] font-mono px-2">
             <span>© Devpulse Cloud Inc.</span>
             <div className="flex gap-4">
               <button
                 onClick={() => void handleDevBypass("github")}
-                className="hover:text-[#a0a0c0] transition-colors"
+                className="hover:text-[var(--text-secondary)] transition-colors"
               >
                 Privacy
               </button>
               <span>/</span>
               <button
                 onClick={() => void handleDevBypass("github")}
-                className="hover:text-[#a0a0c0] transition-colors"
+                className="hover:text-[var(--text-secondary)] transition-colors"
               >
                 Terms
               </button>
               <span>/</span>
               <button
                 onClick={() => void handleDevBypass("github")}
-                className="hover:text-[#a0a0c0] transition-colors"
+                className="hover:text-[var(--text-secondary)] transition-colors"
               >
                 System
               </button>

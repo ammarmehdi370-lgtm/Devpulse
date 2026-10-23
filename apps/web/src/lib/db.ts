@@ -219,17 +219,95 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
     const ids = {
       user: "00000000-0000-4000-8000-000000000001",
       workspace: "00000000-0000-4000-8000-000000000002",
-      project: "00000000-0000-4000-8000-000000000003",
-      file: "00000000-0000-4000-8000-000000000004",
-      channel: "00000000-0000-4000-8000-000000000005",
     };
     const now = new Date();
-    const content = 'console.log("Hello from Devpulse")';
+    const projectSeeds = [
+      {
+        id: "00000000-0000-4000-8000-000000000003",
+        name: "devpulse-core",
+        language: "TypeScript",
+        description: "Hyper-optimized microVM runtime",
+        defaultBranch: "staging",
+        stars: 124,
+        forks: 38,
+        isStarred: true,
+        deployStatus: "live",
+        devboxReady: true,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000004",
+        name: "neural-coder-daemon",
+        language: "Python",
+        description: "AI-powered code generation daemon",
+        defaultBranch: "main",
+        stars: 89,
+        forks: 14,
+        isStarred: true,
+        deployStatus: "building",
+        devboxReady: true,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000005",
+        name: "wireguard-mesh-router",
+        language: "Go",
+        description: "Zero-config mesh networking",
+        defaultBranch: "v1.4-stable",
+        stars: 45,
+        forks: 9,
+        isStarred: false,
+        deployStatus: "live",
+        devboxReady: false,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000006",
+        name: "microkernel-hypervisor",
+        language: "Rust",
+        description: "Bare-metal hypervisor kernel",
+        defaultBranch: "master",
+        stars: 210,
+        forks: 42,
+        isStarred: true,
+        deployStatus: "none",
+        devboxReady: false,
+      },
+    ];
+    const demoFiles = [
+      {
+        id: "00000000-0000-4000-8000-000000000010",
+        path: "src/index.ts",
+        language: "typescript",
+        content: "// Devpulse core entry\nexport {}",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000011",
+        path: "src/server.ts",
+        language: "typescript",
+        content: "// Express server\nexport {}",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000012",
+        path: "src/workers/agent.py",
+        language: "python",
+        content: '# AI agent worker\nprint("hello")',
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000013",
+        path: "package.json",
+        language: "json",
+        content: '{"name":"devpulse-core","version":"0.1.0"}',
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000014",
+        path: "README.md",
+        language: "markdown",
+        content: "# devpulse-core\nHyper-optimized runtime.",
+      },
+    ];
 
     await tx.insert(users).values({
       id: ids.user,
       email: "demo@devpulse.local",
-      name: "Demo User",
+      name: "Alex",
     }).onConflictDoNothing();
     await tx.insert(workspaces).values({
       id: ids.workspace,
@@ -243,32 +321,48 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
       userId: ids.user,
       role: "OWNER",
     }).onConflictDoNothing();
-    await tx.insert(projects).values({
-      id: ids.project,
-      workspaceId: ids.workspace,
-      name: "Demo Project",
-      language: "TypeScript",
-    }).onConflictDoNothing();
-    await tx.insert(files).values({
-      id: ids.file,
-      projectId: ids.project,
-      path: "index.ts",
-      content,
-      language: "typescript",
-      sizeBytes: new TextEncoder().encode(content).byteLength,
-    }).onConflictDoNothing();
-    await tx.insert(channels).values({
-      id: ids.channel,
-      workspaceId: ids.workspace,
-      name: "general",
-      type: "PUBLIC",
-    }).onConflictDoNothing();
-    await tx.insert(messages).values({
-      id: "00000000-0000-4000-8000-000000000006",
-      channelId: ids.channel,
-      authorId: ids.user,
-      body: "Welcome to your local Devpulse workspace.",
-    }).onConflictDoNothing();
+    for (const project of projectSeeds) {
+      await tx.insert(projects).values({
+        ...project,
+        workspaceId: ids.workspace,
+        createdAt: now,
+        updatedAt: now,
+      }).onConflictDoNothing();
+    }
+    for (const file of demoFiles) {
+      await tx.insert(files).values({
+        ...file,
+        projectId: projectSeeds[0]!.id,
+        sizeBytes: new TextEncoder().encode(file.content).byteLength,
+        version: 1,
+        updatedAt: now,
+      }).onConflictDoNothing();
+    }
+    const channelSeeds = ["general", "frontend", "backend"];
+    const generalChannelId = "00000000-0000-4000-8000-000000000020";
+    for (const [index, name] of channelSeeds.entries()) {
+      const channelId = `00000000-0000-4000-8000-${String(21 + index).padStart(12, "0")}`;
+      await tx.insert(channels).values({
+        id: name === "general" ? generalChannelId : channelId,
+        workspaceId: ids.workspace,
+        name,
+        type: "PUBLIC",
+      }).onConflictDoNothing();
+    }
+    await tx.insert(messages).values([
+      {
+        id: "00000000-0000-4000-8000-000000000030",
+        channelId: generalChannelId,
+        authorId: ids.user,
+        body: "Just pushed the new Monaco theme 🎉",
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000031",
+        channelId: generalChannelId,
+        authorId: ids.user,
+        body: "AI drawer is looking great, nice work",
+      },
+    ]).onConflictDoNothing();
 
     return "seeded";
   });
