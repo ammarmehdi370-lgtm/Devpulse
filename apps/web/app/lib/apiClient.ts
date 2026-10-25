@@ -40,3 +40,5 @@ export async function authenticatedFetch(input: RequestInfo | URL, init: Request
   retryHeaders.set("Authorization", `Bearer ${nextToken}`);
   return fetch(input, { ...requestInit, headers: retryHeaders });
 }
+
+

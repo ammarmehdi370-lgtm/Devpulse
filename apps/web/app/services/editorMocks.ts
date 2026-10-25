@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+﻿import { and, eq } from "drizzle-orm";
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices } from "../../src/lib/services";
@@ -364,7 +364,11 @@ export async function reconnectTerminalPreview(): Promise<TerminalReconnectResul
 export async function sendAssistantPreview(
   request: AssistantPreviewRequest,
 ): Promise<AssistantPreviewReply> {
-  const token = sessionStorage.getItem("dp_access_token") ?? "dev-bypass";
+  const token = sessionStorage.getItem("dp_access_token");
+
+  if (!token) {
+    return { text: "Session expired. Please sign in again." };
+  }
 
   try {
     const response = await fetch("/api/ai/chat", {
@@ -372,7 +376,8 @@ export async function sendAssistantPreview(
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${token}`
+
       },
       body: JSON.stringify({
         messages: [{ role: "user", content: request.prompt }],
@@ -445,3 +450,4 @@ export async function getAIInlineCompletion(
     stopReason: "stop",
   };
 }
+

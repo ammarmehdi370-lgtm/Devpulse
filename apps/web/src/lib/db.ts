@@ -217,13 +217,20 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
     if (existingUser) return "database-not-empty";
 
     const ids = {
-      user: "00000000-0000-4000-8000-000000000001",
-      workspace: "00000000-0000-4000-8000-000000000002",
+      user: crypto.randomUUID(),
+      workspace: crypto.randomUUID(),
+      projectCore: crypto.randomUUID(),
+      projectDaemon: crypto.randomUUID(),
+      projectRouter: crypto.randomUUID(),
+      projectHypervisor: crypto.randomUUID(),
+      generalChannel: crypto.randomUUID(),
+      frontendChannel: crypto.randomUUID(),
+      backendChannel: crypto.randomUUID(),
     };
     const now = new Date();
     const projectSeeds = [
       {
-        id: "00000000-0000-4000-8000-000000000003",
+        id: ids.projectCore,
         name: "devpulse-core",
         language: "TypeScript",
         description: "Hyper-optimized microVM runtime",
@@ -235,7 +242,7 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
         devboxReady: true,
       },
       {
-        id: "00000000-0000-4000-8000-000000000004",
+        id: ids.projectDaemon,
         name: "neural-coder-daemon",
         language: "Python",
         description: "AI-powered code generation daemon",
@@ -247,7 +254,7 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
         devboxReady: true,
       },
       {
-        id: "00000000-0000-4000-8000-000000000005",
+        id: ids.projectRouter,
         name: "wireguard-mesh-router",
         language: "Go",
         description: "Zero-config mesh networking",
@@ -259,7 +266,7 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
         devboxReady: false,
       },
       {
-        id: "00000000-0000-4000-8000-000000000006",
+        id: ids.projectHypervisor,
         name: "microkernel-hypervisor",
         language: "Rust",
         description: "Bare-metal hypervisor kernel",
@@ -273,31 +280,31 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
     ];
     const demoFiles = [
       {
-        id: "00000000-0000-4000-8000-000000000010",
+        id: crypto.randomUUID(),
         path: "src/index.ts",
         language: "typescript",
         content: "// Devpulse core entry\nexport {}",
       },
       {
-        id: "00000000-0000-4000-8000-000000000011",
+        id: crypto.randomUUID(),
         path: "src/server.ts",
         language: "typescript",
         content: "// Express server\nexport {}",
       },
       {
-        id: "00000000-0000-4000-8000-000000000012",
+        id: crypto.randomUUID(),
         path: "src/workers/agent.py",
         language: "python",
         content: '# AI agent worker\nprint("hello")',
       },
       {
-        id: "00000000-0000-4000-8000-000000000013",
+        id: crypto.randomUUID(),
         path: "package.json",
         language: "json",
         content: '{"name":"devpulse-core","version":"0.1.0"}',
       },
       {
-        id: "00000000-0000-4000-8000-000000000014",
+        id: crypto.randomUUID(),
         path: "README.md",
         language: "markdown",
         content: "# devpulse-core\nHyper-optimized runtime.",
@@ -338,29 +345,35 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
         updatedAt: now,
       }).onConflictDoNothing();
     }
-    const channelSeeds = ["general", "frontend", "backend"];
-    const generalChannelId = "00000000-0000-4000-8000-000000000020";
-    for (const [index, name] of channelSeeds.entries()) {
-      const channelId = `00000000-0000-4000-8000-${String(21 + index).padStart(12, "0")}`;
-      await tx.insert(channels).values({
-        id: name === "general" ? generalChannelId : channelId,
-        workspaceId: ids.workspace,
-        name,
-        type: "PUBLIC",
-      }).onConflictDoNothing();
-    }
+    const channelSeeds = [
+      { id: ids.generalChannel, name: "general" },
+      { id: ids.frontendChannel, name: "frontend" },
+      { id: ids.backendChannel, name: "backend" },
+    ];
+    await tx.insert(channels).values(channelSeeds.map(({ id, name }) => ({
+      id,
+      workspaceId: ids.workspace,
+      name,
+      type: "PUBLIC",
+    }))).onConflictDoNothing();
     await tx.insert(messages).values([
       {
-        id: "00000000-0000-4000-8000-000000000030",
-        channelId: generalChannelId,
+        id: crypto.randomUUID(),
+        channelId: ids.generalChannel,
         authorId: ids.user,
         body: "Just pushed the new Monaco theme 🎉",
       },
       {
-        id: "00000000-0000-4000-8000-000000000031",
-        channelId: generalChannelId,
+        id: crypto.randomUUID(),
+        channelId: ids.generalChannel,
         authorId: ids.user,
         body: "AI drawer is looking great, nice work",
+      },
+      {
+        id: crypto.randomUUID(),
+        channelId: ids.frontendChannel,
+        authorId: ids.user,
+        body: "Frontend build is passing ✅",
       },
     ]).onConflictDoNothing();
 

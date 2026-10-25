@@ -812,14 +812,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           && "isAuthenticated" in parsed
           && parsed.isAuthenticated === true
         ) {
-          setUser({
+          const profile: UserProfile = {
             name: parsed.name,
             email: parsed.email,
             handle: parsed.handle,
             role: parsed.role,
             avatar: parsed.avatar,
             isAuthenticated: true,
-          });
+          };
+          setUser(profile);
+
+          const existingToken = sessionStorage.getItem("dp_access_token");
+          if (existingToken) {
+            setAccessToken(existingToken);
+            return;
+          }
+
+          try {
+            const db = await getDB();
+            const rows = await db
+              .select()
+              .from(schema.users)
+              .where(eq(schema.users.email, profile.email))
+              .limit(1);
+            const dbUser = rows[0];
+            if (!dbUser) {
+              console.warn("[AppContext] No local profile record found for restored session.");
+              return;
+            }
+
+            const devToken = btoa(JSON.stringify({
+              sub: dbUser.id,
+              email: dbUser.email,
+              name: dbUser.name,
+              iat: Math.floor(Date.now() / 1000),
+              exp: Math.floor(Date.now() / 1000) + 86400,
+            }));
+            sessionStorage.setItem("dp_access_token", devToken);
+            sessionStorage.setItem("dp_user_id", dbUser.id);
+            sessionStorage.setItem("auth:current-user-id", dbUser.id);
+            setAccessToken(devToken);
+            console.log("[AppContext] Restored session token for", profile.email);
+          } catch (error: unknown) {
+            console.warn("[AppContext] Could not restore the saved session token.", error);
+          }
         } else {
           console.warn("[AppContext] The saved local user session is invalid.");
         }

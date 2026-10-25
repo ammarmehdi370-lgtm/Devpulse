@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState } from "react";
 import { useApp } from "../context/AppContext";
@@ -66,7 +66,7 @@ export const FullScreenAiPage: React.FC = () => {
   }));
   return res.status(200).json({ success: true, user: sanitizeUser(user) });
 }`,
-      generationStats: "Generated in 1.4s · 320 tokens",
+      generationStats: "Generated in 1.4s Ã‚Â· 320 tokens",
     },
   ]);
 
@@ -87,7 +87,12 @@ export const FullScreenAiPage: React.FC = () => {
     setError("");
     setIsGenerating(true);
     try {
-      const token = sessionStorage.getItem("dp_access_token") ?? "dev-bypass";
+      const token = sessionStorage.getItem("dp_access_token");
+      if (!token) {
+        setError("Session expired. Please sign in again.");
+        setPage("login");
+        return;
+      }
       const messages: Array<{
         role: string;
         text?: string;
@@ -103,7 +108,8 @@ export const FullScreenAiPage: React.FC = () => {
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token}`
+
         },
         body: JSON.stringify({
           messages: messages.map((message) => ({
@@ -255,7 +261,7 @@ export const FullScreenAiPage: React.FC = () => {
             <span>
               Temp: <strong className="text-white">{temperature}</strong>
             </span>
-            <span>·</span>
+            <span>Ã‚Â·</span>
             <span>
               Top-p: <strong className="text-white">{topP}</strong>
             </span>
@@ -456,3 +462,4 @@ export const FullScreenAiPage: React.FC = () => {
     </div>
   );
 };
+

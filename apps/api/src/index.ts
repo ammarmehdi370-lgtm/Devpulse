@@ -1,4 +1,4 @@
-import "./lib/bootstrap.js";
+﻿import "./lib/bootstrap.js";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
@@ -212,7 +212,7 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
   if (provider === "sso" && process.env.SAML_ENTRYPOINT)
     return response.redirect(process.env.SAML_ENTRYPOINT);
 
-  // ── DEV BYPASS ────────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ DEV BYPASS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   // In development mode, when no OAuth credentials are configured, create a
   // mock session so you can test the full app flow without a real OAuth app.
   if (process.env.NODE_ENV === "development") {
@@ -234,7 +234,7 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
       return next(error);
     }
   }
-  // ── END DEV BYPASS ────────────────────────────────────────────────────────
+  // Ã¢â€â‚¬Ã¢â€â‚¬ END DEV BYPASS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   const error = encodeURIComponent(
     `${provider} OAuth is not configured. Add provider credentials to .env.`,
@@ -274,33 +274,7 @@ app.get("/v1/auth/:provider/callback", async (request, response, next) => {
       const access = (await tokenResponse.json()) as { access_token?: string };
       const profile = (await fetch("https://api.github.com/user", {
         headers: {
-          Authorization: `Bearer ${access.access_token}`,
-          Accept: "application/vnd.github+json",
-        },
-      }).then((result) => result.json())) as {
-        email?: string;
-        login?: string;
-        name?: string;
-        avatar_url?: string;
-      };
-      email = profile.email || `${profile.login}@users.noreply.github.com`;
-      name = profile.name || profile.login || "Devpulse User";
-      avatarUrl = profile.avatar_url;
-    } else if (provider === "gitlab") {
-      const tokenResponse = await fetch("https://gitlab.com/oauth/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: process.env.GITLAB_CLIENT_ID,
-          client_secret: process.env.GITLAB_CLIENT_SECRET,
-          code,
-          grant_type: "authorization_code",
-          redirect_uri: `${process.env.API_URL ?? `http://localhost:${port}`}/v1/auth/gitlab/callback`,
-        }),
-      });
-      const access = (await tokenResponse.json()) as { access_token?: string };
-      const profile = (await fetch("https://gitlab.com/api/v4/user", {
-        headers: { Authorization: `Bearer ${access.access_token}` },
+          Authorization: `Bearer ${access.access_token}` },
       }).then((result) => result.json())) as {
         email?: string;
         username?: string;
@@ -841,10 +815,10 @@ type AiApplySafetyError = { status: 400 | 422; error: string; message: string; o
 
 function validateAIApplyContent(code: string, language: string, skipCheck: boolean): AiApplySafetyError | null {
   if (skipCheck) return null;
-  if (!code.trim()) return { status: 400, error: "EMPTY_CONTENT", message: "AI returned empty code — not applied" };
+  if (!code.trim()) return { status: 400, error: "EMPTY_CONTENT", message: "AI returned empty code Ã¢â‚¬â€ not applied" };
   const openBraces = (code.match(/\{/g) || []).length;
   const closeBraces = (code.match(/\}/g) || []).length;
-  if (openBraces > 0 && openBraces - closeBraces > 2) return { status: 422, error: "TRUNCATED_CONTENT", message: "AI response appears incomplete — missing closing braces", openBraces, closeBraces };
+  if (openBraces > 0 && openBraces - closeBraces > 2) return { status: 422, error: "TRUNCATED_CONTENT", message: "AI response appears incomplete Ã¢â‚¬â€ missing closing braces", openBraces, closeBraces };
   if (language.toLowerCase() === "json") {
     try { JSON.parse(code); } catch { return { status: 422, error: "INVALID_JSON", message: "AI returned invalid JSON" }; }
   }
@@ -1083,7 +1057,7 @@ app.get("/v1/ai/conversations/:id/export", async (request, response, next) => {
     const messages = await db.aIMessage.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: "asc" } });
     const file = conversation.fileId ? await db.file.findUnique({ where: { id: conversation.fileId }, select: { path: true } }) : null;
     const title = file?.path.split("/").pop() || "Conversation";
-    const markdown = [`# AI Conversation — ${title}`, "", ...messages.map((message) => `## ${message.createdAt.toISOString().slice(0, 10)}\n**${message.role === "USER" ? "You" : "Devpulse AI"}:** ${message.content}`), ""].join("\n");
+    const markdown = [`# AI Conversation Ã¢â‚¬â€ ${title}`, "", ...messages.map((message) => `## ${message.createdAt.toISOString().slice(0, 10)}\n**${message.role === "USER" ? "You" : "Devpulse AI"}:** ${message.content}`), ""].join("\n");
     const filename = `devpulse-ai-${new Date().toISOString().slice(0, 10)}.md`;
     return response.set({ "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": `attachment; filename="${filename}"` }).send(markdown);
   } catch (error) { return next(error); }
@@ -1700,3 +1674,4 @@ if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") 
     process.exit(1);
   });
 }
+
