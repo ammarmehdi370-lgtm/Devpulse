@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { useApp } from "../context/AppContext";
 import { setAccessToken } from "../lib/apiClient";
+import { DevpulseLogo } from "../../src/components/DevpulseLogo";
 import {
   Terminal,
   Zap,
@@ -13,7 +14,6 @@ import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
-  Layers,
 } from "lucide-react";
 
 type OAuthProviders = {
@@ -269,15 +269,8 @@ export const LoginPage: React.FC = () => {
         {/* Left Card: Login Form */}
         <div className="lg:col-span-7 bg-[var(--login-panel)] backdrop-blur-xl border border-[var(--login-border)] rounded-2xl p-8 sm:p-10 shadow-[var(--login-shadow)] relative">
           {/* Top Brand Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-[var(--accent)] to-[var(--accent-hover)] flex items-center justify-center shadow-[var(--shadow-panel)]">
-                <Layers className="w-5 h-5 text-[var(--accent-fg)]" />
-              </div>
-              <span className="text-xl font-bold tracking-tight text-[var(--text)]">
-                Devpulse
-              </span>
-            </div>
+          <div className="mb-8 flex flex-col items-center gap-3">
+            <DevpulseLogo size="md" variant="full" theme="dark" />
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--surface-control)] border border-[var(--login-border-soft)] text-[var(--secondary-readable)] text-[11px] font-mono font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--secondary)] animate-pulse" />
               DEV PREVIEW v2.4

@@ -4,6 +4,10 @@
 @tailwind components;
 @tailwind utilities;
 
+.wordmark {
+  font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+}
+
 /* ============================================
    DEVPULSE THEME SYSTEM
    Dark default: Devpulse Night

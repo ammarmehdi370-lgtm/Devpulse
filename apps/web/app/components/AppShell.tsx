@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useApp, PageType } from "../context/AppContext";
 import { getSocket } from "../../src/lib/socket-client";
+import { DevpulseLogo } from "../../src/components/DevpulseLogo";
 import {
   Code2,
   Activity,
@@ -10,7 +11,6 @@ import {
   Database,
   MessageSquare,
   Search,
-  Layers,
   ChevronDown,
   Palette,
   LogOut,
@@ -141,9 +141,10 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
           <button
             type="button"
             onClick={() => setPage("repositories")}
-            className="flex items-center gap-1.5 transition-opacity hover:opacity-80"
+            aria-label="Go to repositories"
+            className="flex items-center transition-opacity hover:opacity-90"
           >
-            <span className="font-mono text-sm font-bold text-[var(--accent)]">⚡ Devpulse</span>
+            <DevpulseLogo size="sm" variant="full" theme="dark" />
           </button>
 
           <span className="text-xs text-[var(--muted)]">
@@ -314,18 +315,10 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
           <button
             type="button"
             onClick={() => navigate("workspaces")}
-            aria-label="Open workspaces"
-            className="group flex items-center gap-2"
+            aria-label="Go to workspaces"
+            className="flex items-center transition-opacity hover:opacity-90"
           >
-            <div
-              className="w-7 h-7 rounded-lg flex items-center justify-center shadow-md transition-transform group-hover:scale-105 text-[var(--accent-fg)]"
-              style={{ backgroundColor: theme.primary }}
-            >
-              <Layers className="w-4 h-4" />
-            </div>
-            <span className="font-bold text-[var(--text)] text-sm tracking-tight hidden sm:inline">
-              Devpulse
-            </span>
+            <DevpulseLogo size="sm" variant="full" theme="dark" />
           </button>
 
           {/* Token String displayed in header (Screenshots 3 & 4) */}

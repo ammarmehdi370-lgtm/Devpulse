@@ -25,6 +25,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useApp, type PageType } from "../context/AppContext";
+import { DevpulseLogo } from "../../src/components/DevpulseLogo";
 
 export type CommandCategory =
   | "navigation"
@@ -487,6 +488,7 @@ export const CommandPalette: React.FC = () => {
         className="fixed left-1/2 top-[20vh] z-50 w-full max-w-xl -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-2xl"
       >
         <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
+          <DevpulseLogo size="sm" variant="mark" theme="dark" className="shrink-0" />
           <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-[var(--muted)]" />
           <input
             ref={inputRef}

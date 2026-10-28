@@ -17,6 +17,7 @@ import { PageHeader } from "./components/PageHeader";
 import { AppShell } from "./components/AppShell";
 import { CommandPalette } from "./components/CommandPalette";
 import { ListSkeleton, PageHeaderSkeleton } from "./components/SkeletonLoaders";
+import { DevpulseLogo } from "../src/components/DevpulseLogo";
 import type { PageType } from "./context/AppContext";
 
 function UnavailablePage({ page }: { page: PageType }) {
@@ -111,6 +112,7 @@ function AppContent() {
           aria-live="polite"
           className="flex items-center justify-center gap-3 border-b border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)]"
         >
+          {servicesLoading && <DevpulseLogo size="md" variant="mark" theme="dark" />}
           <span>
             {servicesLoading
               ? "Starting the local browser database..."
