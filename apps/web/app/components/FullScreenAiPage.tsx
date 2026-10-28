@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useApp } from "../context/AppContext";
+import { authenticatedFetch } from "../lib/apiClient";
 import {
   Sparkles,
   Send,
@@ -87,12 +88,12 @@ export const FullScreenAiPage: React.FC = () => {
     setError("");
     setIsGenerating(true);
     try {
-      const token = sessionStorage.getItem("dp_access_token");
-      if (!token) {
-        setError("Session expired. Please sign in again.");
+      if (!user.isAuthenticated) {
+        setError("Please sign in to use AI.");
         setPage("login");
         return;
       }
+      const token = sessionStorage.getItem("dp_access_token");
       const messages: Array<{
         role: string;
         text?: string;
@@ -103,13 +104,12 @@ export const FullScreenAiPage: React.FC = () => {
           text: `Project: auth-service\nActive file: src/auth/login.js\nBranch: fix/jwt-expiry\nModel preference: ${selectedModel}\nTemperature: ${temperature}\nTop-p: ${topP}\nRequest: ${userMsg.text}`,
         },
       ];
-      const response = await fetch("/api/ai/chat", {
+      const response = await authenticatedFetch("/api/ai/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`
-
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           messages: messages.map((message) => ({

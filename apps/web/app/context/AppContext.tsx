@@ -733,6 +733,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     let active = true;
 
+    const restoreAccessToken = async (email: string): Promise<boolean> => {
+      const existingToken = sessionStorage.getItem("dp_access_token");
+      if (existingToken) {
+        setAccessToken(existingToken);
+        return true;
+      }
+
+      try {
+        let response = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: "POST",
+          credentials: "include",
+        });
+        if (!response.ok && process.env.NODE_ENV !== "production") {
+          response = await fetch(
+            `${API_BASE}/api/auth/dev-bypass?email=${encodeURIComponent(email)}`,
+            { credentials: "include" },
+          );
+        }
+        if (!active || !response.ok) return false;
+
+        const result: unknown = await response.json();
+        if (
+          typeof result !== "object"
+          || result === null
+          || !("accessToken" in result)
+          || typeof result.accessToken !== "string"
+        ) {
+          return false;
+        }
+
+        sessionStorage.setItem("dp_access_token", result.accessToken);
+        setAccessToken(result.accessToken);
+        if (
+          "user" in result
+          && typeof result.user === "object"
+          && result.user !== null
+          && "id" in result.user
+          && typeof result.user.id === "string"
+        ) {
+          sessionStorage.setItem("dp_user_id", result.user.id);
+          sessionStorage.setItem("auth:current-user-id", result.user.id);
+        }
+        return true;
+      } catch (error: unknown) {
+        console.warn("[AppContext] Could not restore the saved access token.", error);
+        return false;
+      }
+    };
+
     const restoreSession = async () => {
       try {
         const response = await fetch(`${API_BASE}/v1/me`, {
@@ -770,6 +819,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               "devpulse_user_session",
               JSON.stringify(serverUser),
             );
+            await restoreAccessToken(serverUser.email);
             return;
           }
           console.warn("[AppContext] The server session response did not contain a valid user.");
@@ -822,40 +872,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           };
           setUser(profile);
 
-          const existingToken = sessionStorage.getItem("dp_access_token");
-          if (existingToken) {
-            setAccessToken(existingToken);
-            return;
-          }
-
-          try {
-            const db = await getDB();
-            const rows = await db
-              .select()
-              .from(schema.users)
-              .where(eq(schema.users.email, profile.email))
-              .limit(1);
-            const dbUser = rows[0];
-            if (!dbUser) {
-              console.warn("[AppContext] No local profile record found for restored session.");
-              return;
-            }
-
-            const devToken = btoa(JSON.stringify({
-              sub: dbUser.id,
-              email: dbUser.email,
-              name: dbUser.name,
-              iat: Math.floor(Date.now() / 1000),
-              exp: Math.floor(Date.now() / 1000) + 86400,
-            }));
-            sessionStorage.setItem("dp_access_token", devToken);
-            sessionStorage.setItem("dp_user_id", dbUser.id);
-            sessionStorage.setItem("auth:current-user-id", dbUser.id);
-            setAccessToken(devToken);
-            console.log("[AppContext] Restored session token for", profile.email);
-          } catch (error: unknown) {
-            console.warn("[AppContext] Could not restore the saved session token.", error);
-          }
+          await restoreAccessToken(profile.email);
         } else {
           console.warn("[AppContext] The saved local user session is invalid.");
         }
