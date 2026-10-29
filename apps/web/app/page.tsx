@@ -108,7 +108,7 @@ function AppContent() {
     <>
       {(servicesLoading || servicesError) && (
         <div
-          role={servicesError ? "alert" : "status"}
+          role="status"
           aria-live="polite"
           className="flex items-center justify-center gap-3 border-b border-[var(--border)] bg-[var(--surface-card)] px-4 py-2 text-sm text-[var(--text-secondary)]"
         >
@@ -116,7 +116,7 @@ function AppContent() {
           <span>
             {servicesLoading
               ? "Starting the local browser database..."
-              : `Local browser services could not start: ${servicesError}`}
+              : `Warning: local browser services could not start: ${servicesError}`}
           </span>
           {servicesError && (
             <button

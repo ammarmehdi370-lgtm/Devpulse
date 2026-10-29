@@ -56,9 +56,70 @@ isolation headers. The current IndexedDB-backed PGlite setup does not require
 and scripts that do not opt in to cross-origin embedding.
 
 The app remains visible while PGlite initializes. If browser services fail to
-start, the app displays the error and a **Retry** action instead of blocking
+start, the app displays a warning and a **Retry** action instead of blocking
 rendering. The database stays IndexedDB-backed; it does not silently switch to
-temporary in-memory storage that would lose data after a reload.
+temporary in-memory storage that would lose data after a reload. Browser app
+data uses the `devpulse` IndexedDB database.
+
+### Chrome browser debugging
+
+1. Start the browser app from the repository root:
+
+   ```powershell
+   pnpm install
+   pnpm --filter @devpulse/web dev
+   ```
+
+2. Open <http://localhost:3000> in Chrome. Open DevTools with **F12** (or
+   **Ctrl+Shift+I**), select **Console**, and note the first red error and its
+   file/line before changing anything. Use **Ctrl+Shift+R** for a hard reload
+   after a fix.
+3. Match the first error to the likely cause:
+
+   | Console symptom | Check |
+   | --- | --- |
+   | `SharedArrayBuffer is not defined`, COOP/COEP, or cross-origin isolation | Check hosting response headers. This PGlite IndexedDB configuration does not require cross-origin isolation. Do not add COOP/COEP headers. |
+   | `WebAssembly.instantiate is not a function` or a missing `@electric-sql/pglite` module | Verify dependencies with `pnpm --filter @devpulse/web list @electric-sql/pglite` and inspect `apps/web/next.config.mjs` for the WebAssembly setting. |
+   | `ServicesProvider` or a null-property exception | This repository uses `AppProvider` in `apps/web/app/context/AppContext.tsx`; look for the earliest application error and the browser-services warning. The login page should still render and offer **Retry** if initialization failed. |
+   | `Cannot find module`, TypeScript diagnostics, or a Next.js build error | Run the typecheck below and fix the first reported source error before rebuilding. |
+   | CORS or `fetch failed` for the API/auth/AI service | This may indicate an unavailable optional service rather than a Next.js startup failure. Check the request URL and the service-specific setup below; API-backed auth and AI features can remain unavailable. |
+
+4. Confirm browser storage: in DevTools open **Application → Storage →
+   IndexedDB** and inspect the `devpulse` database. The application opens this
+   database through PGlite and applies its migrations on initialization. Do not
+   clear site data unless you intend to delete local browser data.
+5. On the login page, use the development **Continue with GitHub** button
+   (it runs the local demo login in development). After login, confirm the
+   repositories page contains the four seeded demo repositories.
+
+### Typecheck and build verification
+
+From the repository root, run:
+
+```powershell
+pnpm --filter @devpulse/web typecheck
+pnpm --filter @devpulse/web build
+```
+
+Resolve the first TypeScript error reported by `tsc --noEmit`, then rerun the
+typecheck before building. For missing-module errors, first confirm the package
+is declared in `apps/web/package.json` and restore dependencies with
+`pnpm install --frozen-lockfile`; do not add a package that is already declared.
+For optional object fields, validate or default the value before passing it to
+an API that requires a string. For database query results, use the inferred
+schema type and handle the possibility that a row is absent rather than
+asserting an arbitrary type.
+
+Chrome verification checklist:
+
+- [ ] `pnpm --filter @devpulse/web typecheck` passes.
+- [ ] `pnpm --filter @devpulse/web build` passes.
+- [ ] Chrome opens <http://localhost:3000>.
+- [ ] The Console has no unexpected red application errors.
+- [ ] DevTools shows the `devpulse` database under **Application → IndexedDB**.
+- [ ] The login page renders with the Devpulse logo.
+- [ ] Development demo login works with `demo@devpulse.local`.
+- [ ] The repositories page shows four seeded repositories.
 
 On Vercel, set `NEXT_PUBLIC_AI_PROXY_URL` to the deployed Worker URL for the
 web build. Set `ANTHROPIC_API_KEY` and `JWT_PUBLIC_KEY` as secrets on the

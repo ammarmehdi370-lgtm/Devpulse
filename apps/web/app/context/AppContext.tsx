@@ -712,7 +712,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           });
       }
     }).catch((error: unknown) => {
-      console.error("[AppContext] Could not initialize browser services.", error);
+      console.warn("[AppContext] Could not initialize browser services.", error);
       if (active) {
         setServicesError(
           error instanceof Error
