@@ -15,7 +15,7 @@ Devpulse is a Turborepo monorepo for the web, API, real-time, AI, and mobile cli
 ```bash
 corepack enable
 pnpm install
-pnpm setup
+pnpm run bootstrap
 make dev
 ```
 

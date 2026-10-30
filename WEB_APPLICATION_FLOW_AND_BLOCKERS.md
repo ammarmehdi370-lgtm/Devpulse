@@ -79,15 +79,25 @@ are ready. See [Frontend implementation](apps/web/app/page.tsx),
 2. The browser calls the API auth routes. OAuth uses a provider redirect and
    callback; magic-link email uses Resend in production.
 3. The API validates the flow, creates or resolves the user and workspace,
-   issues an access token, and sets a refresh-token cookie.
-4. The frontend stores/refreshes its session and uses authenticated API calls
-   to retrieve the current user and protected data.
+   issues an access token, and sets an HTTP-only refresh-token cookie.
+4. The web app keeps the access token only in the shared in-memory auth store.
+   Authenticated requests include credentials; a 401 triggers one refresh and
+   retry. A failed retry clears the token and returns the UI to login.
+5. On startup, the app refreshes the session and requests `/v1/me`. It restores
+   a saved local profile only when the API is unreachable and data mode is
+   explicitly `local`.
 
 **Development path**
 
-The UI also has development/demo login paths backed by local app state. Do not
-assume those local credentials are valid server credentials: see the
-[authentication blockers](#frontend-and-authentication-blockers).
+Development login calls the API's development-only auth route, which returns a
+signed access token and sets the refresh cookie. The browser uses the returned
+server user as its profile; it does not mint a client token. The route is not
+registered in production.
+
+Magic-link verification sets the returned API access token before loading the
+canonical profile from `/v1/me`. The app's `login()` action only updates profile
+state and does not issue or replace credentials. Logout clears the in-memory
+token and requests the API logout route to expire its cookies.
 
 Relevant code: [login UI](apps/web/app/components/LoginPage.tsx),
 [auth API](apps/api/src/routes/auth.ts),
@@ -231,8 +241,8 @@ does not imply that every deployment is currently failing.
 | Issue | Impact | Evidence / next step |
 |---|---|---|
 | Browser-local and API-backed data paths are mixed | A browser-local write is not persisted to PostgreSQL and will not appear automatically on another device or API consumer. | Choose the source of truth per feature and implement explicit migration/synchronization if required. See [AppContext](apps/web/app/context/AppContext.tsx) and [browser services](apps/web/src/lib/services.ts). |
-| Development login token is not an API JWT | The local login helper constructs a base64-encoded token while the API expects a signed JWT. API-backed requests after this login can fail authentication. | Use the API's development auth flow or issue a valid development credential; avoid replacing a valid API token with a local-only token. See [AppContext auth actions](apps/web/app/context/AppContext.tsx) and [API token parsing](apps/api/src/index.ts). |
-| Magic-link verification token can be replaced during app login | The verification flow sets the API token and then calls the app login path, which can replace it with the local token. This can break subsequent authenticated API calls. | Preserve the verified API credential through user/session loading. See [AppContext auth actions](apps/web/app/context/AppContext.tsx) and [auth verification UI](apps/web/app/components/LoginPage.tsx). |
+| Client-generated and persisted access tokens could override API credentials | **Resolved in the current worktree.** Access tokens now live in one in-memory store, and authenticated requests refresh/retry once before expiring the session. | Vitest covers in-memory storage, verified-token reuse, refresh/retry, and logout; Playwright covers development login to an authorized project request. See [auth store](apps/web/src/lib/auth-store.ts) and [auth tests](apps/web/src/lib/auth-store.test.ts). |
+| Development and magic-link login could replace valid API credentials | **Resolved in the current worktree.** Development login consumes the API-issued JWT; magic-link verification installs the returned token before `/v1/me`; profile login does not mint tokens. | See [login UI](apps/web/app/components/LoginPage.tsx), [verification UI](apps/web/app/auth/verify/page.tsx), and [API auth routes](apps/api/src/routes/auth.ts). |
 | AI Studio endpoint differs from the editor/API endpoint | AI Studio requests do not follow the implemented `/v1/ai/chat` API route and may fail instead of reaching the configured AI service. | Align AI Studio with the intended API or Worker route and test streaming end-to-end. See [FullScreenAiPage](apps/web/app/components/FullScreenAiPage.tsx) and [API AI handlers](apps/api/src/index.ts). |
 | Some UI actions are simulations or placeholders | A successful UI state can be mistaken for real deployment/provisioning/billing behavior. | Label demo behavior clearly and connect actions to provisioner/provider APIs before claiming production support. See [AppContext](apps/web/app/context/AppContext.tsx) and the unavailable feature handling in [page.tsx](apps/web/app/page.tsx). |
 | Root navigation is mostly frontend state, not deep-linked routes | Refreshing or sharing a URL may not restore the selected product screen. | Define URL routes/deep-link behavior if direct navigation and refresh restoration are required. See [page.tsx](apps/web/app/page.tsx). |
@@ -285,16 +295,14 @@ does not imply that every deployment is currently failing.
 2. Decide which features are server-backed versus browser-local; define the
    data ownership/synchronization contract and consolidate browser service
    initialization where appropriate.
-3. Repair the auth credential flow so development and magic-link sessions use
-   credentials the API accepts.
-4. Align AI Studio with the actual authenticated streaming endpoint and choose
+3. Align AI Studio with the actual authenticated streaming endpoint and choose
    one production AI proxy path.
-5. Add and test consistent API and Socket.IO authentication/authorization,
+4. Add and test consistent API and Socket.IO authentication/authorization,
    including execution and workspace access.
-6. Clearly separate implemented integrations from demo/simulated screens;
+5. Clearly separate implemented integrations from demo/simulated screens;
    complete provisioning, deployment, billing, and collaboration integrations
    needed for the intended product scope.
-7. Run migrations, API/web tests, and Playwright E2E against a fully configured
+6. Run migrations, API/web tests, and Playwright E2E against a fully configured
    local stack, then separately verify OAuth, email, AI, and deployment
    integrations in a safe staging environment.
 

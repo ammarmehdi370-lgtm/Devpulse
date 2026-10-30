@@ -238,7 +238,7 @@ The web dependency set for the browser architecture is `@electric-sql/pglite`, `
 
 ### Project commands
 - pnpm install
-- pnpm setup
+- pnpm run bootstrap
 - pnpm migrate
 - pnpm seed
 - pnpm dev

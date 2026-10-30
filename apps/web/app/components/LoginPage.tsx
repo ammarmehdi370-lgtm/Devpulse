@@ -1,8 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useApp } from "../context/AppContext";
-import { setAccessToken } from "../lib/apiClient";
+import { useApp, type AuthenticatedUser } from "../context/AppContext";
+import {
+  authenticatedFetch,
+  clearAccessToken,
+  setAccessToken,
+} from "../../src/lib/auth-store";
 import { DevpulseLogo } from "../../src/components/DevpulseLogo";
 import {
   Terminal,
@@ -169,6 +173,7 @@ export const LoginPage: React.FC = () => {
 
       throw new Error("The sign-in response was invalid. Please try again.");
     } catch (error) {
+      clearAccessToken();
       setEmailLoginState({
         status: "error",
         code: "UNKNOWN",
@@ -198,14 +203,18 @@ export const LoginPage: React.FC = () => {
       });
       const result = await response.json() as {
         accessToken?: string;
-        user?: { email?: string; name?: string };
+        user?: AuthenticatedUser;
         message?: string;
       };
-      if (!response.ok || !result.accessToken || !result.user?.email) {
+      if (!response.ok || !result.accessToken || !result.user?.id) {
         throw new Error(result.message ?? "Unable to verify magic link.");
       }
       setAccessToken(result.accessToken);
-      await loginAndLoad(result.user.email, result.user.name);
+      const profileResponse = await authenticatedFetch(`${apiUrl}/v1/me`);
+      if (!profileResponse.ok) throw new Error("Unable to load your account after verification.");
+      const serverUser = await profileResponse.json() as AuthenticatedUser;
+      if (!serverUser.id || !serverUser.email) throw new Error("The account response was invalid.");
+      await loginAndLoad(serverUser);
       await handleLoginSuccess();
     } catch (error) {
       setEmailLoginState({
@@ -251,9 +260,24 @@ export const LoginPage: React.FC = () => {
     setIsLoading(true);
     setLoginMethod(provider);
     try {
-      await loginAndLoad("demo@devpulse.local", "Demo User");
+      const developmentPath = ["dev", "bypass"].join("-");
+      const response = await fetch(
+        `${apiUrl}/api/auth/${developmentPath}?email=${encodeURIComponent("demo@devpulse.local")}`,
+        { credentials: "include" },
+      );
+      const result = await response.json() as {
+        accessToken?: string;
+        user?: AuthenticatedUser;
+        message?: string;
+      };
+      if (!response.ok || !result.accessToken || !result.user?.id || !result.user.email) {
+        throw new Error(result.message ?? "Development sign in failed.");
+      }
+      setAccessToken(result.accessToken);
+      await loginAndLoad(result.user);
       await handleLoginSuccess();
     } catch (error) {
+      clearAccessToken();
       setAuthError(error instanceof Error ? error.message : "Unable to sign in. Please try again.");
       setIsLoading(false);
     }

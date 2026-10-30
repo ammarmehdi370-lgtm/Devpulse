@@ -31,6 +31,18 @@ describe("API foundation", () => {
     });
   });
 
+  it("clears refresh and session cookies on logout", async () => {
+    const response = await request(app).post("/api/auth/logout");
+    const header = response.headers["set-cookie"];
+    const cookies = Array.isArray(header) ? header.join(";") : header ?? "";
+
+    expect(response.status).toBe(204);
+    expect(cookies).toContain("refresh_token=;");
+    expect(cookies).toContain("devpulse_session=;");
+    expect(cookies).toContain("Path=/api/auth");
+    expect(cookies).toContain("Path=/;");
+  });
+
   it("returns a clear service-unavailable response when OAuth is not configured", async () => {
     const originalValues = {
       GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,

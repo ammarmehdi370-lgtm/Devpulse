@@ -6,6 +6,7 @@ import { FileService } from "../services/file.service";
 import { MessageService } from "../services/message.service";
 import { RealtimeService } from "./realtime";
 import { AIService } from "../services/ai.service";
+import { getAccessToken } from "./auth-store";
 
 export class BrowserServices {
   readonly store = new BrowserStateStore();
@@ -24,9 +25,7 @@ export class BrowserServices {
     this.files = new FileService(this.storage);
     this.ai = new AIService(
       process.env.NEXT_PUBLIC_AI_PROXY_URL ?? "",
-      () => typeof sessionStorage === "undefined"
-        ? null
-        : sessionStorage.getItem("devpulse.accessToken"),
+      getAccessToken,
       () => this.auth.getCurrentUserId(),
     );
   }

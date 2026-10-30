@@ -1,5 +1,6 @@
 ﻿import { and, eq, sql } from "drizzle-orm";
 import { getDB } from "../lib/db";
+import { authenticatedFetch } from "../lib/auth-store";
 import { aiUsage } from "../lib/db/schema";
 
 export interface AIContext {
@@ -71,10 +72,9 @@ export class AIService {
 
     let response: Response;
     try {
-      response = await fetch(this.endpoint, {
+      response = await authenticatedFetch(this.endpoint, {
         method: "POST",
         headers: {
-          authorization: `Bearer ${token}`,
           "content-type": "application/json",
           accept: "text/event-stream",
         },
@@ -208,4 +208,3 @@ export class AIService {
     });
   }
 }
-

@@ -2,6 +2,10 @@
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices } from "../../src/lib/services";
+import {
+  authenticatedFetch,
+  getAccessToken,
+} from "../../src/lib/auth-store";
 
 export type EditorRunRequest = {
   language: string;
@@ -364,14 +368,10 @@ export async function reconnectTerminalPreview(): Promise<TerminalReconnectResul
 export async function sendAssistantPreview(
   request: AssistantPreviewRequest,
 ): Promise<AssistantPreviewReply> {
-  const token = sessionStorage.getItem("dp_access_token");
-
-  if (!token) {
-    return { text: "Session expired. Please sign in again." };
-  }
+  const token = getAccessToken();
 
   try {
-    const response = await fetch("/api/ai/chat", {
+    const response = await authenticatedFetch("/api/ai/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -450,4 +450,3 @@ export async function getAIInlineCompletion(
     stopReason: "stop",
   };
 }
-

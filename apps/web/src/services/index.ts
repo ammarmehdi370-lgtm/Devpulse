@@ -7,6 +7,12 @@ import {
   type BrowserTransaction,
 } from "../lib/db";
 import {
+  authenticatedFetch,
+  clearAccessToken,
+  getAccessToken,
+  setAccessToken,
+} from "../lib/auth-store";
+import {
   aiConversations,
   aiMessages,
   aiUsage,
@@ -412,21 +418,12 @@ export class FileService {
 }
 
 export class AuthService {
-  private accessToken: string | null = null;
-
   setAccessToken(token: string | null): void {
-    this.accessToken = token;
-    if (typeof window !== "undefined") {
-      if (token) sessionStorage.setItem("devpulse.accessToken", token);
-      else sessionStorage.removeItem("devpulse.accessToken");
-    }
+    setAccessToken(token);
   }
 
   getAccessToken(): string | null {
-    if (this.accessToken) return this.accessToken;
-    if (typeof window === "undefined") return null;
-    this.accessToken = sessionStorage.getItem("devpulse.accessToken");
-    return this.accessToken;
+    return getAccessToken();
   }
 
   async requestMagicLink(endpoint: string, email: string): Promise<void> {
@@ -461,15 +458,12 @@ export class AuthService {
   }
 
   async signOut(endpoint: string): Promise<void> {
-    const response = await fetch(endpoint, {
+    const response = await authenticatedFetch(endpoint, {
       method: "POST",
-      headers: this.getAccessToken()
-        ? { authorization: `Bearer ${this.getAccessToken()}` }
-        : undefined,
       credentials: "include",
     });
     if (!response.ok) throw new Error(`Sign out failed (${response.status}).`);
-    this.setAccessToken(null);
+    clearAccessToken();
   }
 }
 
@@ -488,12 +482,10 @@ export class AIService {
     if (!this.endpoint) {
       throw new Error("NEXT_PUBLIC_AI_PROXY_URL must point to the deployed AI Worker.");
     }
-    const token = this.auth.getAccessToken();
-    if (!token) throw new Error("An authenticated session is required to use AI.");
-    const response = await fetch(this.endpoint, {
+    if (!this.auth.getAccessToken()) throw new Error("An authenticated session is required to use AI.");
+    const response = await authenticatedFetch(this.endpoint, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${token}`,
         "content-type": "application/json",
         accept: "text/event-stream",
       },
@@ -586,4 +578,3 @@ export class DevpulseServices {
     this.instancePromise = undefined;
   }
 }
-

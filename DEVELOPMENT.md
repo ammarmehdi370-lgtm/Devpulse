@@ -10,7 +10,7 @@ Requirements: Node.js 20.10+ and pnpm 9.15+.
 
 ```bash
 pnpm install
-pnpm setup
+pnpm run bootstrap
 pnpm dev
 ```
 
@@ -18,7 +18,7 @@ Open <http://localhost:3000>. In browser DevTools, inspect **Application →
 IndexedDB** for PGlite data and **Storage → Origin private file system** for
 OPFS files. Clearing site data removes local browser data.
 
-The setup command creates `.env` from `.env.example` only if it does not
+The bootstrap command creates `.env` from `.env.example` only if it does not
 already exist, and checks/install dependencies as needed. It never overwrites
 an existing `.env`. It also creates `apps/web/.env.local` from its public-only
 example if missing, which is where Next.js reads browser build variables.

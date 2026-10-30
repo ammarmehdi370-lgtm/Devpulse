@@ -236,7 +236,7 @@ The documented browser-web workflow is:
 
 ```text
 Step 1: pnpm install
-Step 2: pnpm setup
+Step 2: pnpm run bootstrap
 Step 3: pnpm dev
 Step 4: open http://localhost:3000
 ```

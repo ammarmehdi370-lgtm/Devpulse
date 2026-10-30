@@ -93,7 +93,6 @@ export const FullScreenAiPage: React.FC = () => {
         setPage("login");
         return;
       }
-      const token = sessionStorage.getItem("dp_access_token");
       const messages: Array<{
         role: string;
         text?: string;
@@ -109,7 +108,6 @@ export const FullScreenAiPage: React.FC = () => {
         headers: {
           "Content-Type": "application/json",
           Accept: "text/event-stream",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           messages: messages.map((message) => ({
@@ -462,4 +460,3 @@ export const FullScreenAiPage: React.FC = () => {
     </div>
   );
 };
-

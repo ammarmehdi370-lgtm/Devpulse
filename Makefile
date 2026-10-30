@@ -1,6 +1,6 @@
-.PHONY: setup infra dev dev-seed verify verify-win stop clean clean-cache clean-all reset logs build test lint typecheck migrate db-status db-migrate db-reset seed seed-reset generate studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
-setup:
-	pnpm setup
+.PHONY: bootstrap infra dev dev-seed verify verify-win stop clean clean-cache clean-all reset logs build test lint typecheck migrate db-status db-migrate db-reset seed seed-reset generate studio e2e-setup e2e e2e-headed e2e-ui e2e-report generate-secrets restore verify-install
+bootstrap:
+	pnpm run bootstrap
 infra:
 	bash scripts/start-services.sh
 dev:

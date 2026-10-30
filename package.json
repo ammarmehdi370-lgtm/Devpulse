@@ -37,7 +37,7 @@
     "seed": "pnpm --filter @devpulse/database seed",
     "seed:reset": "pnpm --filter @devpulse/database seed:reset",
     "studio": "pnpm --filter @devpulse/database studio",
-    "setup": "node scripts/setup.js",
+    "bootstrap": "node scripts/setup.js",
     "setup:stack": "node scripts/setup-env.mjs",
     "infra": "docker compose up -d postgres redis minio",
     "clean": "turbo run clean",

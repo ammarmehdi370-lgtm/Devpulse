@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setAccessToken } from "../../lib/apiClient";
+import {
+  authenticatedFetch,
+  clearAccessToken,
+  setAccessToken,
+} from "../../../src/lib/auth-store";
 
 type VerificationState = "verifying" | "success" | "error";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
@@ -32,10 +36,24 @@ export default function MagicLinkVerifyPage() {
         const body = await response.json() as { accessToken?: string; message?: string; error?: string };
         if (!response.ok || !body.accessToken) throw new Error(body.message || "This sign-in link is invalid or expired.");
         setAccessToken(body.accessToken);
+        const profileResponse = await authenticatedFetch(`${API_BASE}/v1/me`);
+        if (!profileResponse.ok) throw new Error("Unable to load your account after verification.");
+        const profile: unknown = await profileResponse.json();
+        if (
+          typeof profile !== "object"
+          || profile === null
+          || !("id" in profile)
+          || typeof profile.id !== "string"
+          || !("email" in profile)
+          || typeof profile.email !== "string"
+        ) {
+          throw new Error("The account response was invalid.");
+        }
         setState("success");
         window.setTimeout(() => router.replace("/"), 1200);
       })
       .catch((reason: unknown) => {
+        clearAccessToken();
         setError(reason instanceof Error ? reason.message : "Network error. Please try again.");
         setState("error");
       });

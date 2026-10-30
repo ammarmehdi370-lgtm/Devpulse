@@ -435,6 +435,12 @@ router.post("/refresh", async (request, response) => {
 
 router.post("/logout", (_request, response) => {
   response.clearCookie("refresh_token", refreshCookieOptions);
+  response.clearCookie("devpulse_session", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  });
   return response.status(204).send();
 });
 

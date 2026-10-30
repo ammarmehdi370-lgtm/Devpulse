@@ -2,11 +2,17 @@
 
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { asc, eq } from "drizzle-orm";
-import { authenticatedFetch, setAccessToken } from "../lib/apiClient";
+import {
+  authenticatedFetch,
+  clearAccessToken,
+  logoutSession,
+  onSessionExpired,
+  setAccessToken,
+} from "../../src/lib/auth-store";
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices, type BrowserServices } from "../../src/lib/services";
-import { connectSocket, disconnectSocket } from "../../src/lib/socket-client";
+import { disconnectSocket } from "../../src/lib/socket-client";
 import { saveEditorPreview } from "../services/editorMocks";
 import { THEME_PRESETS, type ThemeConfig } from "./themeLibrary";
 import { ToastContainer, type ToastMessage } from "../components/ToastContainer";
@@ -37,6 +43,13 @@ export interface UserProfile {
   role: string;
   avatar: string;
   isAuthenticated: boolean;
+}
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  name?: string | null;
+  avatarUrl?: string | null;
+  role?: string;
 }
 export interface Repository {
   id: string;
@@ -128,8 +141,8 @@ interface AppContextType {
   page: PageType;
   setPage: (page: PageType) => void;
   user: UserProfile;
-  login: (email?: string, name?: string) => Promise<void>;
-  loginAndLoad: (email?: string, name?: string) => Promise<void>;
+  login: (serverUser: AuthenticatedUser) => void;
+  loginAndLoad: (serverUser: AuthenticatedUser) => Promise<void>;
   servicesLoading: boolean;
   servicesError: string | null;
   retryServices: () => void;
@@ -236,6 +249,7 @@ const EMPTY_DEPLOYMENTS: Deployment[] = [];
 const EMPTY_ENV_VARS: EnvVariable[] = [];
 const EMPTY_LOGS: LogLine[] = [];
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const IS_LOCAL_DATA_MODE = process.env.NEXT_PUBLIC_DATA_MODE === "local";
 const LARGE_FILE_LIMIT_BYTES = 500 * 1024;
 
 const getLanguageColor = (language?: string | null) => {
@@ -583,18 +597,47 @@ const getCurrentUserId = () =>
   sessionStorage.getItem("auth:current-user-id") ??
   sessionStorage.getItem("dp_user_id");
 
-const isStoredDemoSession = (session: string | null): boolean => {
-  if (!session) return false;
+const parseStoredProfile = (session: string | null): UserProfile | null => {
+  if (!session) return null;
   try {
     const parsed: unknown = JSON.parse(session);
-    return typeof parsed === "object"
+    if (typeof parsed === "object"
       && parsed !== null
+      && "name" in parsed
+      && typeof parsed.name === "string"
       && "email" in parsed
-      && parsed.email === "demo@devpulse.local";
+      && typeof parsed.email === "string"
+      && "handle" in parsed
+      && typeof parsed.handle === "string"
+      && "role" in parsed
+      && typeof parsed.role === "string"
+      && "avatar" in parsed
+      && typeof parsed.avatar === "string"
+      && "isAuthenticated" in parsed
+      && parsed.isAuthenticated === true) {
+      return {
+        name: parsed.name,
+        email: parsed.email,
+        handle: parsed.handle,
+        role: parsed.role,
+        avatar: parsed.avatar,
+        isAuthenticated: true,
+      };
+    }
   } catch {
-    return false;
+    return null;
   }
+  return null;
 };
+
+const toUserProfile = (serverUser: AuthenticatedUser): UserProfile => ({
+  name: serverUser.name ?? serverUser.email.split("@")[0] ?? "User",
+  email: serverUser.email,
+  handle: serverUser.email.split("@")[0] ?? "",
+  role: serverUser.role ?? "Platform Engineer",
+  avatar: serverUser.avatarUrl ?? "",
+  isAuthenticated: true,
+});
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -746,160 +789,90 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     let active = true;
 
-    const restoreAccessToken = async (email: string): Promise<boolean> => {
-      const existingToken = sessionStorage.getItem("dp_access_token");
-      if (existingToken) {
-        setAccessToken(existingToken);
-        return true;
-      }
-
-      try {
-        let response = await fetch(`${API_BASE}/api/auth/refresh`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!response.ok && process.env.NODE_ENV !== "production") {
-          response = await fetch(
-            `${API_BASE}/api/auth/dev-bypass?email=${encodeURIComponent(email)}`,
-            { credentials: "include" },
-          );
-        }
-        if (!active || !response.ok) return false;
-
-        const result: unknown = await response.json();
-        if (
-          typeof result !== "object"
-          || result === null
-          || !("accessToken" in result)
-          || typeof result.accessToken !== "string"
-        ) {
-          return false;
-        }
-
-        sessionStorage.setItem("dp_access_token", result.accessToken);
-        setAccessToken(result.accessToken);
-        if (
-          "user" in result
-          && typeof result.user === "object"
-          && result.user !== null
-          && "id" in result.user
-          && typeof result.user.id === "string"
-        ) {
-          sessionStorage.setItem("dp_user_id", result.user.id);
-          sessionStorage.setItem("auth:current-user-id", result.user.id);
-        }
-        return true;
-      } catch (error: unknown) {
-        console.warn("[AppContext] Could not restore the saved access token.", error);
-        return false;
-      }
-    };
-
     const restoreSession = async () => {
       if (localStorage.getItem("devpulse_logged_out") === "true") return;
-
       const saved = localStorage.getItem("devpulse_user_session");
-      const existingToken = sessionStorage.getItem("dp_access_token");
-      if (!saved && !existingToken) return;
-      if (existingToken) setAccessToken(existingToken);
-
-      if (!isStoredDemoSession(saved)) {
+      let serverUnreachable = false;
+      try {
+        let refreshResponse: Response;
         try {
-          const response = await fetch(`${API_BASE}/v1/me`, {
-            headers: existingToken
-              ? { Authorization: `Bearer ${existingToken}` }
-              : undefined,
+          refreshResponse = await fetch(`${API_BASE}/api/auth/refresh`, {
+            method: "POST",
             credentials: "include",
             signal: AbortSignal.timeout(3000),
           });
-
-          if (response.ok) {
-            const data: unknown = await response.json();
-            if (
-              typeof data === "object"
-              && data !== null
-              && "email" in data
-              && typeof data.email === "string"
-            ) {
-              const serverUser: UserProfile = {
-                name: "name" in data && typeof data.name === "string"
-                  ? data.name
-                  : "Demo User",
-                email: data.email,
-                handle: "handle" in data && typeof data.handle === "string"
-                  ? data.handle
-                  : data.email.split("@")[0] ?? "",
-                role: "role" in data && typeof data.role === "string"
-                  ? data.role
-                  : "Platform Engineer",
-                avatar: "avatarUrl" in data && typeof data.avatarUrl === "string"
-                  ? data.avatarUrl
-                  : "",
-                isAuthenticated: true,
-              };
-              if (!active) return;
-              setUser(serverUser);
-              localStorage.setItem(
-                "devpulse_user_session",
-                JSON.stringify(serverUser),
-              );
-              await restoreAccessToken(serverUser.email);
-              return;
-            }
-            console.warn("[AppContext] The server session response did not contain a valid user.");
-          } else {
-            console.warn(
-              `[AppContext] Server session check failed (${response.status}); trying the local session.`,
-            );
-          }
-        } catch (error: unknown) {
-          if (active) {
-            console.warn(
-              "[AppContext] Server session is unavailable; trying the local session.",
-              error,
-            );
-          }
+        } catch (error) {
+          serverUnreachable = true;
+          throw error;
         }
-      }
+        if (!active) return;
+        if (!refreshResponse.ok) {
+          clearAccessToken();
+          return;
+        }
 
-      if (!active) return;
-
-      if (!saved) return;
-
-      try {
-        const parsed: unknown = JSON.parse(saved);
+        const refreshBody: unknown = await refreshResponse.json();
         if (
-          typeof parsed === "object"
-          && parsed !== null
-          && "name" in parsed
-          && typeof parsed.name === "string"
-          && "email" in parsed
-          && typeof parsed.email === "string"
-          && "handle" in parsed
-          && typeof parsed.handle === "string"
-          && "role" in parsed
-          && typeof parsed.role === "string"
-          && "avatar" in parsed
-          && typeof parsed.avatar === "string"
-          && "isAuthenticated" in parsed
-          && parsed.isAuthenticated === true
+          typeof refreshBody !== "object"
+          || refreshBody === null
+          || !("accessToken" in refreshBody)
+          || typeof refreshBody.accessToken !== "string"
         ) {
-          const profile: UserProfile = {
-            name: parsed.name,
-            email: parsed.email,
-            handle: parsed.handle,
-            role: parsed.role,
-            avatar: parsed.avatar,
-            isAuthenticated: true,
-          };
-          setUser(profile);
-
-          await restoreAccessToken(profile.email);
-        } else {
-          console.warn("[AppContext] The saved local user session is invalid.");
+          throw new Error("Session refresh response did not contain an access token.");
         }
+        setAccessToken(refreshBody.accessToken);
+
+        let response: Response;
+        try {
+          response = await authenticatedFetch(`${API_BASE}/v1/me`, {
+            signal: AbortSignal.timeout(3000),
+          });
+        } catch (error) {
+          serverUnreachable = true;
+          throw error;
+        }
+        if (!active) return;
+        if (!response.ok) {
+          clearAccessToken();
+          return;
+        }
+        const data: unknown = await response.json();
+        if (
+          typeof data !== "object"
+          || data === null
+          || !("id" in data)
+          || typeof data.id !== "string"
+          || !("email" in data)
+          || typeof data.email !== "string"
+        ) {
+          throw new Error("Current-user response did not contain a valid user.");
+        }
+        const serverUser: AuthenticatedUser = {
+          id: data.id,
+          email: data.email,
+          name: "name" in data && typeof data.name === "string" ? data.name : null,
+          avatarUrl: "avatarUrl" in data && typeof data.avatarUrl === "string"
+            ? data.avatarUrl
+            : null,
+          role: "role" in data && typeof data.role === "string" ? data.role : undefined,
+        };
+        const profile = toUserProfile(serverUser);
+        setUser(profile);
+        initializedUserIdRef.current = serverUser.id;
+        sessionStorage.setItem("auth:current-user-id", serverUser.id);
+        sessionStorage.setItem("dp_user_id", serverUser.id);
+        localStorage.setItem("devpulse_user_session", JSON.stringify(profile));
       } catch (error: unknown) {
-        console.warn("[AppContext] Could not read the saved local user session.", error);
+        clearAccessToken();
+        if (!active) return;
+        if (serverUnreachable && IS_LOCAL_DATA_MODE) {
+          const localProfile = parseStoredProfile(saved);
+          if (localProfile) {
+            setUser(localProfile);
+            return;
+          }
+        }
+        console.warn("[AppContext] Server session could not be restored.", error);
       }
     };
 
@@ -918,6 +891,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       active = false;
     };
   }, []);
+
+  useEffect(() => onSessionExpired(() => {
+    sessionStorage.removeItem("auth:current-user-id");
+    sessionStorage.removeItem("dp_user_id");
+    localStorage.removeItem("devpulse_user_session");
+    localStorage.setItem("devpulse_logged_out", "true");
+    setUser({
+      name: "Alex",
+      email: "alex@devpulse.dev",
+      handle: "alex",
+      role: "Staff Platform Engineer",
+      avatar: "",
+      isAuthenticated: false,
+    });
+    setPage("login");
+  }), []);
 
   useEffect(() => {
     if (
@@ -958,83 +947,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const login = async (email?: string, name?: string) => {
-    if (!services) throw new Error("Browser services are still initializing.");
-    const db = await getDB();
-    const targetEmail = email ?? "demo@devpulse.local";
-    const existingRows = await db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.email, targetEmail))
-      .limit(1);
-
-    let dbUser = existingRows[0];
-    if (!dbUser) {
-      const [created] = await db.insert(schema.users).values({
-        id: crypto.randomUUID(),
-        email: targetEmail,
-        name: name ?? "Demo User",
-        avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${crypto.randomUUID()}`,
-      }).returning();
-      dbUser = created;
-    }
-
-    if (!dbUser) throw new Error("Could not create or load the local user.");
-
-    const memberships = await db
-      .select()
-      .from(schema.workspaceMembers)
-      .where(eq(schema.workspaceMembers.userId, dbUser.id))
-      .limit(1);
-    let workspaceId = memberships[0]?.workspaceId;
-    if (memberships.length === 0) {
-      workspaceId = crypto.randomUUID();
-      const slugBase = dbUser.name?.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "workspace";
-      const [workspace] = await db.insert(schema.workspaces).values({
-        id: workspaceId,
-        name: `${dbUser.name ?? "Devpulse"}'s Workspace`,
-        slug: `${slugBase}-${workspaceId.slice(0, 8)}`,
-        ownerId: dbUser.id,
-      }).returning();
-      if (!workspace) throw new Error("Could not create the user's local workspace.");
-      await db.insert(schema.workspaceMembers).values({
-        workspaceId,
-        userId: dbUser.id,
-        role: "OWNER",
-      });
-      await db.insert(schema.channels).values({
-        id: crypto.randomUUID(),
-        workspaceId,
-        name: "general",
-        type: "PUBLIC",
-      });
-    }
-
-    const profile: UserProfile = {
-      name: dbUser.name ?? (name ?? "Demo User"),
-      email: dbUser.email,
-      handle: (name ?? dbUser.name ?? "demo").toLowerCase().replace(/\s+/g, "") || "demo",
-      role: "Staff Platform Engineer",
-      avatar: dbUser.avatarUrl ?? `https://api.dicebear.com/7.x/avataaars/svg?seed=${dbUser.id}`,
-      isAuthenticated: true,
-    };
-
-    setUser(profile);
-    initializedUserIdRef.current = dbUser.id;
-    sessionStorage.setItem("auth:current-user-id", dbUser.id);
-    sessionStorage.setItem("dp_user_id", dbUser.id);
-    const devToken = btoa(JSON.stringify({
-      sub: dbUser.id,
-      email: dbUser.email,
-      name: dbUser.name,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400,
-    }));
-    sessionStorage.setItem("dp_access_token", devToken);
-    if (workspaceId) connectSocket(workspaceId, dbUser.id);
-    services.realtime.setUserId(dbUser.id);
-    localStorage.setItem("devpulse_user_session", JSON.stringify(profile));
-    localStorage.removeItem("devpulse_logged_out");
+  const login = (serverUser: AuthenticatedUser) => {
+    setUser(toUserProfile(serverUser));
   };
 
   const logout = async () => {
@@ -1049,11 +963,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     }
     services?.realtime.setUserId(null);
-    setAccessToken(null);
-    void authenticatedFetch(`${API_BASE}/v1/auth/logout`, {
-      method: "POST",
-      credentials: "include",
-    });
+    clearAccessToken();
     setUser({
       name: "Alex",
       email: "alex@devpulse.dev",
@@ -1064,9 +974,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     });
     sessionStorage.removeItem("auth:current-user-id");
     sessionStorage.removeItem("dp_user_id");
-    sessionStorage.removeItem("dp_access_token");
+    localStorage.removeItem("devpulse_user_session");
     localStorage.setItem("devpulse_logged_out", "true");
     setPage("login");
+    try {
+      await logoutSession();
+    } catch (error: unknown) {
+      console.error("[AppContext] Server logout request failed.", error);
+    }
   };
 
   const loadRepositories = async () => {
@@ -1643,12 +1558,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       ? "repositories"
       : "theme";
 
-  const loginAndLoad = async (email?: string, name?: string) => {
+  const loginAndLoad = async (serverUser: AuthenticatedUser) => {
     setIsDataLoading(true);
     setDataErrors(EMPTY_DATA_ERRORS);
     try {
-      await login(email, name);
-      initializedUserIdRef.current = getCurrentUserId() ?? null;
+      login(serverUser);
+      initializedUserIdRef.current = serverUser.id;
+      sessionStorage.setItem("auth:current-user-id", serverUser.id);
+      sessionStorage.setItem("dp_user_id", serverUser.id);
+      services?.realtime.setUserId(serverUser.id);
+      localStorage.setItem("devpulse_user_session", JSON.stringify(toUserProfile(serverUser)));
+      localStorage.removeItem("devpulse_logged_out");
       setDataErrors(await loadInitialAppData());
       setPage(getPostLoginPage());
     } catch (error) {
