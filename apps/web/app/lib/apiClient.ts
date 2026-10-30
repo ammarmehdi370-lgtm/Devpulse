@@ -5,6 +5,13 @@ let refreshPromise: Promise<string | null> | null = null;
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  if (typeof window !== "undefined") {
+    if (token) {
+      sessionStorage.setItem("dp_access_token", token);
+    } else {
+      sessionStorage.removeItem("dp_access_token");
+    }
+  }
 }
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -40,5 +47,4 @@ export async function authenticatedFetch(input: RequestInfo | URL, init: Request
   retryHeaders.set("Authorization", `Bearer ${nextToken}`);
   return fetch(input, { ...requestInit, headers: retryHeaders });
 }
-
 

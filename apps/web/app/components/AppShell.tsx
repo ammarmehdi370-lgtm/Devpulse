@@ -220,6 +220,7 @@ export const AppShell: React.FC<{ children?: React.ReactNode; minimal?: boolean 
       d: "deployments",
       c: "chat",
       a: "ai-studio",
+      m: "remote-control",
       p: "pricing",
       y: "activity",
     };

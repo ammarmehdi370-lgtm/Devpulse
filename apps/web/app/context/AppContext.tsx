@@ -583,6 +583,19 @@ const getCurrentUserId = () =>
   sessionStorage.getItem("auth:current-user-id") ??
   sessionStorage.getItem("dp_user_id");
 
+const isStoredDemoSession = (session: string | null): boolean => {
+  if (!session) return false;
+  try {
+    const parsed: unknown = JSON.parse(session);
+    return typeof parsed === "object"
+      && parsed !== null
+      && "email" in parsed
+      && parsed.email === "demo@devpulse.local";
+  } catch {
+    return false;
+  }
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
@@ -783,65 +796,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     };
 
     const restoreSession = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/v1/me`, {
-          credentials: "include",
-          signal: AbortSignal.timeout(3000),
-        });
-
-        if (response.ok) {
-          const data: unknown = await response.json();
-          if (
-            typeof data === "object"
-            && data !== null
-            && "email" in data
-            && typeof data.email === "string"
-          ) {
-            const serverUser: UserProfile = {
-              name: "name" in data && typeof data.name === "string"
-                ? data.name
-                : "Demo User",
-              email: data.email,
-              handle: "handle" in data && typeof data.handle === "string"
-                ? data.handle
-                : data.email.split("@")[0] ?? "",
-              role: "role" in data && typeof data.role === "string"
-                ? data.role
-                : "Platform Engineer",
-              avatar: "avatarUrl" in data && typeof data.avatarUrl === "string"
-                ? data.avatarUrl
-                : "",
-              isAuthenticated: true,
-            };
-            if (!active) return;
-            setUser(serverUser);
-            localStorage.setItem(
-              "devpulse_user_session",
-              JSON.stringify(serverUser),
-            );
-            await restoreAccessToken(serverUser.email);
-            return;
-          }
-          console.warn("[AppContext] The server session response did not contain a valid user.");
-        } else {
-          console.warn(
-            `[AppContext] Server session check failed (${response.status}); trying the local session.`,
-          );
-        }
-      } catch (error: unknown) {
-        if (active) {
-          console.warn(
-            "[AppContext] Server session is unavailable; trying the local session.",
-            error,
-          );
-        }
-      }
-
-      if (!active || localStorage.getItem("devpulse_logged_out") === "true") {
-        return;
-      }
+      if (localStorage.getItem("devpulse_logged_out") === "true") return;
 
       const saved = localStorage.getItem("devpulse_user_session");
+      const existingToken = sessionStorage.getItem("dp_access_token");
+      if (!saved && !existingToken) return;
+      if (existingToken) setAccessToken(existingToken);
+
+      if (!isStoredDemoSession(saved)) {
+        try {
+          const response = await fetch(`${API_BASE}/v1/me`, {
+            headers: existingToken
+              ? { Authorization: `Bearer ${existingToken}` }
+              : undefined,
+            credentials: "include",
+            signal: AbortSignal.timeout(3000),
+          });
+
+          if (response.ok) {
+            const data: unknown = await response.json();
+            if (
+              typeof data === "object"
+              && data !== null
+              && "email" in data
+              && typeof data.email === "string"
+            ) {
+              const serverUser: UserProfile = {
+                name: "name" in data && typeof data.name === "string"
+                  ? data.name
+                  : "Demo User",
+                email: data.email,
+                handle: "handle" in data && typeof data.handle === "string"
+                  ? data.handle
+                  : data.email.split("@")[0] ?? "",
+                role: "role" in data && typeof data.role === "string"
+                  ? data.role
+                  : "Platform Engineer",
+                avatar: "avatarUrl" in data && typeof data.avatarUrl === "string"
+                  ? data.avatarUrl
+                  : "",
+                isAuthenticated: true,
+              };
+              if (!active) return;
+              setUser(serverUser);
+              localStorage.setItem(
+                "devpulse_user_session",
+                JSON.stringify(serverUser),
+              );
+              await restoreAccessToken(serverUser.email);
+              return;
+            }
+            console.warn("[AppContext] The server session response did not contain a valid user.");
+          } else {
+            console.warn(
+              `[AppContext] Server session check failed (${response.status}); trying the local session.`,
+            );
+          }
+        } catch (error: unknown) {
+          if (active) {
+            console.warn(
+              "[AppContext] Server session is unavailable; trying the local session.",
+              error,
+            );
+          }
+        }
+      }
+
+      if (!active) return;
+
       if (!saved) return;
 
       try {
@@ -898,7 +920,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => {
-    if (!services || !isClientStorageHydrated || !user.isAuthenticated) return;
+    if (
+      !services?.realtime ||
+      !isClientStorageHydrated ||
+      !user.isAuthenticated
+    ) return;
     const userId = getCurrentUserId();
     if (!userId) return;
 
@@ -1546,14 +1572,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!userId) throw new Error("Cannot load application data without a user.");
 
     const loadWorkspaces = async () => {
+      if (user.email === "demo@devpulse.local") {
+        setWorkspaces(INITIAL_WORKSPACES);
+        return;
+      }
       const response = await apiJson<{ devboxes: WorkspaceDevbox[] }>("/v1/devboxes");
       setWorkspaces(response.devboxes);
     };
     const loadDeployments = async () => {
+      if (user.email === "demo@devpulse.local") {
+        setDeployments(INITIAL_DEPLOYMENTS);
+        return;
+      }
       const response = await apiJson<{ deployments: Deployment[] }>("/v1/deployments");
       setDeployments(response.deployments);
     };
     const loadEnvironmentVariables = async () => {
+      if (user.email === "demo@devpulse.local") {
+        setEnvVars(INITIAL_ENV_VARS);
+        return;
+      }
       const response = await apiJson<{ variables: EnvVariable[] }>("/v1/environment-variables");
       setEnvVars(response.variables);
     };

@@ -354,7 +354,7 @@ export async function seedIfEmpty(): Promise<DemoSeedResult> {
       id,
       workspaceId: ids.workspace,
       name,
-      type: "PUBLIC",
+      type: "PUBLIC" as const,
     }))).onConflictDoNothing();
     await tx.insert(messages).values([
       {

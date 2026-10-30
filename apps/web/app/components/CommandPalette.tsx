@@ -45,6 +45,97 @@ export interface Command {
   keywords?: string[];
 }
 
+type NavigationCommand = Pick<
+  Command,
+  "id" | "label" | "description" | "icon" | "shortcut" | "keywords"
+> & {
+  page: PageType;
+};
+
+const NAV_COMMANDS: NavigationCommand[] = [
+  {
+    id: "nav:workspaces",
+    label: "Go to Workspaces",
+    description: "Cloud Workspaces",
+    icon: Server,
+    shortcut: "⌥W",
+    page: "workspaces",
+    keywords: ["workspace", "devbox", "cloud"],
+  },
+  {
+    id: "nav:repositories",
+    label: "Go to Repositories",
+    description: "Code Projects",
+    icon: GitBranch,
+    shortcut: "⌥R",
+    page: "repositories",
+    keywords: ["repo", "git", "code", "project"],
+  },
+  {
+    id: "nav:editor",
+    label: "Go to Editor",
+    description: "Maestro Code Studio",
+    icon: Code2,
+    shortcut: "⌥E",
+    page: "editor",
+    keywords: ["code", "edit", "file", "monaco"],
+  },
+  {
+    id: "nav:deployments",
+    label: "Go to Deployments",
+    description: "Live Releases & Health",
+    icon: Rocket,
+    shortcut: "⌥D",
+    page: "deployments",
+    keywords: ["deploy", "release", "pipeline"],
+  },
+  {
+    id: "nav:chat",
+    label: "Go to Team Chat",
+    description: "Pulse Chat",
+    icon: MessageSquare,
+    shortcut: "⌥C",
+    page: "chat",
+    keywords: ["chat", "message", "team", "channel"],
+  },
+  {
+    id: "nav:ai-studio",
+    label: "Open AI Studio",
+    description: "Full-screen AI workspace",
+    icon: Sparkles,
+    shortcut: "⌥A",
+    page: "ai-studio",
+    keywords: ["ai", "assistant", "claude", "chat"],
+  },
+  {
+    id: "nav:remote-control",
+    label: "Go to Remote Control",
+    description: "Pulse Pilot",
+    icon: MonitorPlay,
+    shortcut: "⌥M",
+    page: "remote-control",
+    keywords: ["remote", "control", "pilot", "huddle", "pair"],
+  },
+  {
+    id: "nav:activity",
+    label: "Go to Activity",
+    description: "Your Activity",
+    icon: Activity,
+    shortcut: "⌥Y",
+    page: "activity",
+    keywords: ["activity", "log", "history", "events", "timeline"],
+  },
+  {
+    id: "nav:pricing",
+    label: "View Plans & Pricing",
+    description: "Plans & Billing",
+    icon: CreditCard,
+    shortcut: "⌥P",
+    page: "pricing",
+    keywords: ["plan", "billing", "price", "upgrade"],
+  },
+];
+
 const CATEGORY_ORDER: CommandCategory[] = [
   "navigation",
   "editor",
@@ -145,97 +236,13 @@ export const CommandPalette: React.FC = () => {
   }, [closePalette, setPage]);
 
   const commands = useMemo((): Command[] => {
-    const navigationCommands: Command[] = [
-      {
-        id: "nav:workspaces",
-        label: "Go to Workspaces",
-        description: "Cloud Workspaces",
+    const navigationCommands: Command[] = NAV_COMMANDS.map(
+      ({ page, ...command }) => ({
+        ...command,
         category: "navigation",
-        icon: Server,
-        shortcut: "⌥W",
-        keywords: ["workspace", "devbox", "cloud"],
-        action: () => navigate("workspaces"),
-      },
-      {
-        id: "nav:repositories",
-        label: "Go to Repositories",
-        description: "Code Projects",
-        category: "navigation",
-        icon: GitBranch,
-        shortcut: "⌥R",
-        keywords: ["repo", "git", "code", "project"],
-        action: () => navigate("repositories"),
-      },
-      {
-        id: "nav:editor",
-        label: "Go to Editor",
-        description: "Maestro Code Studio",
-        category: "navigation",
-        icon: Code2,
-        shortcut: "⌥E",
-        keywords: ["code", "edit", "file", "monaco"],
-        action: () => navigate("editor"),
-      },
-      {
-        id: "nav:deployments",
-        label: "Go to Deployments",
-        description: "Live Releases & Health",
-        category: "navigation",
-        icon: Rocket,
-        shortcut: "⌥D",
-        keywords: ["deploy", "release", "pipeline"],
-        action: () => navigate("deployments"),
-      },
-      {
-        id: "nav:chat",
-        label: "Go to Team Chat",
-        description: "Pulse Chat",
-        category: "navigation",
-        icon: MessageSquare,
-        shortcut: "⌥C",
-        keywords: ["chat", "message", "team", "channel"],
-        action: () => navigate("chat"),
-      },
-      {
-        id: "nav:ai-studio",
-        label: "Open AI Studio",
-        description: "Full-screen AI workspace",
-        category: "navigation",
-        icon: Sparkles,
-        shortcut: "⌥A",
-        keywords: ["ai", "assistant", "claude", "chat"],
-        action: () => navigate("ai-studio"),
-      },
-      {
-        id: "nav:remote-control",
-        label: "Go to Remote Control",
-        description: "Pulse Pilot",
-        category: "navigation",
-        icon: MonitorPlay,
-        keywords: ["remote", "control", "pilot", "huddle", "pair"],
-        action: () => navigate("remote-control"),
-      },
-      {
-        id: "nav:pricing",
-        label: "View Plans & Pricing",
-        description: "Plans & Billing",
-        category: "navigation",
-        icon: CreditCard,
-        shortcut: "⌥P",
-        keywords: ["plan", "billing", "price", "upgrade"],
-        action: () => navigate("pricing"),
-      },
-      {
-        id: "nav:activity",
-        label: "Go to Activity",
-        description: "Your Activity",
-        category: "navigation",
-        icon: Activity,
-        shortcut: "⌥Y",
-        keywords: ["activity", "log", "history", "events", "timeline"],
-        action: () => navigate("activity"),
-      },
-    ];
+        action: () => navigate(page),
+      }),
+    );
 
     const themeCommands: Command[] = [
       {
