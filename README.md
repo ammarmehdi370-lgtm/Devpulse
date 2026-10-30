@@ -61,3 +61,7 @@ make clean-all    # Reinstall workspace dependencies
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for branch and commit conventions. Never commit a real `.env` file or production credentials.
+
+For the end-to-end frontend, backend, database, and integration flow—including
+known blockers—see the [Web Application Flow and Blockers](WEB_APPLICATION_FLOW_AND_BLOCKERS.md)
+guide.

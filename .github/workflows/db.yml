@@ -1,0 +1,51 @@
+name: Database Migrations
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  migrations:
+    name: Validate database migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: x
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:x@localhost:5432/postgres
+      DIRECT_DATABASE_URL: postgresql://postgres:x@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Deploy migrations to an empty database
+        run: pnpm --filter @devpulse/database exec prisma migrate deploy --schema prisma/schema.prisma
+      - name: Check migration status
+        run: pnpm --filter @devpulse/database exec prisma migrate status --schema prisma/schema.prisma
+      - name: Check database schema matches Prisma
+        run: >-
+          pnpm --filter @devpulse/database exec prisma migrate diff
+          --from-url "$DATABASE_URL"
+          --to-schema-datamodel prisma/schema.prisma
+          --exit-code
+      - name: Validate Prisma schema
+        run: pnpm --filter @devpulse/database exec prisma validate --schema prisma/schema.prisma
