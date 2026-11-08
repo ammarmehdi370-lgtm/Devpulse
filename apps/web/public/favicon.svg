@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <rect width="48" height="48" rx="12" fill="#0D1117"/>
+  <defs>
+    <linearGradient id="primaryRibbon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="50%" stop-color="#8B5CF6"/>
+      <stop offset="100%" stop-color="#EC4899"/>
+    </linearGradient>
+    <linearGradient id="syncNode" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+  </defs>
+  <path d="M18 10 8 20l10 10" fill="none" stroke="url(#primaryRibbon)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m30 18 10 10-10 10" fill="none" stroke="url(#syncNode)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="24" cy="24" r="4.5" fill="none" stroke="url(#primaryRibbon)" stroke-width="2.5"/>
+  <circle cx="24" cy="24" r="1.8" fill="#06B6D4"/>
+</svg>

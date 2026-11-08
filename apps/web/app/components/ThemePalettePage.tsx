@@ -3,8 +3,8 @@
 import React from "react";
 import { ArrowRight, Code2, Layers } from "lucide-react";
 import { useApp } from "../context/AppContext";
+import { BrandMark } from "./BrandLogo";
 import { ThemeMenu, ThemePreviewCard } from "./ThemeMenu";
-import { LOGO_COLORS } from "../logoColors";
 
 export const ThemePalettePage: React.FC = () => {
   const { theme, setPage, workspaces } = useApp();
@@ -19,16 +19,7 @@ export const ThemePalettePage: React.FC = () => {
         <div className="pointer-events-none absolute inset-px -z-10 rounded-[calc(var(--ide-radius-xl)-1px)] border border-[color-mix(in_srgb,var(--ide-color-text-strong)_7%,transparent)]" />
         <div className="pointer-events-none absolute inset-0 -z-20 rounded-[var(--ide-radius-xl)] bg-[color-mix(in_srgb,var(--ide-color-accent)_9%,transparent)] blur-2xl" />
         <header className="mb-5 flex min-w-0 shrink-0 flex-col items-center text-center">
-          <span
-            className="mx-auto mb-2 flex h-8 w-8 items-center justify-center rounded-[var(--ide-radius-md)] shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]"
-            style={{
-              backgroundColor: LOGO_COLORS.background,
-              color: LOGO_COLORS.foreground,
-              boxShadow: LOGO_COLORS.shadow,
-            }}
-          >
-            <Layers className="h-4 w-4" aria-hidden="true" />
-          </span>
+          <BrandMark className="mx-auto mb-2 h-8 w-8" />
           <h1 className="text-2xl font-semibold tracking-tight text-ide-text-strong">
             Choose your workspace theme
           </h1>

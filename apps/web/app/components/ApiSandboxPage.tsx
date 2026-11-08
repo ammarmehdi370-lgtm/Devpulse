@@ -26,6 +26,7 @@ import {
   Key,
 } from "lucide-react";
 import { LOGO_COLORS } from "../logoColors";
+import { BrandMark } from "./BrandLogo";
 import type { SandboxSnapshot } from "./ApiSnapshotDrawer";
 
 const ApiSnapshotDrawer = dynamic(
@@ -766,15 +767,13 @@ export const ApiSandboxPage: React.FC = () => {
             onClick={() => setPage("workspaces")}
             aria-label="Return to workspaces"
             title="Return to workspaces"
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            className="flex h-8 w-8 items-center justify-center rounded-lg"
             style={{
-              backgroundColor: LOGO_COLORS.background,
-              borderColor: LOGO_COLORS.background,
-              color: LOGO_COLORS.foreground,
-              boxShadow: LOGO_COLORS.shadow,
+              backgroundColor: "#0D1117",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.28)",
             }}
           >
-            <Layers className="w-4 h-4" />
+            <BrandMark className="h-8 w-8" />
           </button>
           <div>
             <div className="flex min-w-0 items-center gap-2">
