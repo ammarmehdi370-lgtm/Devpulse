@@ -202,7 +202,11 @@ The schema provides persistence for authenticated users, workspaces, repositorie
 | `POST`   | `/v1/deployments`                       | Create a persisted deployment record                                   |
 | `GET`    | `/v1/environment-variables`             | List persisted project environment variables                           |
 
-File content saves increment `File.version` and create a matching `FileRevision` in one Prisma transaction. Execution requests run without network access, with CPU, memory, process, read-only filesystem, temporary filesystem, and timeout limits. Short-lived execution results are cached in Redis.
+All `/v1` endpoints require an `Authorization: Bearer <access-token>` header except `POST /v1/auth/logout`, provider `start`/`callback` routes under `/v1/auth`, and `/v1/plans` routes. `/health`, `/ready`, and `/health/ready` are public. Project and file routes require workspace membership and return `404` for inaccessible resources.
+
+Execution requests must include the associated `fileId`; source is limited to 100 KB and execution is limited to 20 requests per user per minute. Containers run without network access as a non-root user, with CPU, memory, process, read-only filesystem, temporary filesystem, and hard-timeout limits. Short-lived execution results are cached in Redis.
+
+File content saves increment `File.version` and create a matching `FileRevision` in one Prisma transaction.
 
 ## 8. Local Development
 

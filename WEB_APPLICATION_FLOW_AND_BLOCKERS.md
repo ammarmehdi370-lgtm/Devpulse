@@ -49,6 +49,45 @@ flowchart LR
 | Browser database | `apps/web/src/lib/db/` and `apps/web/src/lib/db.ts` | PGlite/Drizzle persistence in the browser's origin |
 | Auxiliary services | `apps/ai/`, `apps/ai-worker/` | Legacy AI service and a separate edge-worker proxy implementation |
 
+### Request lifecycle at a glance
+
+**Server-backed request:** a screen/action in `apps/web/app/` calls
+`authenticatedFetch` with the in-memory bearer token. The Express API's
+`/v1` middleware verifies the RS256 access token; the route then validates its
+input, checks the relevant user/workspace/project relationship where
+implemented, and reads or writes PostgreSQL through Prisma. The response is
+returned to the screen, which updates its React state. Some server-backed
+flows also call Redis, object storage, Docker, the AI service, or Socket.IO.
+
+**Browser-local request:** a screen or browser service obtains PGlite through
+`getDB()`, applies the browser SQL migrations, and reads or writes the
+IndexedDB-backed database. File bytes may instead be stored through OPFS or
+the IndexedDB file fallback. This path does not pass through Express and does
+not synchronize with PostgreSQL or other browsers.
+
+Treat these as separate persistence and trust boundaries. A successful local
+write does not establish that the server has the same record; a successful
+server response does not imply the browser database was updated. Browser
+storage is shared only within the browser origin/profile; it is not a sync path
+to another device or API client.
+
+### Backend route map
+
+| Route group | Backend responsibility | Persistence or dependency |
+|---|---|---|
+| `/api/auth/*` | OAuth, magic-link, refresh, development login, logout | PostgreSQL user/workspace records; Redis for short-lived auth/session data; provider/email configuration as applicable |
+| `/v1/me`, `/v1/projects`, `/v1/repositories`, `/v1/files/*`, `/v1/projects/*/artifacts` | Current identity, project/repository listing, file content, revisions, editor sessions, and project artifacts | PostgreSQL through Prisma; project/file membership checks are applied on the corresponding resource routes; artifacts use MinIO/S3-compatible storage |
+| `/v1/ai/*` | Chat streaming, AI usage, conversations, and applying generated changes | PostgreSQL conversation/usage/revision records; legacy AI service and Anthropic for chat |
+| `/v1/execute`, `/v1/executions/*` | Run source in a sandbox and retrieve execution records | Docker runtime, PostgreSQL records, and Redis rate-limit/cache behavior |
+| `/v1/devboxes/*`, `/v1/deployments/*`, `/v1/environment-variables/*` | Persist and return workspace, release, and environment-variable records | PostgreSQL; current handlers do not provision real compute or perform deployment |
+| `/health`, `/ready` | Health check and readiness response | `/health` checks PostgreSQL, Redis, and MinIO; `/ready` returns a simple API readiness status |
+| Socket.IO events | Workspace join/leave, presence, file-editing, code, cursor, and typing updates | Redis when available; local in-memory session fallback |
+
+The route list describes implemented server surfaces, not a guarantee that a
+product UI currently calls every route or that each route has complete
+workspace-level authorization. Check the blockers below before relying on a
+route for production data.
+
 ## End-to-end flows
 
 ### 1. Browser startup and screen navigation
@@ -128,7 +167,7 @@ considered feature-by-feature. Relevant implementation includes
 | Editor | Browser-local and API-backed project/file paths | Persistence depends on which project/file path was selected |
 | Deployments/environment | API-backed data in some flows; release action may be simulated | UI state does not guarantee a real release pipeline or billing integration |
 | Team Chat | Browser database and same-origin broadcasts; optional Socket.IO path | Local messages and server collaboration are separate paths |
-| AI Studio | Separate client endpoint from editor AI | Endpoint mismatch can prevent requests from reaching the implemented AI route |
+| AI Studio | Calls `/api/ai/chat` from the browser | No matching Next.js route is present; the API exposes `/v1/ai/chat`, so the request does not reach the implemented API AI handler |
 | Remote Control | Optional Socket.IO collaboration flow | Current client uses a demo workspace identity rather than the selected workspace |
 | Plans and other product screens | UI state/presentation | Subscription/payment behavior needs a real billing integration |
 
@@ -160,8 +199,10 @@ Relevant implementation: [EditorWorkbench](apps/web/app/components/EditorWorkben
    PGlite or a working editor screen alone cannot execute server-side code.
 
 Relevant implementation: execution handlers in
-[apps/api/src/index.ts](apps/api/src/index.ts). Runtime availability and
-authorization coverage must be verified before exposing this flow.
+[apps/api/src/index.ts](apps/api/src/index.ts) and the resource checks in
+[authorization middleware](apps/api/src/middleware/auth.ts). The request
+requires an authenticated user and a file in a workspace that user belongs to;
+runtime availability of Redis and Docker still needs to be verified.
 
 ### 6. AI chat and apply-to-editor
 
@@ -184,8 +225,12 @@ uses the API-to-AI-service route.
 
 **AI Studio**
 
-AI Studio has a separate client request path and must be checked independently;
-its current endpoint does not match the API route used by the editor.
+AI Studio currently calls the relative URL `/api/ai/chat`; there is no
+`apps/web/app/api/` route in this workspace, and the Express AI endpoint is
+`/v1/ai/chat`. Unless an external rewrite/proxy is configured, this request
+does not reach the API handler used by Editor AI. Its prompt also includes
+hard-coded sample project/file/branch context, and the initial conversation is
+demo content rather than a loaded server conversation.
 
 Relevant implementation: [EditorWorkbench](apps/web/app/components/EditorWorkbench.tsx),
 [FullScreenAiPage](apps/web/app/components/FullScreenAiPage.tsx),
@@ -243,7 +288,7 @@ does not imply that every deployment is currently failing.
 | Browser-local and API-backed data paths are mixed | A browser-local write is not persisted to PostgreSQL and will not appear automatically on another device or API consumer. | Choose the source of truth per feature and implement explicit migration/synchronization if required. See [AppContext](apps/web/app/context/AppContext.tsx) and [browser services](apps/web/src/lib/services.ts). |
 | Client-generated and persisted access tokens could override API credentials | **Resolved in the current worktree.** Access tokens now live in one in-memory store, and authenticated requests refresh/retry once before expiring the session. | Vitest covers in-memory storage, verified-token reuse, refresh/retry, and logout; Playwright covers development login to an authorized project request. See [auth store](apps/web/src/lib/auth-store.ts) and [auth tests](apps/web/src/lib/auth-store.test.ts). |
 | Development and magic-link login could replace valid API credentials | **Resolved in the current worktree.** Development login consumes the API-issued JWT; magic-link verification installs the returned token before `/v1/me`; profile login does not mint tokens. | See [login UI](apps/web/app/components/LoginPage.tsx), [verification UI](apps/web/app/auth/verify/page.tsx), and [API auth routes](apps/api/src/routes/auth.ts). |
-| AI Studio endpoint differs from the editor/API endpoint | AI Studio requests do not follow the implemented `/v1/ai/chat` API route and may fail instead of reaching the configured AI service. | Align AI Studio with the intended API or Worker route and test streaming end-to-end. See [FullScreenAiPage](apps/web/app/components/FullScreenAiPage.tsx) and [API AI handlers](apps/api/src/index.ts). |
+| AI Studio endpoint differs from the editor/API endpoint | AI Studio calls `/api/ai/chat`, while the Express handler is `/v1/ai/chat`; without an external rewrite the request does not reach the AI service. | Align AI Studio with the intended API or Worker route and test streaming end-to-end. See [FullScreenAiPage](apps/web/app/components/FullScreenAiPage.tsx) and [API AI handlers](apps/api/src/index.ts). |
 | Some UI actions are simulations or placeholders | A successful UI state can be mistaken for real deployment/provisioning/billing behavior. | Label demo behavior clearly and connect actions to provisioner/provider APIs before claiming production support. See [AppContext](apps/web/app/context/AppContext.tsx) and the unavailable feature handling in [page.tsx](apps/web/app/page.tsx). |
 | Root navigation is mostly frontend state, not deep-linked routes | Refreshing or sharing a URL may not restore the selected product screen. | Define URL routes/deep-link behavior if direct navigation and refresh restoration are required. See [page.tsx](apps/web/app/page.tsx). |
 
@@ -252,11 +297,12 @@ does not imply that every deployment is currently failing.
 | Issue | Impact | Evidence / next step |
 |---|---|---|
 | API requires server infrastructure/configuration | API startup depends on database connectivity and configured JWT material; OAuth/email/AI features additionally need provider configuration. | Provide and verify environment values, database, Redis/storage where needed, and signing keys before starting the API. See [API startup](apps/api/src/index.ts) and [environment validation](apps/api/src/lib/env.ts). |
-| Authorization is not consistently enforced across all API routes | Source inspection found project/file reads or creation and code execution handlers without an apparent user/membership check; review and close these gaps before untrusted deployment. | Apply a consistent authentication and workspace/project authorization policy, especially for execution and data access. See route handlers in [apps/api/src/index.ts]. |
-| Socket.IO accepts workspace identity without apparent credential verification | Clients can identify a workspace/user at connection/join time without the service visibly establishing membership. This makes the realtime flow unsuitable to rely on for protected collaboration until verified and fixed. | Authenticate the socket handshake and authorize every workspace join/event. See [Socket.IO server](apps/socket/src/index.ts) and [Socket.IO client](apps/web/src/lib/socket-client.ts). |
-| Legacy AI service route is separate from the Worker | The standalone AI service has no visible request-auth middleware in the inspected route path, while the Worker has a separate validation path. The current editor flow is through the API and legacy AI service. | Restrict service-to-service access or route production requests through a consistently authenticated proxy. See [legacy AI service](apps/ai/src/index.ts), [API AI handlers](apps/api/src/index.ts), and [AI Worker](apps/ai-worker/src/index.ts). |
+| API authentication is in place, but workspace authorization is incomplete on some product routes | All `/v1` routes pass through the bearer-token gate except the explicit public allow-list; project/file routes and execution perform membership or ownership checks. However, the current devbox, deployment, and environment-variable handlers include unscoped reads or mutations and do not consistently verify membership in the target project's workspace. | Scope every query/mutation to the authenticated user's workspace/project and require the appropriate membership/role before returning or changing records. Add cross-workspace API tests. See [API authorization middleware](apps/api/src/middleware/auth.ts), [API routes](apps/api/src/index.ts), and [authorization tests](apps/api/src/authorization.test.ts). |
+| Socket.IO accepts workspace identity without apparent credential verification | The server lets a client join a workspace room and submit presence/code/cursor events without verifying its access token or workspace membership. API bearer authentication does not protect Socket.IO connections. | Authenticate the socket handshake and authorize workspace joins and every event against the authenticated user. See [Socket.IO server](apps/socket/src/index.ts) and [Socket.IO client](apps/web/src/lib/socket-client.ts). |
+| Legacy AI service is reachable through a separate route from the authenticated API and Worker | The editor's API proxy checks the user session and usage before forwarding to `apps/ai`; the standalone AI `/v1/chat` handler has no visible request-auth middleware. The Worker independently validates an RS256 token and origin, but is not the Editor AI route. | Keep the legacy AI service private to trusted service traffic or select one protected proxy path and use it consistently. See [legacy AI service](apps/ai/src/index.ts), [API AI handlers](apps/api/src/index.ts), and [AI Worker](apps/ai-worker/src/index.ts). |
 | Production integrations need owner-provided secrets and configuration | OAuth, magic-link email, and AI provider calls cannot complete against real providers without their credentials, registered callback URLs, sender setup, and account access. | Configure secrets in the deployment secret store and verify each provider flow; do not put secret keys in browser-exposed variables. |
-| Code execution and real deployments need operational infrastructure | Editor execution requires the API and Docker runtime. Real devbox provisioning and release pipelines require infrastructure beyond UI state and database records. | Deploy and health-check the required runners/provisioners/pipelines; do not treat stored records or simulated success as execution. |
+| Devbox, deployment, and environment-variable APIs persist records but are not provisioning/deployment integrations | Devbox handlers generate placeholder URL/port values and change database status; deployment handlers create placeholder release records rather than invoking a build/deploy pipeline. Environment-variable values are stored in the application database, not a deployment secret manager. | Integrate a real provisioner/deployment platform and secret manager, protect values at rest and in responses, and report asynchronous job status/errors from those providers. Do not equate a created record with a running environment or completed release. See [product API handlers](apps/api/src/index.ts) and [Prisma schema](packages/database/prisma/schema.prisma). |
+| Code execution requires operational infrastructure | Editor execution uses the API, Redis rate-limit/cache behavior, and a Docker runtime. Without those dependencies it cannot execute code; API health alone does not establish that the sandbox is usable. | Deploy and health-check the runner and dependencies, retain per-user/file authorization and limits, and exercise the real execution path in staging. See execution handlers in [apps/api/src/index.ts]. |
 
 ### Database and persistence blockers
 
@@ -265,6 +311,7 @@ does not imply that every deployment is currently failing.
 | Duplicate project-column migrations | **Resolved in the current worktree.** The two same-timestamp migrations were replaced with one uniquely timestamped migration that adds each `Project` column once using `IF NOT EXISTS`. Fresh deploy, migration status, schema diff, and Prisma validation passed against throwaway PostgreSQL. | Retained migration: [20260928120100_add_project_template_and_privacy](packages/database/prisma/migrations/20260928120100_add_project_template_and_privacy/migration.sql). PR verification is in [.github/workflows/db.yml](.github/workflows/db.yml). |
 | OAuth primary-key constraint name differed from Prisma schema | **Resolved in the current worktree.** The schema diff on the fresh database detected the old constraint name after the table rename; a guarded forward migration now aligns it without rewriting prior migration history. | See [20261030000000_rename_oauth_accounts_primary_key](packages/database/prisma/migrations/20261030000000_rename_oauth_accounts_primary_key/migration.sql). |
 | Prisma and browser schema/migrations are independent | Migration success in one store does not migrate or synchronize the other. The browser schema also lacks some server-side feature tables. | Establish the authoritative schema for each supported mode and document/implement any required import or sync contract. See [Prisma schema](packages/database/prisma/schema.prisma), [browser schema](apps/web/src/lib/db/schema.ts), and [browser migrations](apps/web/src/lib/db.ts). |
+| Browser service ownership is split across parallel implementations | The main app context and several screens use `src/lib/services.ts`; the `useBrowserServices` hooks use `src/lib/browser-services.ts`; `src/services/index.ts` defines another overlapping service set. These can initialize overlapping DB/storage/realtime/auth state and leave hooks and screens observing different service instances or lifecycles. | Select one service entry point, migrate its consumers, and remove or clearly isolate unused alternatives. Verify app startup, retry/cleanup, auth, files, chat, and AI through the selected provider. See [main browser services](apps/web/src/lib/services.ts), [hook browser services](apps/web/src/lib/browser-services.ts), [service module](apps/web/src/services/index.ts), and [AppContext](apps/web/app/context/AppContext.tsx). |
 | Browser persistence is origin/profile-local | Data is not automatically backed up, shared between users, or available on another device. Browser storage can also be cleared by the user/browser. | Provide export/backup and/or a server sync path if data durability and multi-device access are product requirements. |
 | Full database-backed feature integration is not established by migration checks | The new CI job verifies fresh migration deployment and schema parity, but does not exercise every API persistence flow. | Add feature-level database integration coverage where required; keep [.github/workflows/db.yml](.github/workflows/db.yml) as the migration/schema check. |
 
@@ -294,15 +341,18 @@ does not imply that every deployment is currently failing.
 1. Keep the fresh-database Prisma migration and schema-diff checks green in CI.
 2. Decide which features are server-backed versus browser-local; define the
    data ownership/synchronization contract and consolidate browser service
-   initialization where appropriate.
-3. Align AI Studio with the actual authenticated streaming endpoint and choose
-   one production AI proxy path.
-4. Add and test consistent API and Socket.IO authentication/authorization,
-   including execution and workspace access.
-5. Clearly separate implemented integrations from demo/simulated screens;
-   complete provisioning, deployment, billing, and collaboration integrations
-   needed for the intended product scope.
-6. Run migrations, API/web tests, and Playwright E2E against a fully configured
+   initialization.
+3. Fix AI Studio's endpoint/context flow and choose one production AI proxy
+   path; test streaming and error handling end to end.
+4. Finish workspace/project authorization on devbox, deployment, and
+   environment-variable routes; add authenticated Socket.IO handshake and
+   per-event authorization.
+5. Restrict the standalone AI service to trusted traffic and protect
+   environment-variable secrets; integrate actual compute/deployment/billing
+   providers where those product flows are required.
+6. Clearly label local/demo/simulated behavior and define what is not
+   production-ready.
+7. Run migrations, API/web tests, and Playwright E2E against a fully configured
    local stack, then separately verify OAuth, email, AI, and deployment
    integrations in a safe staging environment.
 

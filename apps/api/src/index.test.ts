@@ -70,22 +70,22 @@ describe("API foundation", () => {
     }
   });
 
-  it("rejects malformed execution requests", async () => {
+  it("rejects execution requests without authentication", async () => {
     const response = await request(app)
       .post("/v1/execute")
       .send({ language: "ruby", code: 42 });
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe("Invalid request");
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: "UNAUTHORIZED" });
   });
 
-  it("rejects malformed file creation requests", async () => {
+  it("rejects file creation requests without authentication", async () => {
     const response = await request(app)
       .post("/v1/projects/not-a-project/files")
       .send({ path: "../secrets.txt", content: "x" });
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe("Invalid request");
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: "UNAUTHORIZED" });
   });
 
   it("returns a dev verification token without sending email", async () => {

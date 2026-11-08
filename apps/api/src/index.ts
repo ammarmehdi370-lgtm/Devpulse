@@ -1,6 +1,6 @@
 ﻿import "./lib/bootstrap.js";
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import cors from "cors";
 import express from "express";
@@ -12,7 +12,16 @@ import { z } from "zod";
 import { db } from "@devpulse/database";
 import { authRouter, sessionMiddleware } from "./routes/auth.js";
 import { redis, redisConnection } from "./lib/redis.js";
-import { initKeys, verifyToken } from "./lib/jwt.js";
+import { initKeys } from "./lib/jwt.js";
+import {
+  assertWorkspaceMember,
+  findFileForUser,
+  handleWorkspaceMembershipError,
+  loadFileForUser,
+  loadProjectForUser,
+  requireAuth,
+  WorkspaceMembershipError,
+} from "./middleware/auth.js";
 import type { AiApplyRequest } from "./types/requests.js";
 
 const app: express.Express = express();
@@ -123,6 +132,8 @@ app.get("/health/ready", async (_request, response, next) => {
   }
 });
 
+app.use("/v1", requireAuth);
+
 function sessionToken(userId: string): string {
   return jwt.sign({ sub: userId }, jwtSecret, {
     expiresIn: (process.env.JWT_EXPIRES_IN ??
@@ -173,9 +184,7 @@ app.post("/v1/auth/logout", (_request, response) => {
 
 app.get("/v1/me", async (request, response, next) => {
   try {
-    const userId = await getRequestUserId(request);
-    if (!userId)
-      return response.status(401).json({ error: "Authentication required" });
+    const userId = request.user!.id;
     const user = await db.user.findUnique({
       where: { id: userId },
       include: {
@@ -310,63 +319,16 @@ function sendValidationError(
     .json({ error: "Invalid request", details: error.flatten() });
 }
 
-async function findProjectFile(fileId: string) {
-  return db.file.findUnique({
-    where: { id: fileId },
-    include: { project: true, lastEditedBy: { select: { id: true, name: true } } },
-  });
-}
-
-type AuthenticatedRequest = express.Request & { userId?: string; fileRecord?: Awaited<ReturnType<typeof findProjectFile>>; aiUsage?: { id: string; requestCount: number; tokenCount: number; limit: number; plan: string } };
-
-async function getRequestUserId(request: express.Request): Promise<string | null> {
-  const authorization = request.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (authorization) {
-    try {
-      return (await verifyToken(authorization)).sub;
-    } catch {
-      return null;
-    }
-  }
-  const cookie = request.headers.cookie?.match(/(?:^|; )devpulse_session=([^;]+)/)?.[1];
-  if (!cookie) return null;
-  try {
-    return (await verifyToken(cookie)).sub;
-  } catch {
-    try {
-      const payload = jwt.verify(cookie, jwtSecret) as { sub?: unknown };
-      return typeof payload.sub === "string" ? payload.sub : null;
-    } catch {
-      return null;
-    }
-  }
-}
+type AuthenticatedRequest = express.Request & { userId?: string; aiUsage?: { id: string; requestCount: number; tokenCount: number; limit: number; plan: string } };
 
 async function requireUser(request: express.Request, response: express.Response): Promise<string | null> {
-  const userId = await getRequestUserId(request);
+  const userId = request.user?.id;
   if (!userId) {
-    response.status(401).json({ error: "Authentication required" });
+    response.status(401).json({ error: "UNAUTHORIZED" });
     return null;
   }
   (request as AuthenticatedRequest).userId = userId;
   return userId;
-}
-
-async function checkFileAccess(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
-  const userId = await requireUser(request, response);
-  if (!userId) return;
-  const file = await findProjectFile(String(request.params.fileId));
-  if (!file) {
-    response.status(404).json({ error: "File not found" });
-    return;
-  }
-  const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } });
-  if (!membership) {
-    response.status(403).json({ error: "You do not have access to this file" });
-    return;
-  }
-  (request as AuthenticatedRequest).fileRecord = file;
-  next();
 }
 
 function languageFromPath(filePath: string): string | undefined {
@@ -438,9 +400,14 @@ async function saveFileRevision(fileId: string, userId: string, content: string,
   });
 }
 
-app.get("/v1/projects", async (_request, response, next) => {
+app.get("/v1/projects", async (request, response, next) => {
   try {
     const projects = await db.project.findMany({
+      where: {
+        workspace: {
+          memberships: { some: { userId: request.user!.id } },
+        },
+      },
       orderBy: { updatedAt: "desc" },
       select: {
         id: true,
@@ -456,17 +423,12 @@ app.get("/v1/projects", async (_request, response, next) => {
   }
 });
 
-app.get("/v1/projects/:projectId/contributors", async (request, response, next) => {
-  const userId = await requireUser(request, response);
-  if (!userId) return;
+app.get("/v1/projects/:projectId/contributors", loadProjectForUser, async (request, response, next) => {
   const period = request.query.period === "7d" || request.query.period === "all" ? request.query.period : "30d";
   const periodStart = contributorPeriodStart(period);
   const projectId = String(request.params.projectId);
   try {
-    const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
-    if (!project) return response.status(404).json({ error: "Project not found" });
-    const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } } });
-    if (!membership) return response.status(403).json({ error: "You do not have access to this project" });
+    const project = request.project!;
     const fileId = typeof request.query.fileId === "string" ? request.query.fileId : undefined;
     const fileFilter = fileId ? { id: fileId } : undefined;
     const revisionWhere = { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, ...activityWhere(periodStart) };
@@ -530,13 +492,24 @@ app.post("/v1/projects", async (request, response, next) => {
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
-    const workspace = parsed.data.workspaceId
-      ? await db.workspace.findUnique({
-          where: { id: parsed.data.workspaceId },
+    const membership = parsed.data.workspaceId
+      ? await db.workspaceMember.findUnique({
+          where: {
+            workspaceId_userId: {
+              workspaceId: parsed.data.workspaceId,
+              userId: request.user!.id,
+            },
+          },
+          include: { workspace: true },
         })
-      : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
-    if (!workspace)
+      : await db.workspaceMember.findFirst({
+          where: { userId: request.user!.id },
+          include: { workspace: true },
+          orderBy: { joinedAt: "asc" },
+        });
+    if (!membership)
       return response.status(404).json({ error: "Workspace not found" });
+    const workspace = membership.workspace;
     const project = await db.project.create({
       data: {
         name: parsed.data.name,
@@ -553,13 +526,9 @@ app.post("/v1/projects", async (request, response, next) => {
   }
 });
 
-app.get("/v1/projects/:projectId/files", async (request, response, next) => {
+app.get("/v1/projects/:projectId/files", loadProjectForUser, async (request, response, next) => {
   try {
-    const project = await db.project.findUnique({
-      where: { id: request.params.projectId },
-    });
-    if (!project)
-      return response.status(404).json({ error: "Project not found" });
+    const project = request.project!;
     const files = await db.file.findMany({
       where: { projectId: project.id },
       orderBy: { path: "asc" },
@@ -579,19 +548,18 @@ app.get("/v1/projects/:projectId/files", async (request, response, next) => {
 
 app.get(
   "/v1/projects/:projectId/files/:fileId",
+  loadProjectForUser,
+  loadFileForUser,
   async (request, response, next) => {
     try {
-      const file = await findProjectFile(request.params.fileId);
-      if (!file || file.projectId !== request.params.projectId)
-        return response.status(404).json({ error: "File not found" });
-      return response.json(file);
+      return response.json(request.fileRecord);
     } catch (error) {
       return next(error);
     }
   },
 );
 
-app.post("/v1/projects/:projectId/files", async (request, response, next) => {
+app.post("/v1/projects/:projectId/files", loadProjectForUser, async (request, response, next) => {
   const parsed = z
     .object({
       path: filePathSchema,
@@ -601,11 +569,7 @@ app.post("/v1/projects/:projectId/files", async (request, response, next) => {
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
-    const project = await db.project.findUnique({
-      where: { id: request.params.projectId },
-    });
-    if (!project)
-      return response.status(404).json({ error: "Project not found" });
+    const project = request.project!;
     const file = await db.file.create({
       data: {
         projectId: project.id,
@@ -623,6 +587,7 @@ app.post("/v1/projects/:projectId/files", async (request, response, next) => {
 
 app.post(
   "/v1/projects/:projectId/artifacts",
+  loadProjectForUser,
   async (request, response, next) => {
     const parsed = z
       .object({
@@ -637,11 +602,7 @@ app.post(
       .safeParse(request.body);
     if (!parsed.success) return sendValidationError(response, parsed.error);
     try {
-      const project = await db.project.findUnique({
-        where: { id: request.params.projectId },
-      });
-      if (!project)
-        return response.status(404).json({ error: "Project not found" });
+      const project = request.project!;
       const safeName = parsed.data.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const objectKey = `projects/${project.id}/${Date.now()}-${safeName}`;
       const content = Buffer.from(parsed.data.contentBase64, "base64");
@@ -673,12 +634,12 @@ const updateFileSchema = z
   })
   .refine((value) => value.path !== undefined || value.content !== undefined || value.language !== undefined, "at least one field is required");
 
-app.patch("/v1/files/:fileId", checkFileAccess, async (request, response, next) => {
+app.patch("/v1/files/:fileId", loadFileForUser, async (request, response, next) => {
   const parsed = updateFileSchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
     const authenticated = request as AuthenticatedRequest;
-    const existing = authenticated.fileRecord;
+    const existing = request.fileRecord;
     if (!existing)
       return response.status(404).json({ error: "File not found" });
     const nextContent = parsed.data.content ?? existing.content;
@@ -710,7 +671,7 @@ app.patch("/v1/files/:fileId", checkFileAccess, async (request, response, next) 
   }
 });
 
-app.get("/v1/files/:fileId/revisions", checkFileAccess, async (request, response, next) => {
+app.get("/v1/files/:fileId/revisions", loadFileForUser, async (request, response, next) => {
   try {
     const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100);
     const fileId = String(request.params.fileId);
@@ -744,7 +705,7 @@ app.get("/v1/files/:fileId/revisions", checkFileAccess, async (request, response
   } catch (error) { return next(error); }
 });
 
-app.get("/v1/files/:fileId/revisions/:revisionId", checkFileAccess, async (request, response, next) => {
+app.get("/v1/files/:fileId/revisions/:revisionId", loadFileForUser, async (request, response, next) => {
   try {
     const revision = await db.fileRevision.findFirst({
       where: { id: String(request.params.revisionId), fileId: String(request.params.fileId) },
@@ -756,33 +717,31 @@ app.get("/v1/files/:fileId/revisions/:revisionId", checkFileAccess, async (reque
 });
 
 const restoreSchema = z.object({ revisionId: z.string().cuid(), expectedVersion: z.number().int().positive() });
-app.post("/v1/files/:fileId/restore", checkFileAccess, async (request, response, next) => {
+app.post("/v1/files/:fileId/restore", loadFileForUser, async (request, response, next) => {
   const parsed = restoreSchema.safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
     const authenticated = request as AuthenticatedRequest;
     const revision = await db.fileRevision.findFirst({ where: { id: parsed.data.revisionId, fileId: String(request.params.fileId) } });
     if (!revision) return response.status(404).json({ error: "Revision not found" });
-    const file = authenticated.fileRecord!;
+    const file = request.fileRecord!;
     const saved = await saveFileRevision(file.id, authenticated.userId!, revision.content, parsed.data.expectedVersion, file.language ?? languageFromPath(file.path), false, undefined, undefined, `Restored from v${revision.version}`);
     if (!saved) return response.status(409).json({ error: "File was modified elsewhere", currentVersion: (await db.file.findUniqueOrThrow({ where: { id: file.id }, select: { version: true } })).version });
     return response.json({ file: saved.file, newRevisionId: saved.revision.id, revisionId: saved.revision.id, version: saved.file.version });
   } catch (error) { return next(error); }
 });
 
-app.get("/v1/projects/:projectId/tree", async (request, response, next) => {
+app.get("/v1/projects/:projectId/tree", loadProjectForUser, async (request, response, next) => {
   try {
-    const project = await db.project.findUnique({ where: { id: request.params.projectId } });
-    if (!project) return response.status(404).json({ error: "Project not found" });
+    const project = request.project!;
     const files = await db.file.findMany({ where: { projectId: project.id }, orderBy: { path: "asc" }, select: { id: true, path: true, language: true, sizeBytes: true, updatedAt: true, version: true } });
     return response.json({ tree: buildFileTree(files) });
   } catch (error) { return next(error); }
 });
 
-app.delete("/v1/files/:fileId", checkFileAccess, async (request, response, next) => {
+app.delete("/v1/files/:fileId", loadFileForUser, async (request, response, next) => {
   try {
-    const file = await findProjectFile(String(request.params.fileId));
-    if (!file) return response.status(404).json({ error: "File not found" });
+    const file = request.fileRecord!;
     await db.file.delete({ where: { id: file.id } });
     return response.status(204).send();
   } catch (error) {
@@ -840,7 +799,13 @@ async function getOrCreateAIUsage(userId: string, projectId?: string) {
 async function userCanAccessProject(userId: string, projectId: string): Promise<boolean> {
   const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
   if (!project) return false;
-  return Boolean(await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } }, select: { userId: true } }));
+  try {
+    await assertWorkspaceMember(userId, project.workspaceId);
+    return true;
+  } catch (error) {
+    if (error instanceof WorkspaceMembershipError) return false;
+    throw error;
+  }
 }
 
 async function checkAIUsage(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
@@ -868,11 +833,13 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
   let conversationId: string | undefined;
   try {
     if (parsed.data.fileId) {
-      const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { projectId: true } });
+      const file = await findFileForUser(
+        parsed.data.fileId,
+        authenticated.userId!,
+      );
       if (!file) return response.status(404).json({ error: "File not found" });
-      if (!(await userCanAccessProject(authenticated.userId!, file.projectId))) return response.status(403).json({ error: "You do not have access to this file" });
     }
-    if (parsed.data.projectId && !(await userCanAccessProject(authenticated.userId!, parsed.data.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
+    if (parsed.data.projectId && !(await userCanAccessProject(authenticated.userId!, parsed.data.projectId))) return response.status(404).json({ error: "Project not found" });
     if (parsed.data.conversationId) {
       const existingConversation = await findOwnedConversation(authenticated.userId!, parsed.data.conversationId);
       if (!existingConversation) return response.status(404).json({ error: "Conversation not found" });
@@ -945,10 +912,8 @@ app.post("/v1/ai/apply", async (request, response, next) => {
     if (!userId) return;
     const sizeBytes = Buffer.byteLength(applyRequest.code, "utf8");
     if (sizeBytes > AI_APPLY_LIMIT_BYTES) return response.status(413).json({ error: "CONTENT_TOO_LARGE", message: "AI generated content exceeds 500KB limit", sizeBytes, limitBytes: AI_APPLY_LIMIT_BYTES });
-    const file = await db.file.findUnique({ where: { id: applyRequest.fileId }, include: { project: { include: { workspace: true } } } });
+    const file = await findFileForUser(applyRequest.fileId, userId);
     if (!file) return response.status(404).json({ error: "FILE_NOT_FOUND", message: "File not found" });
-    const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspace.id, userId } }, select: { userId: true } });
-    if (!membership) return response.status(403).json({ error: "FORBIDDEN", message: "You do not have access to this file" });
     if (file.version !== applyRequest.expectedVersion) return response.status(409).json({ error: "VERSION_CONFLICT", message: "File changed since AI request was made", currentVersion: file.version });
     const safetyError = validateAIApplyContent(applyRequest.code, applyRequest.language, parsed.data.skipCheck);
     if (safetyError) return response.status(safetyError.status).json(safetyError);
@@ -1003,8 +968,8 @@ app.get("/v1/ai/conversations", async (request, response, next) => {
     if (fileId) {
       const file = await db.file.findUnique({ where: { id: fileId }, select: { projectId: true } });
       if (!file) return response.status(404).json({ error: "File not found" });
-      if (!await userCanAccessProject(userId, file.projectId)) return response.status(403).json({ error: "You do not have access to this file" });
-    } else if (projectId && !await userCanAccessProject(userId, projectId)) return response.status(403).json({ error: "You do not have access to this project" });
+      if (!await userCanAccessProject(userId, file.projectId)) return response.status(404).json({ error: "File not found" });
+    } else if (projectId && !await userCanAccessProject(userId, projectId)) return response.status(404).json({ error: "Project not found" });
     const all = request.query.all === "true";
     const limit = Math.min(Math.max(Number(request.query.limit ?? (all ? 20 : 1)), 1), 100);
     let conversations = await db.aIConversation.findMany({ where: { userId, ...(fileId ? { fileId } : {}), ...(projectId ? { projectId } : {}) }, orderBy: { updatedAt: "desc" }, take: limit, select: { id: true, title: true, messageCount: true, fileId: true, updatedAt: true } });
@@ -1065,9 +1030,12 @@ app.get("/v1/ai/conversations/:id/export", async (request, response, next) => {
 
 const executeSchema = z.object({
   language: z.enum(["javascript", "python", "rust", "go"]),
-  code: z.string().max(500_000),
+  code: z
+    .string()
+    .max(100_000)
+    .refine((code) => Buffer.byteLength(code, "utf8") <= 100_000),
   timeoutMs: z.number().int().min(250).max(30_000).optional(),
-  fileId: z.string().cuid().optional(),
+  fileId: z.string().cuid(),
 });
 const executeImages: Record<z.infer<typeof executeSchema>["language"], string> =
   {
@@ -1076,6 +1044,43 @@ const executeImages: Record<z.infer<typeof executeSchema>["language"], string> =
     rust: "rust:1.83-alpine",
     go: "golang:1.23-alpine",
   };
+const EXECUTION_RATE_LIMIT = 20;
+const EXECUTION_RATE_WINDOW_SECONDS = 60;
+const memoryExecutionRates = new Map<
+  string,
+  { count: number; expiresAt: number }
+>();
+
+async function reserveExecutionSlot(
+  userId: string,
+): Promise<"allowed" | "limited" | "unavailable"> {
+  await redisConnection;
+  const key = `execute-rate:${userId}`;
+  if (redis.isReady) {
+    const count = Number(
+      await redis.eval(
+        "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
+        { keys: [key], arguments: [String(EXECUTION_RATE_WINDOW_SECONDS)] },
+      ),
+    );
+    return count <= EXECUTION_RATE_LIMIT ? "allowed" : "limited";
+  }
+
+  if (process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "development")
+    return "unavailable";
+
+  const now = Date.now();
+  const current = memoryExecutionRates.get(userId);
+  if (!current || current.expiresAt <= now) {
+    memoryExecutionRates.set(userId, {
+      count: 1,
+      expiresAt: now + EXECUTION_RATE_WINDOW_SECONDS * 1000,
+    });
+    return "allowed";
+  }
+  current.count += 1;
+  return current.count <= EXECUTION_RATE_LIMIT ? "allowed" : "limited";
+}
 
 function executeInContainer(
   language: z.infer<typeof executeSchema>["language"],
@@ -1088,443 +1093,521 @@ function executeInContainer(
   timedOut: boolean;
   error?: string;
 }> {
+  const containerName = `devpulse-exec-${randomUUID()}`;
   const command =
     language === "javascript"
       ? ["node", "-"]
       : language === "python"
         ? ["python", "-"]
         : language === "rust"
-          ? [
-              "sh",
-              "-c",
-              "cat > /tmp/main.rs && rustc /tmp/main.rs -o /tmp/main && /tmp/main",
-            ]
+          ? ["sh", "-c", "cat > /tmp/main.rs && rustc /tmp/main.rs -o /tmp/main && /tmp/main"]
           : ["sh", "-c", "cat > /tmp/main.go && go run /tmp/main.go"];
-  const child = spawn(
-    "docker",
-    [
-      "run",
-      "--rm",
-      "-i",
-      "--network",
-      "none",
-      "--cpus",
-      "1",
-      "--memory",
-      "256m",
-      "--pids-limit",
-      "64",
-      "--read-only",
-      "--tmpfs",
-      "/tmp:rw,noexec,nosuid,size=64m",
-      executeImages[language],
-      ...command,
-    ],
-    { windowsHide: true },
-  );
+
   return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+    let inputError: string | undefined;
+    const child = execFile(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--name",
+        containerName,
+        "-i",
+        "--network",
+        "none",
+        "--cpus",
+        "1",
+        "--memory",
+        "256m",
+        "--pids-limit",
+        "64",
+        "--read-only",
+        "--user",
+        "1000:1000",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--tmpfs",
+        "/tmp:rw,nosuid,size=64m,uid=1000,gid=1000",
+        "--env",
+        "HOME=/tmp",
+        "--env",
+        "GOCACHE=/tmp/go-cache",
+        executeImages[language],
+        ...command,
+      ],
+      {
+        windowsHide: true,
+        timeout: timeoutMs,
+        killSignal: "SIGKILL",
+        maxBuffer: 1_000_000,
+        encoding: "utf8",
+      },
+      (error, stdout, stderr) => {
+        const timedOut = error?.code === "ETIMEDOUT";
+        const needsContainerCleanup = error?.killed === true;
+        const exitCode =
+          typeof error?.code === "number" ? error.code : error ? 1 : 0;
+        const finish = (cleanupError?: Error | null) => {
+          const details = [stderr, error?.message, inputError, cleanupError?.message]
+            .filter(Boolean)
+            .join("\n");
+          resolve({
+            stdout: String(stdout),
+            stderr: details,
+            exitCode: timedOut ? null : exitCode,
+            timedOut,
+            ...(error || inputError || cleanupError ? { error: details } : {}),
+          });
+        };
+
+        if (!needsContainerCleanup) {
+          finish();
+          return;
+        }
+
+        execFile(
+          "docker",
+          ["kill", containerName],
+          { windowsHide: true, timeout: 5_000, killSignal: "SIGKILL" },
+          (killError) => finish(killError),
+        );
+      },
+    );
+    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EPIPE") inputError = error.message;
     });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      app.get("/v1/repositories", async (_request, response, next) => {
-        try {
-          const repositories = await db.project.findMany({
-            orderBy: { updatedAt: "desc" },
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              language: true,
-              stars: true,
-              forks: true,
-              isStarred: true,
-              defaultBranch: true,
-              deployStatus: true,
-              devboxReady: true,
-              updatedAt: true,
-            },
-          });
-          return response.json({ repositories });
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.post("/v1/repositories", async (request, response, next) => {
-        const parsed = z
-          .object({
-            name: z.string().trim().min(1).max(120),
-            description: z.string().max(500).default(""),
-            language: z.string().trim().max(40).default("TypeScript"),
-            branch: z.string().trim().max(120).default("main"),
-            workspaceId: z.string().cuid().optional(),
-          })
-          .safeParse(request.body);
-        if (!parsed.success) return sendValidationError(response, parsed.error);
-        try {
-          const workspace = parsed.data.workspaceId
-            ? await db.workspace.findUnique({
-                where: { id: parsed.data.workspaceId },
-              })
-            : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
-          if (!workspace)
-            return response.status(404).json({ error: "Workspace not found" });
-          const repository = await db.project.create({
-            data: {
-              workspaceId: workspace.id,
-              name: parsed.data.name,
-              description: parsed.data.description,
-              language: parsed.data.language,
-              defaultBranch: parsed.data.branch,
-            },
-          });
-          return response.status(201).json(repository);
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.patch(
-        "/v1/repositories/:repositoryId",
-        async (request, response, next) => {
-          const parsed = z
-            .object({
-              isStarred: z.boolean().optional(),
-              description: z.string().max(500).optional(),
-              name: z.string().trim().min(1).max(120).optional(),
-            })
-            .refine(
-              (value) => Object.keys(value).length > 0,
-              "at least one field is required",
-            )
-            .safeParse(request.body);
-          if (!parsed.success)
-            return sendValidationError(response, parsed.error);
-          try {
-            const repository = await db.project.update({
-              where: { id: request.params.repositoryId },
-              data: {
-                ...parsed.data,
-                ...(parsed.data.isStarred === undefined
-                  ? {}
-                  : {
-                      stars: parsed.data.isStarred
-                        ? { increment: 1 }
-                        : { decrement: 1 },
-                    }),
-              },
-            });
-            return response.json(repository);
-          } catch (error) {
-            return next(error);
-          }
-        },
-      );
-
-      app.delete(
-        "/v1/repositories/:repositoryId",
-        async (request, response, next) => {
-          try {
-            await db.project.delete({
-              where: { id: request.params.repositoryId },
-            });
-            return response.status(204).send();
-          } catch (error) {
-            return next(error);
-          }
-        },
-      );
-
-      app.get("/v1/devboxes", async (_request, response, next) => {
-        try {
-          return response.json({
-            devboxes: await db.devbox.findMany({
-              orderBy: { updatedAt: "desc" },
-            }),
-          });
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.post("/v1/devboxes", async (request, response, next) => {
-        const parsed = z
-          .object({
-            name: z.string().trim().min(1).max(120),
-            template: z.string().trim().min(1).max(120),
-            repo: z.string().trim().max(200).default("devpulse-core"),
-            branch: z.string().trim().max(120).default("main"),
-            workspaceId: z.string().cuid().optional(),
-            projectId: z.string().cuid().optional(),
-            vCpu: z.number().int().min(1).max(64).default(8),
-            ram: z.string().max(40).default("32 GB ECC"),
-            storage: z.string().max(40).default("100 GB NVMe"),
-          })
-          .safeParse(request.body);
-        if (!parsed.success) return sendValidationError(response, parsed.error);
-        try {
-          const workspace = parsed.data.workspaceId
-            ? await db.workspace.findUnique({
-                where: { id: parsed.data.workspaceId },
-              })
-            : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
-          if (!workspace)
-            return response.status(404).json({ error: "Workspace not found" });
-          const devbox = await db.devbox.create({
-            data: {
-              ...parsed.data,
-              workspaceId: workspace.id,
-              port: 3000 + Math.floor(Math.random() * 5000),
-              url: `https://ws-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`,
-            },
-          });
-          return response.status(201).json(devbox);
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.patch("/v1/devboxes/:devboxId", async (request, response, next) => {
-        const parsed = z
-          .object({ status: z.enum(["Running", "Stopped", "Building"]) })
-          .safeParse(request.body);
-        if (!parsed.success) return sendValidationError(response, parsed.error);
-        try {
-          return response.json(
-            await db.devbox.update({
-              where: { id: request.params.devboxId },
-              data: parsed.data,
-            }),
-          );
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.delete("/v1/devboxes/:devboxId", async (request, response, next) => {
-        try {
-          await db.devbox.delete({ where: { id: request.params.devboxId } });
-          return response.status(204).send();
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.get("/v1/deployments", async (_request, response, next) => {
-        try {
-          return response.json({
-            deployments: await db.deployment.findMany({
-              orderBy: { createdAt: "desc" },
-            }),
-          });
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.post("/v1/deployments", async (request, response, next) => {
-        const parsed = z
-          .object({
-            projectId: z.string().cuid().optional(),
-            commitMessage: z
-              .string()
-              .max(240)
-              .default("release: deploy latest changes"),
-            author: z.string().max(120).default("devpulse"),
-          })
-          .safeParse(request.body);
-        if (!parsed.success) return sendValidationError(response, parsed.error);
-        try {
-          const project = parsed.data.projectId
-            ? await db.project.findUnique({
-                where: { id: parsed.data.projectId },
-              })
-            : await db.project.findFirst({ orderBy: { updatedAt: "desc" } });
-          if (!project)
-            return response.status(404).json({ error: "Project not found" });
-          const deployment = await db.deployment.create({
-            data: {
-              projectId: project.id,
-              target: `${project.name}-release-${Date.now()}.devpulse.app`,
-              domain: "global-devpulse-ingress",
-              status: "Building",
-              branch: project.defaultBranch,
-              commitHash: createHash("sha1")
-                .update(`${project.id}:${Date.now()}`)
-                .digest("hex")
-                .slice(0, 7),
-              commitMessage: parsed.data.commitMessage,
-              author: parsed.data.author,
-              timestamp: "Just now",
-              duration: "In progress",
-            },
-          });
-          await db.project.update({
-            where: { id: project.id },
-            data: { deployStatus: "building" },
-          });
-          return response.status(201).json(deployment);
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.post(
-        "/v1/deployments/:deploymentId/rerun",
-        async (request, response, next) => {
-          try {
-            return response.json(
-              await db.deployment.update({
-                where: { id: request.params.deploymentId },
-                data: {
-                  status: "Building",
-                  duration: "In progress",
-                  timestamp: "Just now",
-                },
-              }),
-            );
-          } catch (error) {
-            return next(error);
-          }
-        },
-      );
-
-      app.get("/v1/environment-variables", async (_request, response, next) => {
-        try {
-          return response.json({
-            variables: await db.environmentVariable.findMany({
-              orderBy: { updatedAt: "desc" },
-              select: {
-                id: true,
-                projectId: true,
-                key: true,
-                value: true,
-                scope: true,
-                updatedAt: true,
-              },
-            }),
-          });
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.post("/v1/environment-variables", async (request, response, next) => {
-        const parsed = z
-          .object({
-            projectId: z.string().cuid().optional(),
-            key: z.string().trim().min(1).max(120),
-            value: z.string().max(4000),
-            scope: z.string().trim().max(120).default("Production, Staging"),
-          })
-          .safeParse(request.body);
-        if (!parsed.success) return sendValidationError(response, parsed.error);
-        try {
-          const project = parsed.data.projectId
-            ? await db.project.findUnique({
-                where: { id: parsed.data.projectId },
-              })
-            : await db.project.findFirst({ orderBy: { updatedAt: "desc" } });
-          if (!project)
-            return response.status(404).json({ error: "Project not found" });
-          return response.status(201).json(
-            await db.environmentVariable.create({
-              data: {
-                ...parsed.data,
-                projectId: project.id,
-                key: parsed.data.key.toUpperCase(),
-              },
-            }),
-          );
-        } catch (error) {
-          return next(error);
-        }
-      });
-
-      app.delete(
-        "/v1/environment-variables/:variableId",
-        async (request, response, next) => {
-          try {
-            await db.environmentVariable.delete({
-              where: { id: request.params.variableId },
-            });
-            return response.status(204).send();
-          } catch (error) {
-            return next(error);
-          }
-        },
-      );
-      clearTimeout(timer);
-      stderr += error.message;
-      resolve({ stdout, stderr, exitCode: null, timedOut, error: error.message });
-    });
-    child.on("close", (exitCode) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode, timedOut });
-    });
-    child.stdin.end(code);
+    child.stdin?.end(code);
   });
 }
 
-app.post("/v1/execute", async (request, response) => {
-  const parsed = executeSchema.safeParse(request.body);
-  if (!parsed.success) return sendValidationError(response, parsed.error);
-  const cacheKey = `execute:${createHash("sha256").update(JSON.stringify(parsed.data)).digest("hex")}`;
-  await redisConnection;
-  const cached = redis.isReady ? await redis.get(cacheKey) : null;
-  if (cached) {
-    const cachedResult = JSON.parse(cached) as { stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; error?: string; durationMs?: number; executionId?: string };
-    const userId = await getRequestUserId(request);
-    let executionId = cachedResult.executionId;
-    if (parsed.data.fileId && userId && !executionId) {
-      const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
-      const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
-      if (file && membership) {
-        const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, codeSnapshot: parsed.data.code, stdout: cachedResult.stdout, stderr: cachedResult.stderr, exitCode: cachedResult.exitCode, durationMs: cachedResult.durationMs ?? 0, timedOut: cachedResult.timedOut, error: cachedResult.error ?? null } });
-        executionId = execution.id;
-      }
-    }
-    return response.json({ ...cachedResult, executionId, cached: true });
-  }
-  const startedAt = Date.now();
-  const result = await executeInContainer(
-    parsed.data.language,
-    parsed.data.code,
-    parsed.data.timeoutMs ?? 10_000,
-  );
-  const durationMs = Date.now() - startedAt;
-  let executionId: string | undefined;
-  const userId = await getRequestUserId(request);
-  if (parsed.data.fileId && userId) {
-    const file = await db.file.findUnique({ where: { id: parsed.data.fileId }, select: { id: true, project: { select: { workspaceId: true } } } });
-    const membership = file ? await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: file.project.workspaceId, userId } } }) : null;
-    if (file && membership) {
-      const execution = await db.codeExecution.create({ data: { fileId: file.id, userId, language: parsed.data.language, codeSnapshot: parsed.data.code, stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, durationMs, timedOut: result.timedOut, error: result.error ?? null } });
-      executionId = execution.id;
-    }
-  }
-  if (redis.isReady)
-    await redis.set(cacheKey, JSON.stringify({ ...result, durationMs, executionId }), { EX: 60 });
-  if (result.stderr.includes("ENOENT") || result.stderr.includes("not found"))
-    return response.status(503).json({
-      error: "Execution sandbox is unavailable",
-      details: result.stderr,
+app.get("/v1/repositories", async (request, response, next) => {
+  try {
+    const repositories = await db.project.findMany({
+      where: {
+        workspace: {
+          memberships: { some: { userId: request.user!.id } },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        language: true,
+        stars: true,
+        forks: true,
+        isStarred: true,
+        defaultBranch: true,
+        deployStatus: true,
+        devboxReady: true,
+        updatedAt: true,
+      },
     });
-  return response.status(result.timedOut ? 408 : 200).json({ ...result, durationMs, executionId });
+    return response.json({ repositories });
+  } catch (error) {
+    return next(error);
+  }
 });
 
-app.get("/v1/files/:fileId/executions", checkFileAccess, async (request, response, next) => {
+app.post("/v1/repositories", async (request, response, next) => {
+  const parsed = z
+    .object({
+      name: z.string().trim().min(1).max(120),
+      description: z.string().max(500).default(""),
+      language: z.string().trim().max(40).default("TypeScript"),
+      branch: z.string().trim().max(120).default("main"),
+      workspaceId: z.string().cuid().optional(),
+    })
+    .safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const membership = parsed.data.workspaceId
+      ? await db.workspaceMember.findUnique({
+          where: {
+            workspaceId_userId: {
+              workspaceId: parsed.data.workspaceId,
+              userId: request.user!.id,
+            },
+          },
+          include: { workspace: true },
+        })
+      : await db.workspaceMember.findFirst({
+          where: { userId: request.user!.id },
+          include: { workspace: true },
+          orderBy: { joinedAt: "asc" },
+        });
+    if (!membership)
+      return response.status(404).json({ error: "Workspace not found" });
+    const workspace = membership.workspace;
+    const repository = await db.project.create({
+      data: {
+        workspaceId: workspace.id,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        language: parsed.data.language,
+        defaultBranch: parsed.data.branch,
+      },
+    });
+    return response.status(201).json(repository);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.patch(
+  "/v1/repositories/:projectId",
+  loadProjectForUser,
+  async (request, response, next) => {
+    const parsed = z
+      .object({
+        isStarred: z.boolean().optional(),
+        description: z.string().max(500).optional(),
+        name: z.string().trim().min(1).max(120).optional(),
+      })
+      .refine(
+        (value) => Object.keys(value).length > 0,
+        "at least one field is required",
+      )
+      .safeParse(request.body);
+    if (!parsed.success)
+      return sendValidationError(response, parsed.error);
+    try {
+      const repository = await db.project.update({
+        where: { id: request.project!.id },
+        data: {
+          ...parsed.data,
+          ...(parsed.data.isStarred === undefined
+            ? {}
+            : {
+                stars: parsed.data.isStarred
+                  ? { increment: 1 }
+                  : { decrement: 1 },
+              }),
+        },
+      });
+      return response.json(repository);
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+app.delete(
+  "/v1/repositories/:projectId",
+  loadProjectForUser,
+  async (request, response, next) => {
+    try {
+      await db.project.delete({
+        where: { id: request.project!.id },
+      });
+      return response.status(204).send();
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+app.get("/v1/devboxes", async (_request, response, next) => {
+  try {
+    return response.json({
+      devboxes: await db.devbox.findMany({
+        orderBy: { updatedAt: "desc" },
+      }),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/v1/devboxes", async (request, response, next) => {
+  const parsed = z
+    .object({
+      name: z.string().trim().min(1).max(120),
+      template: z.string().trim().min(1).max(120),
+      repo: z.string().trim().max(200).default("devpulse-core"),
+      branch: z.string().trim().max(120).default("main"),
+      workspaceId: z.string().cuid().optional(),
+      projectId: z.string().cuid().optional(),
+      vCpu: z.number().int().min(1).max(64).default(8),
+      ram: z.string().max(40).default("32 GB ECC"),
+      storage: z.string().max(40).default("100 GB NVMe"),
+    })
+    .safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const workspace = parsed.data.workspaceId
+      ? await db.workspace.findUnique({
+          where: { id: parsed.data.workspaceId },
+        })
+      : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
+    if (!workspace)
+      return response.status(404).json({ error: "Workspace not found" });
+    const devbox = await db.devbox.create({
+      data: {
+        ...parsed.data,
+        workspaceId: workspace.id,
+        port: 3000 + Math.floor(Math.random() * 5000),
+        url: `https://ws-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`,
+      },
+    });
+    return response.status(201).json(devbox);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.patch("/v1/devboxes/:devboxId", async (request, response, next) => {
+  const parsed = z
+    .object({ status: z.enum(["Running", "Stopped", "Building"]) })
+    .safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    return response.json(
+      await db.devbox.update({
+        where: { id: request.params.devboxId },
+        data: parsed.data,
+      }),
+    );
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete("/v1/devboxes/:devboxId", async (request, response, next) => {
+  try {
+    await db.devbox.delete({ where: { id: request.params.devboxId } });
+    return response.status(204).send();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/v1/deployments", async (_request, response, next) => {
+  try {
+    return response.json({
+      deployments: await db.deployment.findMany({
+        orderBy: { createdAt: "desc" },
+      }),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/v1/deployments", async (request, response, next) => {
+  const parsed = z
+    .object({
+      projectId: z.string().cuid().optional(),
+      commitMessage: z
+        .string()
+        .max(240)
+        .default("release: deploy latest changes"),
+      author: z.string().max(120).default("devpulse"),
+    })
+    .safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const project = parsed.data.projectId
+      ? await db.project.findUnique({
+          where: { id: parsed.data.projectId },
+        })
+      : await db.project.findFirst({ orderBy: { updatedAt: "desc" } });
+    if (!project)
+      return response.status(404).json({ error: "Project not found" });
+    const deployment = await db.deployment.create({
+      data: {
+        projectId: project.id,
+        target: `${project.name}-release-${Date.now()}.devpulse.app`,
+        domain: "global-devpulse-ingress",
+        status: "Building",
+        branch: project.defaultBranch,
+        commitHash: createHash("sha1")
+          .update(`${project.id}:${Date.now()}`)
+          .digest("hex")
+          .slice(0, 7),
+        commitMessage: parsed.data.commitMessage,
+        author: parsed.data.author,
+        timestamp: "Just now",
+        duration: "In progress",
+      },
+    });
+    await db.project.update({
+      where: { id: project.id },
+      data: { deployStatus: "building" },
+    });
+    return response.status(201).json(deployment);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post(
+  "/v1/deployments/:deploymentId/rerun",
+  async (request, response, next) => {
+    try {
+      return response.json(
+        await db.deployment.update({
+          where: { id: request.params.deploymentId },
+          data: {
+            status: "Building",
+            duration: "In progress",
+            timestamp: "Just now",
+          },
+        }),
+      );
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+app.get("/v1/environment-variables", async (_request, response, next) => {
+  try {
+    return response.json({
+      variables: await db.environmentVariable.findMany({
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true,
+          projectId: true,
+          key: true,
+          value: true,
+          scope: true,
+          updatedAt: true,
+        },
+      }),
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/v1/environment-variables", async (request, response, next) => {
+  const parsed = z
+    .object({
+      projectId: z.string().cuid().optional(),
+      key: z.string().trim().min(1).max(120),
+      value: z.string().max(4000),
+      scope: z.string().trim().max(120).default("Production, Staging"),
+    })
+    .safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  try {
+    const project = parsed.data.projectId
+      ? await db.project.findUnique({
+          where: { id: parsed.data.projectId },
+        })
+      : await db.project.findFirst({ orderBy: { updatedAt: "desc" } });
+    if (!project)
+      return response.status(404).json({ error: "Project not found" });
+    return response.status(201).json(
+      await db.environmentVariable.create({
+        data: {
+          ...parsed.data,
+          projectId: project.id,
+          key: parsed.data.key.toUpperCase(),
+        },
+      }),
+    );
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete(
+  "/v1/environment-variables/:variableId",
+  async (request, response, next) => {
+    try {
+      await db.environmentVariable.delete({
+        where: { id: request.params.variableId },
+      });
+      return response.status(204).send();
+    } catch (error) {
+      return next(error);
+    }
+  },
+);
+
+
+app.post("/v1/execute", async (request, response, next) => {
+  const parsed = executeSchema.safeParse(request.body);
+  if (!parsed.success) return sendValidationError(response, parsed.error);
+  const userId = request.user!.id;
+
+  try {
+    const rateLimit = await reserveExecutionSlot(userId);
+    if (rateLimit === "limited")
+      return response.status(429).json({ error: "RATE_LIMITED" });
+    if (rateLimit === "unavailable")
+      return response.status(503).json({ error: "RATE_LIMIT_UNAVAILABLE" });
+
+    const file = await findFileForUser(parsed.data.fileId, userId);
+    if (!file) return response.status(404).json({ error: "File not found" });
+
+    const cacheKey = `execute:${userId}:${createHash("sha256")
+      .update(JSON.stringify(parsed.data))
+      .digest("hex")}`;
+    const cached = redis.isReady ? await redis.get(cacheKey) : null;
+    if (cached) {
+      const cachedResult = JSON.parse(cached) as {
+        stdout: string;
+        stderr: string;
+        exitCode: number | null;
+        timedOut: boolean;
+        error?: string;
+        durationMs: number;
+        executionId: string;
+      };
+      return response.json({ ...cachedResult, cached: true });
+    }
+
+    const startedAt = Date.now();
+    const result = await executeInContainer(
+      parsed.data.language,
+      parsed.data.code,
+      parsed.data.timeoutMs ?? 10_000,
+    );
+    const durationMs = Date.now() - startedAt;
+    const execution = await db.codeExecution.create({
+      data: {
+        fileId: file.id,
+        userId,
+        language: parsed.data.language,
+        codeSnapshot: parsed.data.code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode,
+        durationMs,
+        timedOut: result.timedOut,
+        error: result.error ?? null,
+      },
+    });
+    const responseBody = {
+      ...result,
+      durationMs,
+      executionId: execution.id,
+    };
+    if (redis.isReady)
+      await redis.set(cacheKey, JSON.stringify(responseBody), { EX: 60 });
+    if (
+      result.error &&
+      /ENOENT|not found|cannot connect|docker daemon/i.test(result.error)
+    ) {
+      return response.status(503).json({
+        error: "Execution sandbox is unavailable",
+        details: result.error,
+      });
+    }
+    return response
+      .status(result.timedOut ? 408 : 200)
+      .json(responseBody);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.get("/v1/files/:fileId/executions", loadFileForUser, async (request, response, next) => {
   try {
     const limit = Math.min(Math.max(Number(request.query.limit ?? 10), 1), 100);
     const executions = await db.codeExecution.findMany({ where: { fileId: String(request.params.fileId) }, orderBy: { createdAt: "desc" }, take: limit, select: { id: true, language: true, stdout: true, stderr: true, exitCode: true, durationMs: true, timedOut: true, error: true, createdAt: true } });
@@ -1550,30 +1633,30 @@ app.put("/v1/editor/session", async (request, response, next) => {
     const project = await db.project.findUnique({ where: { id: parsed.data.projectId }, select: { workspaceId: true } });
     if (!project) return response.status(404).json({ error: "Project not found" });
     const membership = await db.workspaceMember.findUnique({ where: { workspaceId_userId: { workspaceId: project.workspaceId, userId } } });
-    if (!membership) return response.status(403).json({ error: "You do not have access to this project" });
+    if (!membership) return response.status(404).json({ error: "Project not found" });
     const session = await db.editorSession.upsert({ where: { userId_projectId: { userId, projectId: parsed.data.projectId } }, create: { ...parsed.data, userId }, update: { ...parsed.data, updatedAt: new Date() } });
     return response.json({ session });
   } catch (error) { return next(error); }
 });
 
-app.get("/v1/editor/session/:projectId", async (request, response, next) => {
-  const userId = await requireUser(request, response); if (!userId) return;
+app.get("/v1/editor/session/:projectId", loadProjectForUser, async (request, response, next) => {
+  const userId = request.user!.id;
   try {
-    if (!await userCanAccessProject(userId, String(request.params.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
     const session = await db.editorSession.findUnique({ where: { userId_projectId: { userId, projectId: String(request.params.projectId) } } });
     const savedSession = session ? { openFileIds: session.openFileIds, activeFileId: session.activeFileId, scrollPositions: session.scrollPositions, cursorPositions: session.cursorPositions } : null;
     return response.json({ session: savedSession, openFileIds: savedSession?.openFileIds ?? [], activeFileId: savedSession?.activeFileId ?? null, scrollPositions: savedSession?.scrollPositions ?? {}, cursorPositions: savedSession?.cursorPositions ?? {} });
   } catch (error) { return next(error); }
 });
 
-app.delete("/v1/editor/session/:projectId", async (request, response, next) => {
-  const userId = await requireUser(request, response); if (!userId) return;
+app.delete("/v1/editor/session/:projectId", loadProjectForUser, async (request, response, next) => {
+  const userId = request.user!.id;
   try {
-    if (!await userCanAccessProject(userId, String(request.params.projectId))) return response.status(403).json({ error: "You do not have access to this project" });
     await db.editorSession.deleteMany({ where: { userId, projectId: String(request.params.projectId) } });
     return response.status(204).send();
   } catch (error) { return next(error); }
 });
+
+app.use(handleWorkspaceMembershipError);
 
 async function verifyDatabase(): Promise<void> {
   try {
@@ -1674,4 +1757,3 @@ if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") 
     process.exit(1);
   });
 }
-
