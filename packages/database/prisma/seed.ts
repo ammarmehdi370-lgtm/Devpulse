@@ -4,6 +4,87 @@ const DEMO_EMAIL = "demo@devpulse.local";
 const DEMO_WORKSPACE_SLUG = "demo";
 const DEMO_PROJECT_ID = "demo-project";
 const DEMO_CHANNEL_ID = "demo-channel-general";
+const DEMO_PROJECTS = [
+  {
+    id: DEMO_PROJECT_ID,
+    name: "Devpulse Demo Project",
+    description: "Persistent Devpulse demo repository",
+    language: "TypeScript",
+    files: [
+      {
+        path: "README.md",
+        language: "markdown",
+        content: "# Devpulse Demo\n",
+      },
+      {
+        path: "main.py",
+        language: "python",
+        content: 'print("Hello from Devpulse")\n',
+      },
+    ],
+  },
+  {
+    id: "demo-project-web",
+    name: "Devpulse Web",
+    description: "A demo web application repository",
+    language: "TypeScript",
+    files: [
+      {
+        path: "README.md",
+        language: "markdown",
+        content: "# Devpulse Web\n",
+      },
+      {
+        path: "src/index.ts",
+        language: "typescript",
+        content: 'export const appName = "Devpulse Web";\n',
+      },
+    ],
+  },
+  {
+    id: "demo-project-api",
+    name: "Devpulse API",
+    description: "A demo API service repository",
+    language: "TypeScript",
+    files: [
+      {
+        path: "README.md",
+        language: "markdown",
+        content: "# Devpulse API\n",
+      },
+      {
+        path: "src/server.ts",
+        language: "typescript",
+        content: 'export const healthRoute = "/health";\n',
+      },
+    ],
+  },
+  {
+    id: "demo-project-docs",
+    name: "Devpulse Docs",
+    description: "A demo documentation repository",
+    language: "Markdown",
+    files: [
+      {
+        path: "README.md",
+        language: "markdown",
+        content: "# Devpulse Docs\n",
+      },
+      {
+        path: "guide.md",
+        language: "markdown",
+        content: "## Getting started\n\nWelcome to Devpulse.\n",
+      },
+    ],
+  },
+] as const;
+const DEMO_PROJECT_IDS = DEMO_PROJECTS.map(({ id }) => id);
+const DEMO_CHANNELS = [
+  { id: DEMO_CHANNEL_ID, name: "general" },
+  { id: "demo-channel-development", name: "development" },
+  { id: "demo-channel-announcements", name: "announcements" },
+] as const;
+const DEMO_CHANNEL_IDS = DEMO_CHANNELS.map(({ id }) => id);
 const DEMO_CONVERSATION_IDS = [
   "demo-ai-conversation-1",
   "demo-ai-conversation-2",
@@ -24,6 +105,9 @@ async function clearSeedData(): Promise<void> {
     await transaction.aIConversation.deleteMany({
       where: { id: { in: DEMO_CONVERSATION_IDS } },
     });
+    await transaction.aIUsage.deleteMany({
+      where: { user: { email: DEMO_EMAIL } },
+    });
     await transaction.message.deleteMany({
       where: { id: "demo-message-welcome" },
     });
@@ -31,7 +115,7 @@ async function clearSeedData(): Promise<void> {
       where: { id: { in: DEMO_EXECUTION_IDS } },
     });
     await transaction.editorSession.deleteMany({
-      where: { projectId: DEMO_PROJECT_ID },
+      where: { projectId: { in: DEMO_PROJECT_IDS } },
     });
     await transaction.devbox.deleteMany({
       where: { id: "demo-devbox" },
@@ -39,8 +123,11 @@ async function clearSeedData(): Promise<void> {
     await transaction.deployment.deleteMany({
       where: { id: "demo-deployment" },
     });
+    await transaction.channel.deleteMany({
+      where: { id: { in: DEMO_CHANNEL_IDS } },
+    });
     await transaction.project.deleteMany({
-      where: { id: DEMO_PROJECT_ID },
+      where: { id: { in: DEMO_PROJECT_IDS } },
     });
   });
 
@@ -60,7 +147,7 @@ async function seedData(): Promise<void> {
 
   const workspace = await db.workspace.upsert({
     where: { slug: DEMO_WORKSPACE_SLUG },
-    update: { name: "Demo Workspace" },
+    update: { name: "Demo Workspace", ownerId: user.id, plan: "PRO" },
     create: {
       name: "Demo Workspace",
       slug: DEMO_WORKSPACE_SLUG,
@@ -86,87 +173,89 @@ async function seedData(): Promise<void> {
   });
   console.log("✓ Membership: OWNER");
 
-  const project = await db.project.upsert({
-    where: { id: DEMO_PROJECT_ID },
-    update: {
-      description: "Persistent Devpulse demo repository",
-      language: "TypeScript",
-      isPrivate: false,
-      stars: 12,
-      forks: 3,
-      isStarred: true,
-      deployStatus: "live",
-    },
-    create: {
-      id: DEMO_PROJECT_ID,
-      name: "Devpulse Demo Project",
-      workspaceId: workspace.id,
-      description: "Persistent Devpulse demo repository",
-      language: "TypeScript",
-      isPrivate: false,
-      stars: 12,
-      forks: 3,
-      isStarred: true,
-      deployStatus: "live",
-    },
-  });
-  console.log(`✓ Project: ${project.name}`);
+  const projects = [];
+  for (const [index, projectSeed] of DEMO_PROJECTS.entries()) {
+    const project = await db.project.upsert({
+      where: { id: projectSeed.id },
+      update: {
+        name: projectSeed.name,
+        workspaceId: workspace.id,
+        description: projectSeed.description,
+        language: projectSeed.language,
+        isPrivate: false,
+        stars: index === 0 ? 12 : 0,
+        forks: index === 0 ? 3 : 0,
+        isStarred: index === 0,
+        deployStatus: index === 0 ? "live" : "none",
+      },
+      create: {
+        id: projectSeed.id,
+        name: projectSeed.name,
+        workspaceId: workspace.id,
+        description: projectSeed.description,
+        language: projectSeed.language,
+        isPrivate: false,
+        stars: index === 0 ? 12 : 0,
+        forks: index === 0 ? 3 : 0,
+        isStarred: index === 0,
+        deployStatus: index === 0 ? "live" : "none",
+      },
+    });
+    projects.push(project);
+    console.log(`✓ Project: ${project.name}`);
+  }
 
-  const fileSeeds = [
-    {
-      path: "README.md",
-      language: "markdown",
-      content: "# Devpulse Demo\n",
-    },
-    {
-      path: "main.py",
-      language: "python",
-      content: 'print("Hello from Devpulse")\n',
-    },
-  ];
+  const primaryProject = projects[0];
+  if (!primaryProject) throw new Error("Demo projects were not created.");
+
   const files: Awaited<ReturnType<typeof db.file.upsert>>[] = [];
-  for (const fileSeed of fileSeeds) {
-    const file = await db.file.upsert({
-      where: {
-        projectId_path: {
+  for (const [projectIndex, projectSeed] of DEMO_PROJECTS.entries()) {
+    const project = projects[projectIndex];
+    if (!project) throw new Error(`Missing demo project ${projectSeed.name}.`);
+
+    for (const fileSeed of projectSeed.files) {
+      const file = await db.file.upsert({
+        where: {
+          projectId_path: {
+            projectId: project.id,
+            path: fileSeed.path,
+          },
+        },
+        update: {
+          language: fileSeed.language,
+          content: fileSeed.content,
+          sizeBytes: Buffer.byteLength(fileSeed.content),
+        },
+        create: {
           projectId: project.id,
           path: fileSeed.path,
+          language: fileSeed.language,
+          content: fileSeed.content,
+          sizeBytes: Buffer.byteLength(fileSeed.content),
         },
-      },
-      update: {
-        language: fileSeed.language,
-        content: fileSeed.content,
-        sizeBytes: Buffer.byteLength(fileSeed.content),
-      },
-      create: {
-        projectId: project.id,
-        path: fileSeed.path,
-        language: fileSeed.language,
-        content: fileSeed.content,
-        sizeBytes: Buffer.byteLength(fileSeed.content),
-      },
-    });
-    files.push(file);
+      });
+      files.push(file);
 
-    await db.fileRevision.upsert({
-      where: {
-        fileId_version: {
+      await db.fileRevision.upsert({
+        where: {
+          fileId_version: {
+            fileId: file.id,
+            version: 1,
+          },
+        },
+        update: {
+          content: fileSeed.content,
+          authorId: user.id,
+        },
+        create: {
           fileId: file.id,
           version: 1,
+          content: fileSeed.content,
+          authorId: user.id,
         },
-      },
-      update: {
-        content: fileSeed.content,
-        authorId: user.id,
-      },
-      create: {
-        fileId: file.id,
-        version: 1,
-        content: fileSeed.content,
-        authorId: user.id,
-      },
-    });
-    console.log(`✓ File: ${fileSeed.path}`);
+      });
+      console.log(`✓ File: ${project.name}/${fileSeed.path}`);
+    }
   }
 
   const conversationSeeds = [
@@ -182,7 +271,7 @@ async function seedData(): Promise<void> {
       update: {
         title: conversationSeed.title,
         userId: user.id,
-        projectId: project.id,
+        projectId: primaryProject.id,
         fileId: file.id,
         model: "claude-sonnet-4-6",
         messageCount: 5,
@@ -191,7 +280,7 @@ async function seedData(): Promise<void> {
         id: conversationSeed.id,
         title: conversationSeed.title,
         userId: user.id,
-        projectId: project.id,
+        projectId: primaryProject.id,
         fileId: file.id,
         model: "claude-sonnet-4-6",
         messageCount: 5,
@@ -250,7 +339,8 @@ async function seedData(): Promise<void> {
     const file = files[index % files.length];
     if (!file) throw new Error("Demo project files were not created.");
     const executionId = DEMO_EXECUTION_IDS[index];
-    if (!executionId) throw new Error(`Missing demo execution ID for item ${index + 1}.`);
+    if (!executionId)
+      throw new Error(`Missing demo execution ID for item ${index + 1}.`);
 
     await db.codeExecution.upsert({
       where: { id: executionId },
@@ -289,7 +379,7 @@ async function seedData(): Promise<void> {
 
   await db.editorSession.upsert({
     where: {
-      userId_projectId: { userId: user.id, projectId: project.id },
+      userId_projectId: { userId: user.id, projectId: primaryProject.id },
     },
     update: {
       openFileIds: files.map((file) => file.id),
@@ -299,7 +389,7 @@ async function seedData(): Promise<void> {
     },
     create: {
       userId: user.id,
-      projectId: project.id,
+      projectId: primaryProject.id,
       openFileIds: files.map((file) => file.id),
       activeFileId: primaryFile.id,
       scrollPositions: { [primaryFile.id]: 1 },
@@ -311,7 +401,7 @@ async function seedData(): Promise<void> {
     where: { id: "demo-devbox" },
     update: {
       workspaceId: workspace.id,
-      projectId: project.id,
+      projectId: primaryProject.id,
       name: "devpulse-demo-devbox",
       repo: "devpulse-demo-project",
       template: "Next.js 15",
@@ -321,7 +411,7 @@ async function seedData(): Promise<void> {
     create: {
       id: "demo-devbox",
       workspaceId: workspace.id,
-      projectId: project.id,
+      projectId: primaryProject.id,
       name: "devpulse-demo-devbox",
       repo: "devpulse-demo-project",
       template: "Next.js 15",
@@ -333,7 +423,7 @@ async function seedData(): Promise<void> {
   await db.deployment.upsert({
     where: { id: "demo-deployment" },
     update: {
-      projectId: project.id,
+      projectId: primaryProject.id,
       target: "devpulse-demo-preview.devpulse.app",
       domain: "global-devpulse-ingress",
       status: "Ready",
@@ -346,7 +436,7 @@ async function seedData(): Promise<void> {
     },
     create: {
       id: "demo-deployment",
-      projectId: project.id,
+      projectId: primaryProject.id,
       target: "devpulse-demo-preview.devpulse.app",
       domain: "global-devpulse-ingress",
       status: "Ready",
@@ -362,7 +452,7 @@ async function seedData(): Promise<void> {
   await db.environmentVariable.upsert({
     where: {
       projectId_key: {
-        projectId: project.id,
+        projectId: primaryProject.id,
         key: "DATABASE_URL",
       },
     },
@@ -371,44 +461,50 @@ async function seedData(): Promise<void> {
       scope: "Development",
     },
     create: {
-      projectId: project.id,
+      projectId: primaryProject.id,
       key: "DATABASE_URL",
       value: "postgresql://localhost:5433/devpulse",
       scope: "Development",
     },
   });
 
-  const channel = await db.channel.upsert({
-    where: {
-      workspaceId_name: {
-        workspaceId: workspace.id,
-        name: "general",
+  let generalChannelId: string | undefined;
+  for (const channelSeed of DEMO_CHANNELS) {
+    const channel = await db.channel.upsert({
+      where: {
+        workspaceId_name: {
+          workspaceId: workspace.id,
+          name: channelSeed.name,
+        },
       },
-    },
-    update: { type: "PUBLIC" },
-    create: {
-      id: DEMO_CHANNEL_ID,
-      workspaceId: workspace.id,
-      name: "general",
-      type: "PUBLIC",
-    },
-  });
+      update: { type: "PUBLIC" },
+      create: {
+        id: channelSeed.id,
+        workspaceId: workspace.id,
+        name: channelSeed.name,
+        type: "PUBLIC",
+      },
+    });
+    if (channelSeed.id === DEMO_CHANNEL_ID) generalChannelId = channel.id;
+  }
+  if (!generalChannelId)
+    throw new Error("Demo general channel was not created.");
 
   await db.message.upsert({
     where: { id: "demo-message-welcome" },
     update: {
-      channelId: channel.id,
+      channelId: generalChannelId,
       authorId: user.id,
       body: "Welcome to the Devpulse demo workspace!",
     },
     create: {
       id: "demo-message-welcome",
-      channelId: channel.id,
+      channelId: generalChannelId,
       authorId: user.id,
       body: "Welcome to the Devpulse demo workspace!",
     },
   });
-  console.log("✓ Channel: #general and welcome message");
+  console.log("✓ Channels: #general, #development, #announcements");
 }
 
 async function verifySeed(): Promise<void> {
@@ -416,39 +512,49 @@ async function verifySeed(): Promise<void> {
     where: { slug: DEMO_WORKSPACE_SLUG },
     select: { id: true },
   });
-  const [users, workspaces, projects, files, channels] = await Promise.all([
-    db.user.count({ where: { email: DEMO_EMAIL } }),
-    db.workspace.count({ where: { slug: DEMO_WORKSPACE_SLUG } }),
-    workspace
-      ? db.project.count({
-          where: {
-            workspaceId: workspace.id,
-            name: "Devpulse Demo Project",
-          },
-        })
-      : Promise.resolve(0),
-    workspace
-      ? db.file.count({
-          where: {
-            project: {
+  const [users, workspaces, ownerMemberships, projects, files, channels] =
+    await Promise.all([
+      db.user.count({ where: { email: DEMO_EMAIL } }),
+      db.workspace.count({ where: { slug: DEMO_WORKSPACE_SLUG } }),
+      workspace
+        ? db.workspaceMember.count({
+            where: {
               workspaceId: workspace.id,
-              name: "Devpulse Demo Project",
+              user: { email: DEMO_EMAIL },
+              role: "OWNER",
             },
-          },
-        })
-      : Promise.resolve(0),
-    db.channel.count({ where: { id: DEMO_CHANNEL_ID } }),
-  ]);
+          })
+        : Promise.resolve(0),
+      workspace
+        ? db.project.count({
+            where: { id: { in: DEMO_PROJECT_IDS }, workspaceId: workspace.id },
+          })
+        : Promise.resolve(0),
+      workspace
+        ? db.file.count({ where: { projectId: { in: DEMO_PROJECT_IDS } } })
+        : Promise.resolve(0),
+      db.channel.count({ where: { id: { in: DEMO_CHANNEL_IDS } } }),
+    ]);
 
   console.log("\nVerification:");
   console.log(`  users:      ${users}`);
   console.log(`  workspaces: ${workspaces}`);
+  console.log(`  OWNER memberships: ${ownerMemberships}`);
   console.log(`  projects:   ${projects}`);
   console.log(`  files:      ${files}`);
   console.log(`  channels:   ${channels}`);
 
-  if (users !== 1 || workspaces !== 1 || projects !== 1 || files < 2 || channels !== 1) {
-    throw new Error("Seed verification failed: one or more demo records are missing.");
+  if (
+    users !== 1 ||
+    workspaces !== 1 ||
+    ownerMemberships !== 1 ||
+    projects !== DEMO_PROJECTS.length ||
+    files < 4 ||
+    channels !== DEMO_CHANNELS.length
+  ) {
+    throw new Error(
+      "Seed verification failed: one or more demo records are missing.",
+    );
   }
 }
 

@@ -96,7 +96,9 @@ data uses the `devpulse` IndexedDB database.
    clear site data unless you intend to delete local browser data.
 5. On the login page, use the development **Continue with GitHub** button
    (it runs the local demo login in development). After login, confirm the
-   repositories page contains the four seeded demo repositories.
+   repositories page contains the four seeded demo repositories. Repository
+   metadata is stored on the `Project` model; Prisma does not define a separate
+   `Repository` model.
 
 ### Typecheck and build verification
 
