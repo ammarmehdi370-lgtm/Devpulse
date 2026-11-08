@@ -1,30 +1,36 @@
 # Devpulse Development Commands
 
-## Browser app quick start
+## Full-stack quick start
 
-The browser app uses Next.js for its web development server. PGlite and OPFS
-run in the browser; `pnpm dev` does not start Docker, PostgreSQL, Redis, MinIO,
-Express, Socket.IO, or the AI Worker.
+The workspace includes the Next.js web app and the API, Socket.IO, and AI
+services. PGlite and OPFS still run in the browser for local-first features.
 
 Requirements: Node.js 20.10+ and pnpm 9.15+.
 
 ```bash
 pnpm install
 pnpm run bootstrap
-pnpm dev
+node scripts/dev-start.mjs
 ```
+
+Bootstrap creates `.env` only when missing, fills a blank/placeholder
+`SESSION_SECRET`, and creates the RS256 keypair when needed without replacing
+an existing `.env` or complete keypair. It reports optional integrations whose
+credentials are unset. The startup script checks Docker, starts PostgreSQL,
+Redis, and MinIO, waits for healthchecks, creates the MinIO bucket, generates
+the Prisma client, applies migrations, starts the app services, and waits for
+the API, Socket.IO, and AI health endpoints.
 
 Open <http://localhost:3000>. In browser DevTools, inspect **Application →
 IndexedDB** for PGlite data and **Storage → Origin private file system** for
 OPFS files. Clearing site data removes local browser data.
 
-The bootstrap command creates `.env` from `.env.example` only if it does not
-already exist, and checks/install dependencies as needed. It never overwrites
-an existing `.env`. It also creates `apps/web/.env.local` from its public-only
-example if missing, which is where Next.js reads browser build variables.
 Browser database migrations execute when PGlite initializes in the browser;
 `pnpm migrate` is the legacy Prisma/PostgreSQL migration command and is not
 needed by the browser database.
+
+For browser-only development without the server-backed services, run
+`pnpm --filter @devpulse/web dev` after installing dependencies.
 
 ### AI proxy
 
@@ -126,14 +132,16 @@ web build. Set `ANTHROPIC_API_KEY` and `JWT_PUBLIC_KEY` as secrets on the
 Cloudflare Worker, not as Vercel web-app variables. The Worker and its
 authoritative usage enforcement are separate from static hosting.
 
-### Legacy server-backed development
+### Server-backed service development
 
-The application UI is not fully migrated; some routes still depend on the
-legacy Express API and Socket.IO services. Use the legacy stack only for those
-flows. It requires Docker Desktop and OpenSSL:
+Some routes still depend on the Express API and Socket.IO services. The
+`node scripts/dev-start.mjs` workflow is the recommended full-stack setup.
+Individual service commands are also available:
 
 - `pnpm setup:stack` runs the legacy environment/key setup.
-- `pnpm dev:stack` starts the legacy server-backed workspace.
+- `pnpm dev` starts the server-backed workspace when infrastructure and the
+  Prisma client are already ready.
+- `pnpm dev:stack` is an alias for the server-backed workspace launcher.
 - `pnpm build:stack` builds all workspace packages.
 - `pnpm dev:api`, `pnpm dev:socket`, and `pnpm dev:ai` start individual services.
 
@@ -323,8 +331,9 @@ Repeat the flow with **Continue with Google** to verify Google sign-in.
 
 ## Generating JWT Keys
 
-Generate an RS256 key pair once before starting the API. From the repository
-root, run one of:
+The recommended `pnpm run bootstrap` command creates the RS256 keypair when
+either key is missing. The platform-specific scripts remain available for
+manual key generation:
 
 ```bash
 bash apps/api/scripts/generate-keys.sh
@@ -484,23 +493,18 @@ docker compose down -v
 
 ## Run all applications locally
 
-Start infrastructure, wait for PostgreSQL, Redis, and MinIO, generate the
-Prisma client, apply migrations, create the MinIO bucket, and start the web,
-API, Socket.IO, and AI services:
+The recommended cross-platform startup command starts infrastructure, waits
+for PostgreSQL, Redis, and MinIO, generates the Prisma client, applies
+migrations, creates the MinIO bucket, starts the web/API/Socket.IO/AI services,
+and verifies the three backend health endpoints:
 
 ```bash
-make dev
+node scripts/dev-start.mjs
 ```
 
-On Windows PowerShell, use:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/dev-start.ps1
-```
-
-For demo data, use `make dev-seed` or add `--seed` to either startup script.
-The legacy workspace launcher is `pnpm dev:stack`; it checks Docker, `.env`,
-database/Redis/MinIO health, and Prisma generation before starting services.
+After infrastructure and Prisma are ready, `pnpm dev` starts the app services
+directly. `pnpm dev:stack` runs the same service launcher. The older
+platform-specific startup scripts are retained for existing workflows.
 Mobile/Expo is intentionally separate; use `pnpm dev:mobile`. `pnpm dev:all`
 includes mobile and performs the same prerequisite checks.
 
@@ -546,9 +550,9 @@ The local services use these URLs:
 
 Use these endpoints and commands to check each running service. The API health
 response checks PostgreSQL, Redis, and the configured MinIO bucket; it returns
-`{"status":"ok"}` only when all three checks pass. The AI endpoint returns
-`configured: false` (HTTP 503) when `ANTHROPIC_API_KEY` is unset, which is
-expected when developing without AI access.
+`{"status":"ok"}` only when all three checks pass. The AI endpoint returns HTTP 200 with `configured: false` when
+`ANTHROPIC_API_KEY` is unset; AI requests themselves remain unavailable until
+the key is configured.
 
 | Service | Check | Healthy result |
 | ------- | ----- | -------------- |

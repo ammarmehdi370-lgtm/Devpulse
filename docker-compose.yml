@@ -1,3 +1,18 @@
+x-workspace-volumes: &workspace-volumes
+  - .:/workspace
+  - workspace-node-modules:/workspace/node_modules
+  - workspace-app-ai-node-modules:/workspace/apps/ai/node_modules
+  - workspace-app-ai-worker-node-modules:/workspace/apps/ai-worker/node_modules
+  - workspace-app-api-node-modules:/workspace/apps/api/node_modules
+  - workspace-app-mobile-node-modules:/workspace/apps/mobile/node_modules
+  - workspace-app-socket-node-modules:/workspace/apps/socket/node_modules
+  - workspace-app-web-node-modules:/workspace/apps/web/node_modules
+  - workspace-package-config-node-modules:/workspace/packages/config/node_modules
+  - workspace-package-database-node-modules:/workspace/packages/database/node_modules
+  - workspace-package-types-node-modules:/workspace/packages/types/node_modules
+  - workspace-package-ui-node-modules:/workspace/packages/ui/node_modules
+  - workspace-package-utils-node-modules:/workspace/packages/utils/node_modules
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -50,7 +65,8 @@ services:
     ports: ["9000:9000", "9001:9001"]
     volumes: [devpulse-rustfs:/data]
     healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent http://localhost:9000/health/live"]
+      test:
+        ["CMD-SHELL", "curl --fail --silent http://localhost:9000/health/live"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -62,15 +78,23 @@ services:
       minio:
         condition: service_healthy
     entrypoint: ["/bin/sh", "-ec"]
-    command: >-
-      aws --endpoint-url http://minio:9000 s3api head-bucket --bucket "$$MINIO_BUCKET"
-      || aws --endpoint-url http://minio:9000 s3api create-bucket --bucket "$$MINIO_BUCKET";
-      echo 'S3-compatible bucket ready'
+    command:
+      - |
+        aws --endpoint-url http://minio:9000 s3api head-bucket --bucket "$$MINIO_BUCKET" ||
+        aws --endpoint-url http://minio:9000 s3api create-bucket --bucket "$$MINIO_BUCKET"
+        echo 'S3-compatible bucket ready'
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-${S3_MINIO_ROOT_USER:-devpulse}}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-${S3_MINIO_ROOT_PASSWORD:-devpulse123}}
       AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
       MINIO_BUCKET: ${MINIO_BUCKET:-devpulse-files}
+    restart: "no"
+
+  deps-init:
+    image: node:20-bookworm
+    working_dir: /workspace
+    command: sh -c "corepack enable && pnpm install --frozen-lockfile"
+    volumes: *workspace-volumes
     restart: "no"
 
   web:
@@ -83,8 +107,10 @@ services:
       NEXT_PUBLIC_SOCKET_URL: http://localhost:4001
       NEXT_PUBLIC_AI_URL: http://localhost:4002
     ports: ["3000:3000"]
-    volumes: [".:/workspace", "web-node-modules:/workspace/node_modules"]
+    volumes: *workspace-volumes
     depends_on:
+      deps-init:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
       socket:
@@ -92,7 +118,13 @@ services:
       ai:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -102,7 +134,7 @@ services:
     image: node:20-bookworm
     restart: unless-stopped
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/database db:generate && pnpm --filter @devpulse/api dev"
+    command: sh -c "corepack enable && pnpm --filter @devpulse/database db:generate && pnpm --filter @devpulse/api dev"
     env_file: .env
     environment:
       NODE_ENV: development
@@ -136,14 +168,22 @@ services:
       EMAIL_FROM: ${EMAIL_FROM:-noreply@devpulse.io}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Devpulse}
     ports: ["4000:4000"]
-    volumes: [".:/workspace", "api-node-modules:/workspace/node_modules"]
+    volumes: *workspace-volumes
     depends_on:
+      deps-init:
+        condition: service_completed_successfully
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       minio: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -153,19 +193,27 @@ services:
     image: node:20-bookworm
     restart: unless-stopped
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/socket dev"
+    command: sh -c "corepack enable && pnpm --filter @devpulse/socket dev"
     environment:
       NODE_ENV: development
       SOCKET_PORT: 4001
       APP_URL: http://localhost:3000
       REDIS_URL: redis://redis:6379
     ports: ["4001:4001"]
-    volumes: [".:/workspace", "socket-node-modules:/workspace/node_modules"]
+    volumes: *workspace-volumes
     depends_on:
+      deps-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -175,16 +223,25 @@ services:
     image: node:20-bookworm
     restart: unless-stopped
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/ai dev"
+    command: sh -c "corepack enable && pnpm --filter @devpulse/ai dev"
     environment:
       NODE_ENV: development
       AI_PORT: 4002
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
     ports: ["4002:4002"]
-    volumes: [".:/workspace", "ai-node-modules:/workspace/node_modules"]
+    volumes: *workspace-volumes
+    depends_on:
+      deps-init:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4002/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4002/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -193,20 +250,31 @@ services:
   mobile:
     image: node:20-bookworm
     working_dir: /workspace
-    command: sh -c "corepack enable && pnpm install && pnpm --filter @devpulse/mobile dev -- --lan"
+    command: sh -c "corepack enable && pnpm --filter @devpulse/mobile dev -- --lan"
     environment:
       EXPO_PUBLIC_API_URL: http://localhost:4000
       EXPO_PUBLIC_SOCKET_URL: http://localhost:4001
     ports: ["8081:8081", "19000:19000", "19001:19001", "19002:19002"]
-    volumes: [".:/workspace", "mobile-node-modules:/workspace/node_modules"]
-    depends_on: [api]
+    volumes: *workspace-volumes
+    depends_on:
+      deps-init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
 
 volumes:
   devpulse-postgres:
   devpulse-redis:
   devpulse-rustfs:
-  web-node-modules:
-  api-node-modules:
-  socket-node-modules:
-  ai-node-modules:
-  mobile-node-modules:
+  workspace-node-modules:
+  workspace-app-ai-node-modules:
+  workspace-app-ai-worker-node-modules:
+  workspace-app-api-node-modules:
+  workspace-app-mobile-node-modules:
+  workspace-app-socket-node-modules:
+  workspace-app-web-node-modules:
+  workspace-package-config-node-modules:
+  workspace-package-database-node-modules:
+  workspace-package-types-node-modules:
+  workspace-package-ui-node-modules:
+  workspace-package-utils-node-modules:

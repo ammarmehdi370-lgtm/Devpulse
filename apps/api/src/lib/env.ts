@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export interface RequiredEnv {
   DATABASE_URL: string;
   REDIS_URL: string;
@@ -12,68 +14,78 @@ export interface OptionalEnv {
   GITHUB_CLIENT_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  GITLAB_CLIENT_ID?: string;
+  GITLAB_CLIENT_SECRET?: string;
   RESEND_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   PORT?: string;
   NODE_ENV?: string;
 }
 
+const envSchema = z.object({
+  DATABASE_URL: z.string().min(1),
+  REDIS_URL: z.string().min(1),
+  SESSION_SECRET: z
+    .string()
+    .min(32)
+    .refine((value) => !value.startsWith("replace-with-")),
+  JWT_PRIVATE_KEY_PATH: z.string().min(1),
+  JWT_PUBLIC_KEY_PATH: z.string().min(1),
+  FRONTEND_URL: z.string().url(),
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GITLAB_CLIENT_ID: z.string().optional(),
+  GITLAB_CLIENT_SECRET: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  PORT: z.string().optional(),
+  NODE_ENV: z.string().optional(),
+});
+
 export function validateEnv(): RequiredEnv & OptionalEnv {
-  const required: (keyof RequiredEnv)[] = [
-    "DATABASE_URL",
-    "REDIS_URL",
-    "SESSION_SECRET",
-    "JWT_PRIVATE_KEY_PATH",
-    "JWT_PUBLIC_KEY_PATH",
-    "FRONTEND_URL",
-  ];
-  const missing: string[] = [];
-
-  for (const key of required) {
-    if (!process.env[key]) missing.push(key);
-  }
-
-  const secret = process.env.SESSION_SECRET ?? "";
-  if (secret && secret.length < 32) {
-    console.error(
-      `[ENV] SESSION_SECRET must be at least 32 characters (got ${secret.length})`,
-    );
-    console.error("Generate one: openssl rand -hex 32");
-    missing.push("SESSION_SECRET (too short)");
-  }
-
-  if (missing.length > 0) {
+  const parsed = envSchema.safeParse(process.env);
+  if (!parsed.success) {
+    const invalidNames = [
+      ...new Set(parsed.error.issues.map((issue) => String(issue.path[0]))),
+    ];
     console.error("\n[ENV] Missing or invalid required variables:");
-    for (const key of missing) console.error(`  - ${key}`);
-    console.error("\nCopy .env.example to .env and fill in the required values.");
-    console.error("Generate SESSION_SECRET: openssl rand -hex 32\n");
+    for (const name of invalidNames) console.error(`  - ${name}`);
+    console.error(
+      "\nCopy .env.example to .env and fill in the required values.\n",
+    );
     process.exit(1);
   }
+  const env = parsed.data;
 
-  const optionalWarnings: Record<string, string> = {
-    GITHUB_CLIENT_ID: "GitHub OAuth will be disabled",
-    GOOGLE_CLIENT_ID: "Google OAuth will be disabled",
-    RESEND_API_KEY: "Magic-link email will not send",
-    ANTHROPIC_API_KEY: "AI chat will not work",
-  };
-  for (const [key, warning] of Object.entries(optionalWarnings)) {
-    if (!process.env[key]) console.warn(`[ENV] Warning: ${key} not set - ${warning}`);
+  const optionalWarnings: [keyof OptionalEnv, string][] = [
+    ["GITHUB_CLIENT_ID", "GitHub OAuth will be disabled"],
+    ["GOOGLE_CLIENT_ID", "Google OAuth will be disabled"],
+    ["GITLAB_CLIENT_ID", "GitLab OAuth will be disabled"],
+    ["RESEND_API_KEY", "Magic-link email will not send"],
+    ["ANTHROPIC_API_KEY", "AI chat will not work"],
+  ];
+  for (const [key, warning] of optionalWarnings) {
+    if (!env[key]) console.warn(`[ENV] Warning: ${key} not set - ${warning}`);
   }
 
   return {
-    DATABASE_URL: process.env.DATABASE_URL!,
-    REDIS_URL: process.env.REDIS_URL!,
-    SESSION_SECRET: process.env.SESSION_SECRET!,
-    JWT_PRIVATE_KEY_PATH: process.env.JWT_PRIVATE_KEY_PATH!,
-    JWT_PUBLIC_KEY_PATH: process.env.JWT_PUBLIC_KEY_PATH!,
-    FRONTEND_URL: process.env.FRONTEND_URL!,
-    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
-    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
-    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-    RESEND_API_KEY: process.env.RESEND_API_KEY,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-    PORT: process.env.PORT,
-    NODE_ENV: process.env.NODE_ENV,
+    DATABASE_URL: env.DATABASE_URL,
+    REDIS_URL: env.REDIS_URL,
+    SESSION_SECRET: env.SESSION_SECRET,
+    JWT_PRIVATE_KEY_PATH: env.JWT_PRIVATE_KEY_PATH,
+    JWT_PUBLIC_KEY_PATH: env.JWT_PUBLIC_KEY_PATH,
+    FRONTEND_URL: env.FRONTEND_URL,
+    GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET,
+    GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
+    GITLAB_CLIENT_ID: env.GITLAB_CLIENT_ID,
+    GITLAB_CLIENT_SECRET: env.GITLAB_CLIENT_SECRET,
+    RESEND_API_KEY: env.RESEND_API_KEY,
+    ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+    PORT: env.PORT,
+    NODE_ENV: env.NODE_ENV,
   };
 }

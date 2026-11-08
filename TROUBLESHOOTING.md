@@ -74,8 +74,8 @@ pnpm --filter @devpulse/database validate
 ```
 
 If `pnpm dev` reports that PostgreSQL, Redis, MinIO, or the Prisma client is
-not ready, run `make dev` (or the PowerShell startup script on Windows) to
-complete the ordered startup before launching app services.
+not ready, run `node scripts/dev-start.mjs` to complete the ordered startup
+before launching app services.
 
 ### Migration failed
 

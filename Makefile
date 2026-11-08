@@ -4,7 +4,7 @@ bootstrap:
 infra:
 	bash scripts/start-services.sh
 dev:
-	bash scripts/dev-start.sh
+	node scripts/dev-start.mjs
 dev-seed:
 	bash scripts/dev-start.sh --seed
 verify:

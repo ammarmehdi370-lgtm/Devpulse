@@ -16,16 +16,18 @@ Devpulse is a Turborepo monorepo for the web, API, real-time, AI, and mobile cli
 corepack enable
 pnpm install
 pnpm run bootstrap
-make dev
+node scripts/dev-start.mjs
 ```
 
-`make dev` starts and checks PostgreSQL, Redis, and MinIO, generates the Prisma
-client, applies migrations, creates the MinIO bucket, and then starts the app
-services. On Windows PowerShell, run
-`powershell -ExecutionPolicy Bypass -File scripts/dev-start.ps1` instead.
-Direct `pnpm dev` requires Docker, `.env`, healthy infrastructure, and an
-already generated Prisma client; it prints a setup error if any prerequisite
-is missing.
+`pnpm run bootstrap` creates `.env` if needed, generates a session secret and
+RS256 keys, and reports optional integrations whose credentials are unset.
+`node scripts/dev-start.mjs` starts and checks PostgreSQL, Redis, and MinIO,
+creates the MinIO bucket, generates the Prisma client, applies migrations, then
+starts the web, API, Socket.IO, and AI services. The command works on Windows,
+macOS, and Linux.
+
+The AI service health endpoint remains available when `ANTHROPIC_API_KEY` is
+unset; AI requests will report that the provider is not configured.
 
 Local services:
 
