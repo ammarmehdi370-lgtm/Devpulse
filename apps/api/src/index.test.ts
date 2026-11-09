@@ -6,18 +6,15 @@ describe("API foundation", () => {
   it("reports service health", async () => {
     const response = await request(app).get("/health");
 
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      status: expect.stringMatching(/^(ok|unhealthy)$/),
-      checks: {
-        database: expect.any(Boolean),
-        redis: expect.any(Boolean),
-        minio: expect.any(Boolean),
-        email: expect.any(Boolean),
-        ai: expect.any(Boolean),
-      },
+    expect(response.body).toEqual({
+      db: expect.any(Boolean),
+      redis: expect.any(Boolean),
+      minio: expect.any(Boolean),
+      ai: expect.any(Boolean),
     });
-    expect(Number.isNaN(Date.parse(response.body.timestamp))).toBe(false);
+    expect(response.status).toBe(
+      response.body.db && response.body.redis ? 200 : 503,
+    );
   });
 
   it("reports configured authentication providers", async () => {
@@ -34,7 +31,7 @@ describe("API foundation", () => {
   it("clears refresh and session cookies on logout", async () => {
     const response = await request(app).post("/api/auth/logout");
     const header = response.headers["set-cookie"];
-    const cookies = Array.isArray(header) ? header.join(";") : header ?? "";
+    const cookies = Array.isArray(header) ? header.join(";") : (header ?? "");
 
     expect(response.status).toBe(204);
     expect(cookies).toContain("refresh_token=;");
@@ -100,7 +97,9 @@ describe("API foundation", () => {
       expect(response.status).toBe(200);
       expect(response.body.mode).toBe("development");
       expect(response.body.token).toMatch(/^[a-f\d]{64}$/i);
-      expect(response.body.url).toContain(`/auth/verify?token=${response.body.token}`);
+      expect(response.body.url).toContain(
+        `/auth/verify?token=${response.body.token}`,
+      );
     } finally {
       if (originalApiKey === undefined) delete process.env.RESEND_API_KEY;
       else process.env.RESEND_API_KEY = originalApiKey;
@@ -134,7 +133,8 @@ describe("API foundation", () => {
 
   it("limits magic-link sends to three per email per hour", async () => {
     const email = `rate-limit-${Date.now()}@example.com`;
-    const send = () => request(app).post("/api/auth/magic-link/send").send({ email });
+    const send = () =>
+      request(app).post("/api/auth/magic-link/send").send({ email });
 
     expect((await send()).status).toBe(200);
     expect((await send()).status).toBe(200);

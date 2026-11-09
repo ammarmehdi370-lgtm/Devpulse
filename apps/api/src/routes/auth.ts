@@ -16,7 +16,7 @@ const refreshCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
-  path: "/api/auth",
+  path: "/api/auth"
 };
 const MAGIC_TOKEN_TTL_SECONDS = 15 * 60;
 const MAGIC_RATE_LIMIT = 3;
@@ -50,7 +50,7 @@ export const sessionMiddleware: express.RequestHandler = session({
   store: isTestEnvironment ? undefined : new RedisStore({
     client: redis,
     prefix: "oauth-session:",
-    ttl: 600,
+    ttl: 600
   }),
   secret: sessionSecret,
   resave: false,
@@ -60,8 +60,8 @@ export const sessionMiddleware: express.RequestHandler = session({
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 10 * 60 * 1000,
-  },
+    maxAge: 10 * 60 * 1000
+  }
 });
 
 router.use(passport.initialize());
@@ -75,7 +75,7 @@ function strategy(provider: "github" | "google", mode: "start" | "callback") {
       const options: passport.AuthenticateOptions = {
         scope: provider === "github" ? ["user:email"] : ["profile", "email"],
         session: false,
-        state,
+        state
       };
       return passport.authenticate(provider, options)(request, response, next);
     });
@@ -90,7 +90,7 @@ function requireOAuthProvider(provider: "github" | "google"): express.RequestHan
       return response.status(503).json({
         error: "OAUTH_NOT_CONFIGURED",
         message: `${provider === "github" ? "GitHub" : "Google"} OAuth is not set up on this server`,
-        hint: "Contact the administrator",
+        hint: "Contact the administrator"
       });
     }
     return next();
@@ -116,7 +116,7 @@ async function issueTokens(userId: string, response: express.Response): Promise<
   const membership = await db.workspaceMember.findFirst({
     where: { userId },
     include: { workspace: true },
-    orderBy: { joinedAt: "asc" },
+    orderBy: { joinedAt: "asc" }
   });
   if (!membership) throw new Error("OAuth user has no workspace membership");
   const user = await db.user.findUniqueOrThrow({ where: { id: userId } });
@@ -125,15 +125,15 @@ async function issueTokens(userId: string, response: express.Response): Promise<
     email: user.email,
     name: user.name ?? user.email,
     workspaceId: membership.workspaceId,
-    plan: membership.workspace.plan.toLowerCase(),
+    plan: membership.workspace.plan.toLowerCase()
   };
   const [accessToken, refreshToken] = await Promise.all([
     generateAccessToken(tokenPayload),
-    generateRefreshToken({ sub: user.id }),
+    generateRefreshToken({ sub: user.id })
   ]);
   response.cookie("refresh_token", refreshToken, {
     ...refreshCookieOptions,
-    maxAge: 30 * 24 * 60 * 60 * 1000,
+    maxAge: 30 * 24 * 60 * 60 * 1000
   });
   return accessToken;
 }
@@ -143,7 +143,9 @@ function hashValue(value: string): string {
 }
 
 function memoryFallbackAllowed(): boolean {
-  return process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+  return (
+    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test"
+  );
 }
 
 async function reserveMagicLinkAttempt(email: string): Promise<number> {
@@ -151,7 +153,7 @@ async function reserveMagicLinkAttempt(email: string): Promise<number> {
   if (redis.isReady) {
     const count = await redis.eval(
       "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
-      { keys: [key], arguments: [String(MAGIC_RATE_WINDOW_SECONDS)] },
+      { keys: [key], arguments: [String(MAGIC_RATE_WINDOW_SECONDS)] }
     );
     return Number(count);
   }
@@ -201,7 +203,13 @@ async function ensureWorkspaceMembership(userId: string, name: string): Promise<
   if (await db.workspaceMember.findFirst({ where: { userId }, select: { userId: true } })) return;
   await db.$transaction(async (transaction) => {
     if (await transaction.workspaceMember.findFirst({ where: { userId }, select: { userId: true } })) return;
-    const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "workspace"}-${randomBytes(4).toString("hex")}`;
+    const slug = `${
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 30) || "workspace"
+    }-${randomBytes(4).toString("hex")}`;
     const workspace = await transaction.workspace.create({ data: { name: `${name}'s workspace`, slug, ownerId: userId } });
     await transaction.workspaceMember.create({ data: { userId, workspaceId: workspace.id, role: "OWNER" } });
   });
@@ -209,13 +217,13 @@ async function ensureWorkspaceMembership(userId: string, name: string): Promise<
 
 async function sendMagicLinkHandler(
   request: express.Request,
-  response: express.Response<DevMagicLinkResponse | ProdMagicLinkResponse | MagicLinkErrorResponse>,
+  response: express.Response<DevMagicLinkResponse | ProdMagicLinkResponse | MagicLinkErrorResponse>
 ): Promise<express.Response> {
   const validation = z.object({ email: z.string().trim().email().max(254) }).safeParse(request.body);
   if (!validation.success) {
     return response.status(400).json({
       error: "INVALID_EMAIL",
-      message: "Invalid email address",
+      message: "Invalid email address"
     });
   }
   const email = validation.data.email.toLowerCase();
@@ -223,7 +231,7 @@ async function sendMagicLinkHandler(
     console.error("[Auth] Email not configured: RESEND_API_KEY is not set");
     return response.status(503).json({
       error: "EMAIL_NOT_CONFIGURED",
-      message: "Email delivery is not available. Try another sign-in method.",
+      message: "Email delivery is not available. Try another sign-in method."
     });
   }
 
@@ -251,7 +259,7 @@ async function sendMagicLinkHandler(
       mode: "development",
       token,
       url,
-      message: "Dev mode: use this token directly",
+      message: "Dev mode: use this token directly"
     };
     return response.json(result);
   }
@@ -261,7 +269,7 @@ async function sendMagicLinkHandler(
     await sendMagicLink(email, token, user?.name ?? undefined);
     const result: ProdMagicLinkResponse = {
       mode: "production",
-      message: "Check your email for a sign-in link",
+      message: "Check your email for a sign-in link"
     };
     return response.json(result);
   } catch (emailError) {
@@ -275,13 +283,13 @@ async function sendMagicLinkHandler(
       console.error("[Auth] Email not configured:", errorMessage);
       return response.status(503).json({
         error: "EMAIL_NOT_CONFIGURED",
-        message: "Email delivery is not available. Try another sign-in method.",
+        message: "Email delivery is not available. Try another sign-in method."
       });
     }
     console.error("[Auth] Magic-link email send failed:", emailError);
     return response.status(503).json({
       error: "EMAIL_FAILED",
-      message: "Could not send sign-in email. Please try again in a minute.",
+      message: "Could not send sign-in email. Please try again in a minute."
     });
   }
 }
@@ -300,7 +308,13 @@ async function verifyMagicLinkHandler(request: express.Request, response: expres
       try {
         user = await db.$transaction(async (transaction) => {
           const created = await transaction.user.create({ data: { email: stored.email, name } });
-          const slug = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "workspace"}-${randomBytes(4).toString("hex")}`;
+          const slug = `${
+            name
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/^-|-$/g, "")
+              .slice(0, 30) || "workspace"
+          }-${randomBytes(4).toString("hex")}`;
           const workspace = await transaction.workspace.create({ data: { name: `${name}'s workspace`, slug, ownerId: created.id } });
           await transaction.workspaceMember.create({ data: { userId: created.id, workspaceId: workspace.id, role: "OWNER" } });
           return created;
@@ -329,63 +343,66 @@ async function verifyMagicLinkHandler(request: express.Request, response: expres
   }
 }
 
-if (process.env.NODE_ENV !== "production") {
-  router.get("/dev-bypass", async (request, response, next) => {
-    const email =
-      typeof request.query.email === "string" && request.query.email
-        ? request.query.email
-        : "demo@devpulse.local";
+router.get("/dev-bypass", async (request, response, next) => {
+  if (process.env.NODE_ENV === "production")
+    return response.status(404).json({ error: "Not found" });
 
-    try {
-      const user = await db.user.findUnique({
-        where: { email },
-        include: { memberships: { include: { workspace: true } } },
-      });
-      if (!user) {
-        return response.status(404).json({
-          error: "Dev user not found",
-          hint: "Run: pnpm seed",
-        });
-      }
+  const email =
+    typeof request.query.email === "string" && request.query.email
+      ? request.query.email
+      : "demo@devpulse.local";
 
-      const membership = user.memberships[0];
-      const [accessToken, refreshToken] = await Promise.all([
-        generateAccessToken({
-          sub: user.id,
-          email: user.email,
-          name: user.name ?? user.email,
-          workspaceId: membership?.workspaceId ?? "",
-          plan: membership?.workspace.plan.toLowerCase() ?? "free",
-        }),
-        generateRefreshToken({ sub: user.id }),
-      ]);
-
-      response.cookie("devpulse_session", accessToken, {
-        httpOnly: true,
-        secure: false,
-        sameSite: "lax",
-        maxAge: 15 * 60 * 1000,
+  try {
+    const user = await db.user.findUnique({
+      where: { email },
+      include: { memberships: { include: { workspace: true } } },
+    });
+    if (!user) {
+      return response.status(404).json({
+        error: "Dev user not found",
+        hint: "Run: pnpm seed",
       });
-      response.cookie("refresh_token", refreshToken, {
-        ...refreshCookieOptions,
-        secure: false,
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
-
-      return response.json({
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-        },
-        accessToken,
-        workspaceId: membership?.workspaceId,
-      });
-    } catch (error) {
-      return next(error);
     }
-  });
-}
+
+    const membership = user.memberships[0];
+    if (!membership)
+      return response.status(404).json({ error: "Dev user has no workspace" });
+    const [accessToken, refreshToken] = await Promise.all([
+      generateAccessToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name ?? user.email,
+        workspaceId: membership.workspaceId,
+        plan: membership.workspace.plan.toLowerCase(),
+      }),
+      generateRefreshToken({ sub: user.id }),
+    ]);
+
+    response.cookie("devpulse_session", accessToken, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      maxAge: 15 * 60 * 1000,
+    });
+    response.cookie("refresh_token", refreshToken, {
+      ...refreshCookieOptions,
+      secure: false,
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+
+    return response.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+      },
+      accessToken,
+      workspaceId: membership.workspaceId,
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
 
 router.post("/magic-link/send", sendMagicLinkHandler);
 router.post("/magic-link", sendMagicLinkHandler);
@@ -395,7 +412,7 @@ router.get("/providers", (_request, response) => {
   return response.json({
     github: isOAuthProviderConfigured("github"),
     google: isOAuthProviderConfigured("google"),
-    magicLink: process.env.NODE_ENV !== "production" || Boolean(process.env.RESEND_API_KEY?.trim()),
+    magicLink: process.env.NODE_ENV !== "production" || Boolean(process.env.RESEND_API_KEY?.trim())
   });
 });
 
@@ -415,13 +432,13 @@ for (const provider of ["github", "google"] as const) {
       } catch (error) {
         return next(error);
       }
-    },
+    }
   );
 }
 
 router.post("/refresh", async (request, response) => {
-  const refreshToken = request.cookies?.refresh_token as string | undefined
-    ?? request.headers.cookie?.match(/(?:^|; )refresh_token=([^;]+)/)?.[1];
+  const refreshToken =
+    (request.cookies?.refresh_token as string | undefined) ?? request.headers.cookie?.match(/(?:^|; )refresh_token=([^;]+)/)?.[1];
   if (!refreshToken) return response.status(401).json({ error: "Refresh token required" });
   try {
     const payload = await verifyRefreshToken(refreshToken);
@@ -439,7 +456,7 @@ router.post("/logout", (_request, response) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    path: "/",
+    path: "/"
   });
   return response.status(204).send();
 });

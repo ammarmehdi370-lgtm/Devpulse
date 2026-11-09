@@ -27,7 +27,7 @@ vi.mock("@devpulse/database", () => {
         findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
           where.id === project.id ? project : null,
         ),
-        findMany: vi.fn(async () => []),
+        findMany: vi.fn(async () => [project]),
       },
       file: {
         findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
@@ -40,9 +40,11 @@ vi.mock("@devpulse/database", () => {
           async ({
             where,
           }: {
-            where: { workspaceId_userId: { userId: string; workspaceId: string } };
+            where: {
+              workspaceId_userId: { userId: string; workspaceId: string };
+            };
           }) =>
-            where.workspaceId_userId.userId === "user-a" &&
+            ["user-a", "user-c"].includes(where.workspaceId_userId.userId) &&
             where.workspaceId_userId.workspaceId === project.workspaceId
               ? { role: "OWNER" }
               : null,
@@ -57,9 +59,18 @@ vi.mock("@devpulse/database", () => {
 
 vi.mock("./lib/jwt.js", () => ({
   verifyToken: vi.fn(async (token: string) => {
-    if (token !== "user-a-token" && token !== "user-b-token")
+    if (
+      token !== "user-a-token" &&
+      token !== "user-b-token" &&
+      token !== "user-c-token"
+    )
       throw new Error("Invalid test token");
-    const userId = token === "user-a-token" ? "user-a" : "user-b";
+    const userId =
+      token === "user-a-token"
+        ? "user-a"
+        : token === "user-c-token"
+          ? "user-c"
+          : "user-b";
     return {
       sub: userId,
       email: `${userId}@example.com`,
@@ -139,10 +150,23 @@ describe("v1 authorization", () => {
       expect(authIndex).toBeLessThan(route.index);
 
       if (route.path.includes(":projectId"))
-        expect(route.handlers.some((layer) => layer.handle === loadProjectForUser)).toBe(true);
+        expect(
+          route.handlers.some((layer) => layer.handle === loadProjectForUser),
+        ).toBe(true);
       if (route.path.includes(":fileId"))
-        expect(route.handlers.some((layer) => layer.handle === loadFileForUser)).toBe(true);
+        expect(
+          route.handlers.some((layer) => layer.handle === loadFileForUser),
+        ).toBe(true);
     }
+  });
+
+  it("allows only explicitly public health, auth, and plans paths", () => {
+    expect(isPublicV1Route("/v1/health")).toBe(true);
+    expect(isPublicV1Route("/v1/auth/github/callback")).toBe(true);
+    expect(isPublicV1Route("/v1/plans")).toBe(true);
+    expect(isPublicV1Route("/v1/plans/pro")).toBe(true);
+    expect(isPublicV1Route("/v1/projects")).toBe(false);
+    expect(isPublicV1Route("/v1/auth/unknown/private")).toBe(false);
   });
 
   it("rejects requests without a bearer token", async () => {
@@ -175,6 +199,9 @@ describe("v1 authorization", () => {
   });
 
   it("allows the project owner to read and execute an authorized file", async () => {
+    const projectsResponse = await request(app)
+      .get("/v1/projects")
+      .set("Authorization", ownerToken);
     const projectResponse = await request(app)
       .get(projectPath)
       .set("Authorization", ownerToken);
@@ -186,6 +213,8 @@ describe("v1 authorization", () => {
       .set("Authorization", ownerToken)
       .send({ language: "javascript", code: "1 + 1", fileId });
 
+    expect(projectsResponse.status).toBe(200);
+    expect(projectsResponse.body.projects).toHaveLength(1);
     expect(projectResponse.status).toBe(200);
     expect(fileResponse.status).toBe(200);
     expect(executeResponse.status).toBe(200);
@@ -193,6 +222,65 @@ describe("v1 authorization", () => {
       stdout: "execution output",
       executionId: "execution-a",
     });
+  });
+
+  it("runs code through Docker with isolated resource limits and argument arrays", async () => {
+    await request(app)
+      .post("/v1/execute")
+      .set("Authorization", ownerToken)
+      .send({ language: "javascript", code: "1 + 1", fileId });
+
+    const { execFile } = await import("node:child_process");
+    const dockerRun = vi
+      .mocked(execFile)
+      .mock.calls.slice()
+      .reverse()
+      .find(
+        ([executable, args]) =>
+          executable === "docker" && Array.isArray(args) && args[0] === "run",
+      );
+    const [executable, args, options] = dockerRun ?? [];
+    expect(executable).toBe("docker");
+    expect(Array.isArray(args)).toBe(true);
+    expect(args).toEqual(
+      expect.arrayContaining([
+        "--network",
+        "none",
+        "--cpus",
+        "1",
+        "--memory",
+        "256m",
+        "--pids-limit",
+        "64",
+        "--read-only",
+        "--user",
+        "1000:1000",
+        "--cap-drop",
+        "ALL",
+        "--entrypoint",
+        "sleep",
+      ]),
+    );
+    expect(args).not.toContain("sh");
+    expect(args).not.toContain("-c");
+    expect(options).toMatchObject({
+      timeout: expect.any(Number),
+      killSignal: "SIGKILL",
+    });
+  });
+
+  it("limits executions per authenticated user", async () => {
+    const execute = () =>
+      request(app)
+        .post("/v1/execute")
+        .set("Authorization", "Bearer user-c-token")
+        .send({ language: "javascript", code: "1 + 1", fileId });
+
+    for (let attempt = 0; attempt < 20; attempt += 1)
+      expect((await execute()).status).toBe(200);
+    const limited = await execute();
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: "RATE_LIMITED" });
   });
 
   it("validates execution requests after authentication", async () => {

@@ -11,16 +11,16 @@ import pinoHttp from "pino-http";
 import { z } from "zod";
 import { db } from "@devpulse/database";
 import { authRouter, sessionMiddleware } from "./routes/auth.js";
-import { redis, redisConnection } from "./lib/redis.js";
+import { connectRedis, redis } from "./lib/redis.js";
 import { initKeys } from "./lib/jwt.js";
 import {
-  assertWorkspaceMember,
   findFileForUser,
   handleWorkspaceMembershipError,
   loadFileForUser,
   loadProjectForUser,
   requireAuth,
   WorkspaceMembershipError,
+  requireWorkspaceMember
 } from "./middleware/auth.js";
 import type { AiApplyRequest } from "./types/requests.js";
 
@@ -29,13 +29,13 @@ const port = Number(process.env.PORT ?? 4000);
 const objectStoreEndpoint = new URL(
   process.env.MINIO_ENDPOINT ??
     process.env.AWS_S3_ENDPOINT ??
-    "http://localhost:9000",
+    "http://localhost:9000"
 );
 const minio = new Minio.Client({
   endPoint: objectStoreEndpoint.hostname,
   port: Number(
     objectStoreEndpoint.port ||
-      (objectStoreEndpoint.protocol === "https:" ? 443 : 80),
+      (objectStoreEndpoint.protocol === "https:" ? 443 : 80)
   ),
   useSSL: objectStoreEndpoint.protocol === "https:",
   accessKey:
@@ -47,7 +47,7 @@ const minio = new Minio.Client({
     process.env.MINIO_SECRET_KEY ||
     process.env.AWS_SECRET_ACCESS_KEY ||
     process.env.S3_MINIO_ROOT_PASSWORD ||
-    "devpulse123",
+    "devpulse123"
 });
 const objectBucket =
   process.env.MINIO_BUCKET ??
@@ -62,7 +62,7 @@ const filePathSchema = z
   .refine(
     (value) =>
       !value.includes("..") && !value.startsWith("/") && !value.includes("\\"),
-    "path must be project-relative",
+    "path must be project-relative"
   );
 const fileLanguageSchema = z.string().trim().min(1).max(32).optional();
 const fileContentSchema = z.string().max(2_000_000);
@@ -71,46 +71,40 @@ app.use(helmet());
 app.use(
   cors({
     origin: process.env.FRONTEND_URL ?? process.env.APP_URL ?? "http://localhost:3000",
-    credentials: true,
-  }),
+    credentials: true
+  })
 );
 app.use(express.json({ limit: "5mb" }));
 app.use(pinoHttp());
 app.use("/api/auth/github", sessionMiddleware);
 app.use("/api/auth/google", sessionMiddleware);
 app.use("/api/auth", authRouter);
-app.get("/health", async (_request, response) => {
-  const [databaseHealthy, redisHealthy, minioHealthy] = await Promise.all([
+const healthHandler: express.RequestHandler = async (_request, response) => {
+  const [dbHealthy, redisHealthy, minioHealthy] = await Promise.all([
     db.$queryRaw`SELECT 1`.then(
       () => true,
-      () => false,
+      () => false
     ),
     redis.isOpen
       ? redis.ping().then(
           () => true,
-          () => false,
+          () => false
         )
       : Promise.resolve(false),
     minio.bucketExists(objectBucket).then(
       (exists) => exists,
-      () => false,
-    ),
+      () => false
+    )
   ]);
-  const status =
-    databaseHealthy && redisHealthy && minioHealthy ? "ok" : "unhealthy";
 
-  return response.json({
-    status,
-    checks: {
-      database: databaseHealthy,
-      redis: redisHealthy,
-      minio: minioHealthy,
-      email: Boolean(process.env.RESEND_API_KEY),
-      ai: Boolean(process.env.ANTHROPIC_API_KEY),
-    },
-    timestamp: new Date().toISOString(),
-  });
-});
+  return response.status(dbHealthy && redisHealthy ? 200 : 503).json({
+    db: dbHealthy,
+    redis: redisHealthy,
+    minio: minioHealthy,
+    ai: Boolean(process.env.ANTHROPIC_API_KEY)
+    });
+};
+app.get("/health", healthHandler);
 app.get("/ready", (_request, response) => response.json({ status: "ready" }));
 app.get("/health/ready", async (_request, response, next) => {
   if (process.env.NODE_ENV !== "test")
@@ -118,14 +112,14 @@ app.get("/health/ready", async (_request, response, next) => {
   try {
     const demoUser = await db.user.findUnique({
       where: { email: "demo@devpulse.local" },
-      select: { id: true },
+      select: { id: true }
     });
     if (!demoUser)
       return response.status(503).json({ error: "Database is not seeded" });
     return response.json({
       status: "ready",
       database: "seeded",
-      environment: "test",
+      environment: "test"
     });
   } catch (error) {
     return next(error);
@@ -133,18 +127,19 @@ app.get("/health/ready", async (_request, response, next) => {
 });
 
 app.use("/v1", requireAuth);
+app.get("/v1/health", healthHandler);
 
 function sessionToken(userId: string): string {
   return jwt.sign({ sub: userId }, jwtSecret, {
     expiresIn: (process.env.JWT_EXPIRES_IN ??
-      "15m") as SignOptions["expiresIn"],
+      "15m") as SignOptions["expiresIn"]
   });
 }
 
 function setSessionCookie(response: express.Response, token: string): void {
   response.setHeader(
     "Set-Cookie",
-    `devpulse_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=900`,
+    `devpulse_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=900`
   );
 }
 
@@ -157,13 +152,13 @@ if (process.env.NODE_ENV === "test") {
     try {
       await db.$transaction(async (transaction) => {
         await transaction.project.deleteMany({
-          where: { name: { startsWith: "e2e-test-" } },
+          where: { name: { startsWith: "e2e-test-" } }
         });
         await transaction.workspace.deleteMany({
-          where: { owner: { email: { startsWith: "e2e-" } } },
+          where: { owner: { email: { startsWith: "e2e-" } } }
         });
         await transaction.user.deleteMany({
-          where: { email: { startsWith: "e2e-" } },
+          where: { email: { startsWith: "e2e-" } }
         });
       });
       return response.json({ cleaned: true });
@@ -176,7 +171,7 @@ if (process.env.NODE_ENV === "test") {
 app.post("/v1/auth/logout", (_request, response) => {
   response.setHeader(
     "Set-Cookie",
-    "devpulse_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0",
+    "devpulse_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0"
   );
   response.append("Set-Cookie", "refresh_token=; HttpOnly; Path=/api/auth; SameSite=Lax; Max-Age=0");
   return response.status(204).send();
@@ -189,9 +184,9 @@ app.get("/v1/me", async (request, response, next) => {
       where: { id: userId },
       include: {
         memberships: {
-          include: { workspace: { include: { projects: true } } },
-        },
-      },
+          include: { workspace: { include: { projects: true } } }
+        }
+      }
     });
     if (!user)
       return response.status(401).json({ error: "Session user not found" });
@@ -201,8 +196,8 @@ app.get("/v1/me", async (request, response, next) => {
       name: user.name,
       avatarUrl: user.avatarUrl,
       workspaces: user.memberships.map(
-        (membership: (typeof user.memberships)[number]) => membership.workspace,
-      ),
+        (membership: (typeof user.memberships)[number]) => membership.workspace
+      )
     });
   } catch (error) {
     return next(error);
@@ -213,10 +208,11 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
   const provider = request.params.provider;
   const callback = `${process.env.API_URL ?? `http://localhost:${port}`}/v1/auth/${provider}/callback`;
   if (provider === "github" && process.env.GITHUB_CLIENT_ID)
-    return response.redirect(`${process.env.API_URL ?? `http://localhost:${port}`}/api/auth/github`);
+    return response.redirect(`${process.env.API_URL ?? `http://localhost:${port}`}/api/auth/github`
+    );
   if (provider === "gitlab" && process.env.GITLAB_CLIENT_ID)
     return response.redirect(
-      `https://gitlab.com/oauth/authorize?client_id=${encodeURIComponent(process.env.GITLAB_CLIENT_ID)}&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=read_user`,
+      `https://gitlab.com/oauth/authorize?client_id=${encodeURIComponent(process.env.GITLAB_CLIENT_ID)}&redirect_uri=${encodeURIComponent(callback)}&response_type=code&scope=read_user`
     );
   if (provider === "sso" && process.env.SAML_ENTRYPOINT)
     return response.redirect(process.env.SAML_ENTRYPOINT);
@@ -231,13 +227,13 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
       const user = await db.user.upsert({
         where: { email: devEmail },
         update: { name: devName },
-        create: { email: devEmail, name: devName },
+        create: { email: devEmail, name: devName }
       });
       const token = sessionToken(user.id);
       setSessionCookie(response, token);
       console.log(`[DEV BYPASS] Auto-logged in as ${devEmail} via ${provider}`);
       return response.redirect(
-        `${process.env.APP_URL ?? "http://localhost:3000"}?authenticated=1`,
+        `${process.env.APP_URL ?? "http://localhost:3000"}?authenticated=1`
       );
     } catch (error) {
       return next(error);
@@ -246,10 +242,10 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
   // Ã¢â€â‚¬Ã¢â€â‚¬ END DEV BYPASS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   const error = encodeURIComponent(
-    `${provider} OAuth is not configured. Add provider credentials to .env.`,
+    `${provider} OAuth is not configured. Add provider credentials to .env.`
   );
   return response.redirect(
-    `${process.env.APP_URL ?? "http://localhost:3000"}?auth_error=${error}`,
+    `${process.env.APP_URL ?? "http://localhost:3000"}?auth_error=${error}`
   );
 });
 
@@ -271,19 +267,19 @@ app.get("/v1/auth/:provider/callback", async (request, response, next) => {
           method: "POST",
           headers: {
             Accept: "application/json",
-            "Content-Type": "application/json",
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
             client_id: process.env.GITHUB_CLIENT_ID,
             client_secret: process.env.GITHUB_CLIENT_SECRET,
-            code,
-          }),
-        },
+            code
+          })
+        }
       );
       const access = (await tokenResponse.json()) as { access_token?: string };
       const profile = (await fetch("https://api.github.com/user", {
         headers: {
-          Authorization: `Bearer ${access.access_token}` },
+          Authorization: `Bearer ${access.access_token}` }
       }).then((result) => result.json())) as {
         email?: string;
         username?: string;
@@ -299,11 +295,11 @@ app.get("/v1/auth/:provider/callback", async (request, response, next) => {
     const user = await db.user.upsert({
       where: { email },
       update: { name, avatarUrl },
-      create: { email, name, avatarUrl },
+      create: { email, name, avatarUrl }
     });
     setSessionCookie(response, sessionToken(user.id));
     return response.redirect(
-      `${process.env.APP_URL ?? "http://localhost:3000"}?authenticated=1`,
+      `${process.env.APP_URL ?? "http://localhost:3000"}?authenticated=1`
     );
   } catch (error) {
     return next(error);
@@ -312,14 +308,16 @@ app.get("/v1/auth/:provider/callback", async (request, response, next) => {
 
 function sendValidationError(
   response: express.Response,
-  error: z.ZodError,
+  error: z.ZodError
 ): void {
   response
     .status(400)
     .json({ error: "Invalid request", details: error.flatten() });
 }
 
-type AuthenticatedRequest = express.Request & { userId?: string; aiUsage?: { id: string; requestCount: number; tokenCount: number; limit: number; plan: string } };
+type AuthenticatedRequest = express.Request & { userId?: string; aiUsage?: { id: string; requestCount: number; tokenCount: number; limit: number; plan: string;
+  };
+};
 
 async function requireUser(request: express.Request, response: express.Response): Promise<string | null> {
   const userId = request.user?.id;
@@ -336,11 +334,13 @@ function languageFromPath(filePath: string): string | undefined {
   return languages[extname(filePath).toLowerCase()];
 }
 
-function fileSummary(file: { id: string; path: string; language: string | null; sizeBytes: number | null; updatedAt: Date; version: number; content?: string }) {
+function fileSummary(file: { id: string; path: string; language: string | null; sizeBytes: number | null; updatedAt: Date; version: number; content?: string;
+}) {
   return { id: file.id, name: file.path.split("/").pop() ?? file.path, path: file.path, language: file.language, sizeBytes: file.sizeBytes, version: file.version, modified: file.updatedAt };
 }
 
-function buildFileTree(files: Array<{ id: string; path: string; language: string | null; sizeBytes: number | null; updatedAt: Date; version: number }>) {
+function buildFileTree(files: Array<{ id: string; path: string; language: string | null; sizeBytes: number | null; updatedAt: Date; version: number;
+  }>) {
   const root: Array<Record<string, unknown>> = [];
   for (const file of files) {
     let current = root;
@@ -371,27 +371,33 @@ function contributorPeriodStart(period: string): Date | undefined {
   return start;
 }
 
-function activityWhere(periodStart: Date | undefined): { createdAt?: { gte: Date } } {
+function activityWhere(periodStart: Date | undefined): { createdAt?: { gte: Date };
+} {
   return periodStart ? { createdAt: { gte: periodStart } } : {};
 }
 
-function addActivity(current: { dates: Set<string>; lastActiveAt: Date | null; daily: Map<string, number> }, createdAt: Date): void {
+function addActivity(current: { dates: Set<string>; lastActiveAt: Date | null; daily: Map<string, number>;
+  }, createdAt: Date): void {
   const date = createdAt.toISOString().slice(0, 10);
   current.dates.add(date);
   current.daily.set(date, (current.daily.get(date) ?? 0) + 1);
   if (!current.lastActiveAt || createdAt > current.lastActiveAt) current.lastActiveAt = createdAt;
 }
 
-function contributorOverallPercentage(stats: { revisions: number; linesAdded: number; executions: number; aiRequests: number }, totals: { revisions: number; linesAdded: number; executions: number; aiRequests: number }): number {
-  const share = (value: number, total: number) => total ? value / total : 0;
-  return (share(stats.revisions, totals.revisions) * 0.4 + share(stats.linesAdded, totals.linesAdded) * 0.3 + share(stats.executions, totals.executions) * 0.2 + share(stats.aiRequests, totals.aiRequests) * 0.1) * 100;
+function contributorOverallPercentage(stats: { revisions: number; linesAdded: number; executions: number; aiRequests: number;
+  }, totals: { revisions: number; linesAdded: number; executions: number; aiRequests: number;
+  }): number {
+  const share = (value: number, total: number) => (total ? value / total : 0);
+  return (
+    (share(stats.revisions, totals.revisions) * 0.4 + share(stats.linesAdded, totals.linesAdded) * 0.3 + share(stats.executions, totals.executions) * 0.2 + share(stats.aiRequests, totals.aiRequests) * 0.1) * 100
+  );
 }
 
 async function saveFileRevision(fileId: string, userId: string, content: string, expectedVersion: number, language?: string, appliedFromAI = false, aiMessageId?: string, path?: string, note?: string) {
   return db.$transaction(async (transaction) => {
     const updated = await transaction.file.updateMany({
       where: { id: fileId, version: expectedVersion },
-      data: { content, ...(language ? { language } : {}), ...(path ? { path } : {}), sizeBytes: Buffer.byteLength(content, "utf8"), lastEditedById: userId, lastEditedAt: new Date(), version: { increment: 1 } },
+      data: { content, ...(language ? { language } : {}), ...(path ? { path } : {}), sizeBytes: Buffer.byteLength(content, "utf8"), lastEditedById: userId, lastEditedAt: new Date(), version: { increment: 1 } }
     });
     if (updated.count !== 1) return null;
     const file = await transaction.file.findUniqueOrThrow({ where: { id: fileId } });
@@ -405,8 +411,8 @@ app.get("/v1/projects", async (request, response, next) => {
     const projects = await db.project.findMany({
       where: {
         workspace: {
-          memberships: { some: { userId: request.user!.id } },
-        },
+          memberships: { some: { userId: request.user!.id } }
+        }
       },
       orderBy: { updatedAt: "desc" },
       select: {
@@ -414,8 +420,8 @@ app.get("/v1/projects", async (request, response, next) => {
         name: true,
         defaultBranch: true,
         workspaceId: true,
-        updatedAt: true,
-      },
+        updatedAt: true
+      }
     });
     return response.json({ projects });
   } catch (error) {
@@ -437,9 +443,12 @@ app.get("/v1/projects/:projectId/contributors", loadProjectForUser, async (reque
       db.fileRevision.findMany({ where: revisionWhere, orderBy: { createdAt: "asc" }, select: { fileId: true, authorId: true, createdAt: true, lineCount: true, file: { select: { path: true } } } }),
       db.codeExecution.findMany({ where: { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, ...activityWhere(periodStart) }, select: { userId: true, fileId: true, createdAt: true, file: { select: { path: true } } } }),
       db.aIMessage.findMany({ where: { conversation: { projectId, ...(fileFilter ? { fileId } : {}) }, ...activityWhere(periodStart) }, select: { createdAt: true, conversation: { select: { userId: true, fileId: true } } } }),
-      periodStart ? db.fileRevision.findMany({ where: { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, createdAt: { lt: periodStart } }, orderBy: { createdAt: "desc" }, distinct: ["fileId"], select: { fileId: true, lineCount: true } }) : Promise.resolve([]),
+      periodStart ? db.fileRevision.findMany({ where: { file: { projectId, ...(fileFilter ? { id: fileId } : {}) }, createdAt: { lt: periodStart } }, orderBy: { createdAt: "desc" }, distinct: ["fileId"], select: { fileId: true, lineCount: true } }) : Promise.resolve([])
     ]);
-    const contributorMap = new Map<string, { user: { id: string; name: string | null; email: string; avatarUrl: string | null }; role: string; revisions: number; linesAdded: number; linesRemoved: number; executions: number; aiRequests: number; files: Set<string>; fileCounts: Map<string, { path: string; count: number }>; activity: { dates: Set<string>; lastActiveAt: Date | null; daily: Map<string, number> } }>();
+    const contributorMap = new Map<string, { user: { id: string; name: string | null; email: string; avatarUrl: string | null;
+          }; role: string; revisions: number; linesAdded: number; linesRemoved: number; executions: number; aiRequests: number; files: Set<string>; fileCounts: Map<string, { path: string; count: number }>; activity: { dates: Set<string>; lastActiveAt: Date | null; daily: Map<string, number>;
+          };
+        }>();
     const ensureContributor = (member: (typeof members)[number]) => {
       const existing = contributorMap.get(member.user.id);
       if (existing) return existing;
@@ -487,7 +496,7 @@ app.post("/v1/projects", async (request, response, next) => {
         .enum(["blank", "nextjs", "fastapi", "rust", "go", "pytorch"])
         .optional()
         .default("blank"),
-      isPrivate: z.boolean().optional().default(false),
+      isPrivate: z.boolean().optional().default(false)
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
@@ -497,15 +506,15 @@ app.post("/v1/projects", async (request, response, next) => {
           where: {
             workspaceId_userId: {
               workspaceId: parsed.data.workspaceId,
-              userId: request.user!.id,
-            },
+              userId: request.user!.id
+            }
           },
-          include: { workspace: true },
+          include: { workspace: true }
         })
       : await db.workspaceMember.findFirst({
           where: { userId: request.user!.id },
           include: { workspace: true },
-          orderBy: { joinedAt: "asc" },
+          orderBy: { joinedAt: "asc" }
         });
     if (!membership)
       return response.status(404).json({ error: "Workspace not found" });
@@ -517,8 +526,8 @@ app.post("/v1/projects", async (request, response, next) => {
         defaultBranch: parsed.data.defaultBranch,
         template: parsed.data.template,
         isPrivate: parsed.data.isPrivate,
-        workspaceId: workspace.id,
-      },
+        workspaceId: workspace.id
+      }
     });
     return response.status(201).json(project);
   } catch (error) {
@@ -537,8 +546,8 @@ app.get("/v1/projects/:projectId/files", loadProjectForUser, async (request, res
         path: true,
         language: true,
         version: true,
-        updatedAt: true,
-      },
+        updatedAt: true
+      }
     });
     return response.json({ project, files });
   } catch (error) {
@@ -556,7 +565,7 @@ app.get(
     } catch (error) {
       return next(error);
     }
-  },
+  }
 );
 
 app.post("/v1/projects/:projectId/files", loadProjectForUser, async (request, response, next) => {
@@ -564,7 +573,7 @@ app.post("/v1/projects/:projectId/files", loadProjectForUser, async (request, re
     .object({
       path: filePathSchema,
       content: fileContentSchema.default(""),
-      language: fileLanguageSchema,
+      language: fileLanguageSchema
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
@@ -576,8 +585,8 @@ app.post("/v1/projects/:projectId/files", loadProjectForUser, async (request, re
         path: parsed.data.path,
         content: parsed.data.content,
         language: parsed.data.language,
-        revisions: { create: { version: 1, content: parsed.data.content } },
-      },
+        revisions: { create: { version: 1, content: parsed.data.content } }
+      }
     });
     return response.status(201).json(file);
   } catch (error) {
@@ -597,7 +606,7 @@ app.post(
           .string()
           .trim()
           .max(120)
-          .default("application/octet-stream"),
+          .default("application/octet-stream")
       })
       .safeParse(request.body);
     if (!parsed.success) return sendValidationError(response, parsed.error);
@@ -610,10 +619,10 @@ app.post(
       if (!exists)
         await minio.makeBucket(
           objectBucket,
-          process.env.AWS_REGION ?? "us-east-1",
+          process.env.AWS_REGION ?? "us-east-1"
         );
       await minio.putObject(objectBucket, objectKey, content, content.length, {
-        "Content-Type": parsed.data.contentType,
+        "Content-Type": parsed.data.contentType
       });
       return response
         .status(201)
@@ -621,7 +630,7 @@ app.post(
     } catch (error) {
       return next(error);
     }
-  },
+  }
 );
 
 const updateFileSchema = z
@@ -630,7 +639,7 @@ const updateFileSchema = z
     content: z.string().max(5_000_000).optional(),
     language: fileLanguageSchema,
     expectedVersion: z.number().int().positive(),
-    forceOverride: z.boolean().optional().default(false),
+    forceOverride: z.boolean().optional().default(false)
   })
   .refine((value) => value.path !== undefined || value.content !== undefined || value.language !== undefined, "at least one field is required");
 
@@ -682,8 +691,8 @@ app.get("/v1/files/:fileId/revisions", loadFileForUser, async (request, response
         where: { fileId },
         orderBy: { createdAt: "desc" },
         take: limit + 1,
-        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      }),
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {})
+      })
     ]);
     const hasNext = revisions.length > limit;
     const page = revisions.slice(0, limit);
@@ -697,10 +706,11 @@ app.get("/v1/files/:fileId/revisions", loadFileForUser, async (request, response
         lineCount: revision.lineCount,
         charCount: revision.charCount,
         appliedFromAI: revision.appliedFromAI,
-        author: revision.authorId ? authorMap.get(revision.authorId) ?? null : null,
+        author: revision.authorId ? (authorMap.get(revision.authorId) ?? null)
+            : null
       })),
-      nextCursor: hasNext ? page[page.length - 1]?.id ?? null : null,
-      total,
+      nextCursor: hasNext ? (page[page.length - 1]?.id ?? null) : null,
+      total
     });
   } catch (error) { return next(error); }
 });
@@ -708,7 +718,7 @@ app.get("/v1/files/:fileId/revisions", loadFileForUser, async (request, response
 app.get("/v1/files/:fileId/revisions/:revisionId", loadFileForUser, async (request, response, next) => {
   try {
     const revision = await db.fileRevision.findFirst({
-      where: { id: String(request.params.revisionId), fileId: String(request.params.fileId) },
+      where: { id: String(request.params.revisionId), fileId: String(request.params.fileId) }
     });
     if (!revision) return response.status(404).json({ error: "Revision not found" });
     const author = revision.authorId ? await db.user.findUnique({ where: { id: revision.authorId }, select: { id: true, name: true, avatarUrl: true } }) : null;
@@ -757,7 +767,7 @@ const aiChatSchema = z.object({
   context: z.object({ fileName: z.string().max(512).optional(), language: z.string().max(40).optional(), selectedCode: z.string().max(200_000).optional(), surroundingCode: z.string().max(200_000).optional(), projectName: z.string().max(120).optional(), recentErrors: z.array(z.string().max(4_000)).max(20).optional() }).optional(),
   fileId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
-  conversationId: z.string().cuid().optional(),
+  conversationId: z.string().cuid().optional()
 });
 const AI_APPLY_LIMIT_BYTES = 512_000;
 const aiApplySchema = z.object({
@@ -767,10 +777,11 @@ const aiApplySchema = z.object({
   range: z.object({ startLine: z.number().int().positive(), endLine: z.number().int().positive() }).refine((value) => value.endLine >= value.startLine, "endLine must be greater than or equal to startLine").optional(),
   aiMessageId: z.string().cuid().optional(),
   expectedVersion: z.number().int().positive(),
-  skipCheck: z.boolean().optional().default(false),
+  skipCheck: z.boolean().optional().default(false)
 });
 
-type AiApplySafetyError = { status: 400 | 422; error: string; message: string; openBraces?: number; closeBraces?: number };
+type AiApplySafetyError = { status: 400 | 422; error: string; message: string; openBraces?: number; closeBraces?: number;
+};
 
 function validateAIApplyContent(code: string, language: string, skipCheck: boolean): AiApplySafetyError | null {
   if (skipCheck) return null;
@@ -792,7 +803,9 @@ async function getOrCreateAIUsage(userId: string, projectId?: string) {
     ? (await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } }))?.workspaceId
     : (await db.workspaceMember.findFirst({ where: { userId }, orderBy: { joinedAt: "asc" }, select: { workspaceId: true } }))?.workspaceId;
   const usage = await db.aIUsage.upsert({ where: { userId_month_year: { userId, month, year } }, create: { userId, month, year, workspaceId }, update: workspaceId ? { workspaceId } : {} });
-  const plan = workspaceId ? (await db.workspace.findUnique({ where: { id: workspaceId }, select: { plan: true } }))?.plan ?? "FREE" : "FREE";
+  const plan = workspaceId ? ((
+        await db.workspace.findUnique({ where: { id: workspaceId }, select: { plan: true } }))?.plan ?? "FREE")
+    : "FREE";
   return { ...usage, plan: plan.toLowerCase(), limit: plan === "FREE" ? 100 : 10_000 };
 }
 
@@ -800,7 +813,7 @@ async function userCanAccessProject(userId: string, projectId: string): Promise<
   const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
   if (!project) return false;
   try {
-    await assertWorkspaceMember(userId, project.workspaceId);
+    await requireWorkspaceMember(userId, project.workspaceId);
     return true;
   } catch (error) {
     if (error instanceof WorkspaceMembershipError) return false;
@@ -835,7 +848,7 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
     if (parsed.data.fileId) {
       const file = await findFileForUser(
         parsed.data.fileId,
-        authenticated.userId!,
+        authenticated.userId!
       );
       if (!file) return response.status(404).json({ error: "File not found" });
     }
@@ -869,7 +882,8 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
     const writeEvent = (event: string): void => {
       if (!event.startsWith("data: ")) return;
       try {
-        const value = JSON.parse(event.slice(6)) as { type?: string; content?: string; tokensUsed?: number; message?: string; code?: string };
+        const value = JSON.parse(event.slice(6)) as { type?: string; content?: string; tokensUsed?: number; message?: string; code?: string;
+        };
         if (value.type === "chunk") assistantContent += value.content ?? "";
         if (value.type === "done") { tokensUsed = value.tokensUsed; upstreamSentDone = true; }
         if (value.type === "error") upstreamHadError = true;
@@ -949,14 +963,15 @@ const aiConversationMessageSchema = z.object({
   command: z.string().trim().max(40).optional(),
   hasCode: z.boolean().optional().default(false),
   codeLanguage: z.string().trim().max(40).optional(),
-  tokensUsed: z.number().int().nonnegative().optional(),
+  tokensUsed: z.number().int().nonnegative().optional()
 });
 
 async function findOwnedConversation(userId: string, conversationId: string) {
   return db.aIConversation.findFirst({ where: { id: conversationId, userId } });
 }
 
-function conversationSummary(conversation: { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: Date }) {
+function conversationSummary(conversation: { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: Date;
+}) {
   return { id: conversation.id, title: conversation.title, fileId: conversation.fileId, messageCount: conversation.messageCount, updatedAt: conversation.updatedAt };
 }
 
@@ -968,8 +983,8 @@ app.get("/v1/ai/conversations", async (request, response, next) => {
     if (fileId) {
       const file = await db.file.findUnique({ where: { id: fileId }, select: { projectId: true } });
       if (!file) return response.status(404).json({ error: "File not found" });
-      if (!await userCanAccessProject(userId, file.projectId)) return response.status(404).json({ error: "File not found" });
-    } else if (projectId && !await userCanAccessProject(userId, projectId)) return response.status(404).json({ error: "Project not found" });
+      if (!(await userCanAccessProject(userId, file.projectId))) return response.status(404).json({ error: "File not found" });
+    } else if (projectId && !(await userCanAccessProject(userId, projectId))) return response.status(404).json({ error: "Project not found" });
     const all = request.query.all === "true";
     const limit = Math.min(Math.max(Number(request.query.limit ?? (all ? 20 : 1)), 1), 100);
     let conversations = await db.aIConversation.findMany({ where: { userId, ...(fileId ? { fileId } : {}), ...(projectId ? { projectId } : {}) }, orderBy: { updatedAt: "desc" }, take: limit, select: { id: true, title: true, messageCount: true, fileId: true, updatedAt: true } });
@@ -991,7 +1006,7 @@ app.get("/v1/ai/conversations/:id/messages", async (request, response, next) => 
     const limit = Math.min(Math.max(Number(request.query.limit ?? 20), 1), 100);
     const messages = await db.aIMessage.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: "desc" }, take: limit + 1, ...(typeof request.query.cursor === "string" ? { skip: 1, cursor: { id: request.query.cursor } } : {}) });
     const page = messages.slice(0, limit);
-    return response.json({ messages: page, nextCursor: messages.length > limit ? page[page.length - 1]?.id ?? null : null, total: await db.aIMessage.count({ where: { conversationId: conversation.id } }) });
+    return response.json({ messages: page, nextCursor: messages.length > limit ? (page[page.length - 1]?.id ?? null) : null, total: await db.aIMessage.count({ where: { conversationId: conversation.id } }) });
   } catch (error) { return next(error); }
 });
 
@@ -1003,7 +1018,8 @@ app.post("/v1/ai/conversations/:id/messages", async (request, response, next) =>
     const conversation = await findOwnedConversation(userId, String(request.params.id));
     if (!conversation) return response.status(404).json({ error: "Conversation not found" });
     const existing = await db.aIMessage.findFirst({ where: { conversationId: conversation.id, role: parsed.data.role, content: parsed.data.content, createdAt: { gte: new Date(Date.now() - 30_000) } }, orderBy: { createdAt: "desc" } });
-    const message = existing ?? await db.aIMessage.create({ data: { conversationId: conversation.id, ...parsed.data }, });
+    const message = existing ??
+        (await db.aIMessage.create({ data: { conversationId: conversation.id, ...parsed.data } }));
     if (!existing) await db.aIConversation.update({ where: { id: conversation.id }, data: { messageCount: { increment: 1 } } });
     return response.json({ message });
   } catch (error) { return next(error); }
@@ -1035,14 +1051,14 @@ const executeSchema = z.object({
     .max(100_000)
     .refine((code) => Buffer.byteLength(code, "utf8") <= 100_000),
   timeoutMs: z.number().int().min(250).max(30_000).optional(),
-  fileId: z.string().cuid(),
+  fileId: z.string().cuid()
 });
 const executeImages: Record<z.infer<typeof executeSchema>["language"], string> =
   {
     javascript: "node:20-alpine",
     python: "python:3.12-alpine",
     rust: "rust:1.83-alpine",
-    go: "golang:1.23-alpine",
+    go: "golang:1.23-alpine"
   };
 const EXECUTION_RATE_LIMIT = 20;
 const EXECUTION_RATE_WINDOW_SECONDS = 60;
@@ -1052,16 +1068,15 @@ const memoryExecutionRates = new Map<
 >();
 
 async function reserveExecutionSlot(
-  userId: string,
+  userId: string
 ): Promise<"allowed" | "limited" | "unavailable"> {
-  await redisConnection;
   const key = `execute-rate:${userId}`;
   if (redis.isReady) {
     const count = Number(
       await redis.eval(
         "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
-        { keys: [key], arguments: [String(EXECUTION_RATE_WINDOW_SECONDS)] },
-      ),
+        { keys: [key], arguments: [String(EXECUTION_RATE_WINDOW_SECONDS)] }
+      )
     );
     return count <= EXECUTION_RATE_LIMIT ? "allowed" : "limited";
   }
@@ -1074,7 +1089,7 @@ async function reserveExecutionSlot(
   if (!current || current.expiresAt <= now) {
     memoryExecutionRates.set(userId, {
       count: 1,
-      expiresAt: now + EXECUTION_RATE_WINDOW_SECONDS * 1000,
+      expiresAt: now + EXECUTION_RATE_WINDOW_SECONDS * 1000
     });
     return "allowed";
   }
@@ -1085,7 +1100,7 @@ async function reserveExecutionSlot(
 function executeInContainer(
   language: z.infer<typeof executeSchema>["language"],
   code: string,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<{
   stdout: string;
   stderr: string;
@@ -1094,91 +1109,264 @@ function executeInContainer(
   error?: string;
 }> {
   const containerName = `devpulse-exec-${randomUUID()}`;
-  const command =
-    language === "javascript"
-      ? ["node", "-"]
-      : language === "python"
-        ? ["python", "-"]
-        : language === "rust"
-          ? ["sh", "-c", "cat > /tmp/main.rs && rustc /tmp/main.rs -o /tmp/main && /tmp/main"]
-          : ["sh", "-c", "cat > /tmp/main.go && go run /tmp/main.go"];
+  const dockerLimits = [
+    "--name",
+    containerName,
+    "--network",
+    "none",
+    "--cpus",
+    "1",
+    "--memory",
+    "256m",
+    "--pids-limit",
+    "64",
+    "--read-only",
+    "--user",
+    "1000:1000",
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    "--tmpfs",
+    "/tmp:rw,nosuid,size=64m,uid=1000,gid=1000",
+    "--env",
+    "HOME=/tmp",
+    "--env",
+    "GOCACHE=/tmp/go-cache",
+    "--env",
+    "GOPATH=/tmp/go",
+    "--env",
+    "GO111MODULE=off"
+  ];
 
-  return new Promise((resolve) => {
-    let inputError: string | undefined;
-    const child = execFile(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "--name",
-        containerName,
-        "-i",
-        "--network",
-        "none",
-        "--cpus",
-        "1",
-        "--memory",
-        "256m",
-        "--pids-limit",
-        "64",
-        "--read-only",
-        "--user",
-        "1000:1000",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--tmpfs",
-        "/tmp:rw,nosuid,size=64m,uid=1000,gid=1000",
-        "--env",
-        "HOME=/tmp",
-        "--env",
-        "GOCACHE=/tmp/go-cache",
-        executeImages[language],
-        ...command,
-      ],
-      {
-        windowsHide: true,
-        timeout: timeoutMs,
-        killSignal: "SIGKILL",
-        maxBuffer: 1_000_000,
-        encoding: "utf8",
-      },
-      (error, stdout, stderr) => {
-        const timedOut = error?.code === "ETIMEDOUT";
-        const needsContainerCleanup = error?.killed === true;
-        const exitCode =
-          typeof error?.code === "number" ? error.code : error ? 1 : 0;
-        const finish = (cleanupError?: Error | null) => {
-          const details = [stderr, error?.message, inputError, cleanupError?.message]
+  function runDocker(
+    args: string[],
+    input?: string,
+    timeout = timeoutMs
+  ): Promise<{
+    stdout: string;
+    stderr: string;
+    exitCode: number;
+    timedOut: boolean;
+    error?: string;
+  }> {
+    return new Promise((resolve) => {
+      let inputError: string | undefined;
+      const child = execFile(
+        "docker",
+        args,
+        {
+          windowsHide: true,
+          timeout,
+          killSignal: "SIGKILL",
+          maxBuffer: 1_000_000,
+          encoding: "utf8"
+        },
+        (error, stdout, stderr) => {
+          const timedOut = error?.code === "ETIMEDOUT";
+          const exitCode =
+            typeof error?.code === "number" ? error.code : error ? 1 : 0;
+          const details = [stderr, error?.message, inputError]
             .filter(Boolean)
             .join("\n");
           resolve({
             stdout: String(stdout),
             stderr: details,
-            exitCode: timedOut ? null : exitCode,
+            exitCode,
             timedOut,
-            ...(error || inputError || cleanupError ? { error: details } : {}),
+            ...(error || inputError ? { error: details } : {})
           });
-        };
+        }
+      );
 
-        if (!needsContainerCleanup) {
-          finish();
+      if (input !== undefined) {
+        child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
+          if (error.code !== "EPIPE") inputError = error.message;
+        });
+        child.stdin?.end(input);
+      }
+    });
+  }
+
+  return new Promise((resolve) => {
+    let containerStarted = false;
+    let timedOut = false;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const deadline = Date.now() + timeoutMs;
+
+    const execution = async () => {
+      const remainingTime = () => Math.max(1, deadline - Date.now());
+      const start = await runDocker(
+        [
+          "run",
+          "--detach",
+          ...dockerLimits,
+          "--entrypoint",
+          "sleep",
+          executeImages[language],
+          "3600"
+        ],
+        undefined,
+        timeoutMs
+      );
+      if (start.exitCode !== 0 || start.timedOut) {
+        return {
+          stdout: "",
+          stderr:
+            start.stderr || "Docker could not start the execution container.",
+          exitCode: start.timedOut ? null : start.exitCode,
+          timedOut: start.timedOut,
+          error: `Docker could not start the execution container: ${start.error ?? start.stderr}`
+        };
+      }
+      containerStarted = true;
+      if (Date.now() >= deadline) {
+        timedOut = true;
+        return {
+          stdout: "",
+          stderr: "Execution timed out.",
+          exitCode: null,
+          timedOut: true
+        };
+      }
+
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        void runDocker(["kill", containerName], undefined, 5_000);
+      }, remainingTime());
+
+      let stdout = "";
+      let stderr = "";
+      let command: string[];
+      if (language === "javascript") command = ["node", "-"];
+      else if (language === "python") command = ["python", "-"];
+      else {
+        const sourcePath =
+          language === "rust" ? "/tmp/main.rs" : "/tmp/main.go";
+        const writeSource = await runDocker(
+          ["exec", "-i", containerName, "tee", sourcePath],
+          code,
+          remainingTime()
+        );
+        if (timedOut || writeSource.timedOut)
+          return {
+            stdout,
+            stderr: "Execution timed out.",
+            exitCode: null,
+            timedOut: true
+          };
+        if (writeSource.exitCode !== 0)
+          return {
+            stdout,
+            stderr: writeSource.stderr,
+            exitCode: writeSource.exitCode,
+            timedOut: false,
+            error: writeSource.error ?? writeSource.stderr
+          };
+
+        command =
+          language === "rust"
+            ? ["rustc", "--edition=2021", sourcePath, "-o", "/tmp/main"]
+      : ["go", "run", sourcePath];
+        const compile = await runDocker(
+          ["exec", containerName, ...command],
+          undefined,
+          remainingTime()
+        );
+        stderr = compile.stderr;
+        if (timedOut || compile.timedOut)
+          return {
+            stdout,
+            stderr: "Execution timed out.",
+            exitCode: null,
+            timedOut: true
+          };
+        if (compile.exitCode !== 0)
+          return {
+            stdout,
+            stderr,
+            exitCode: compile.exitCode,
+            timedOut: false,
+            ...(compile.error ? { error: compile.error } : {})
+          };
+
+        if (language === "go") {
+          stdout = compile.stdout;
+          return {
+            stdout,
+            stderr,
+            exitCode: compile.exitCode,
+            timedOut: false
+          };
+        }
+        command = ["/tmp/main"];
+      }
+
+      const result = await runDocker(
+        [
+          "exec",
+          ...(language === "javascript" || language === "python"
+        ? ["-i"]
+        : []),
+        containerName,
+        ...command
+      ],
+        language === "javascript" || language === "python" ? code : undefined,
+        remainingTime()
+      );
+      if (timedOut || result.timedOut)
+        return {
+          stdout: result.stdout,
+          stderr: "Execution timed out.",
+          exitCode: null,
+          timedOut: true
+        };
+      return {
+        stdout: result.stdout, stderr: [stderr, result.stderr].filter(Boolean).join("\n"),
+        exitCode: result.exitCode,
+        timedOut: false,
+        ...(result.error ? { error: result.error } : {})
+      };
+    };
+
+    void execution()
+      .then(async (result) => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (!containerStarted) {
+          await runDocker(["rm", "--force", containerName], undefined, 5_000);
+          resolve(result);
           return;
         }
-
-        execFile(
-          "docker",
-          ["kill", containerName],
-          { windowsHide: true, timeout: 5_000, killSignal: "SIGKILL" },
-          (killError) => finish(killError),
+        const cleanup = await runDocker(
+          ["rm", "--force", containerName],
+          undefined,
+          5_000
         );
-      },
-    );
-    child.stdin?.on("error", (error: NodeJS.ErrnoException) => {
-      if (error.code !== "EPIPE") inputError = error.message;
-    });
-    child.stdin?.end(code);
+        if (cleanup.exitCode !== 0 && !timedOut) {
+          const details = [result.stderr, cleanup.stderr]
+            .filter(Boolean)
+            .join("\n");
+          resolve({
+            ...result,
+            stderr: details,
+            error: details || "Execution container cleanup failed."
+          });
+          return;
+        }
+        resolve(result);
+      })
+      .catch(async (error: unknown) => {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (containerStarted)
+          await runDocker(["rm", "--force", containerName], undefined, 5_000);
+        const details = error instanceof Error ? error.message : String(error);
+          resolve({
+            stdout: "",
+            stderr: details,
+            exitCode: timedOut ? null : 1,
+            timedOut,
+          error: details });
+      });
   });
 }
 
@@ -1187,8 +1375,8 @@ app.get("/v1/repositories", async (request, response, next) => {
     const repositories = await db.project.findMany({
       where: {
         workspace: {
-          memberships: { some: { userId: request.user!.id } },
-        },
+          memberships: { some: { userId: request.user!.id } }
+        }
       },
       orderBy: { updatedAt: "desc" },
       select: {
@@ -1202,8 +1390,8 @@ app.get("/v1/repositories", async (request, response, next) => {
         defaultBranch: true,
         deployStatus: true,
         devboxReady: true,
-        updatedAt: true,
-      },
+        updatedAt: true
+      }
     });
     return response.json({ repositories });
   } catch (error) {
@@ -1218,7 +1406,7 @@ app.post("/v1/repositories", async (request, response, next) => {
       description: z.string().max(500).default(""),
       language: z.string().trim().max(40).default("TypeScript"),
       branch: z.string().trim().max(120).default("main"),
-      workspaceId: z.string().cuid().optional(),
+      workspaceId: z.string().cuid().optional()
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
@@ -1228,15 +1416,15 @@ app.post("/v1/repositories", async (request, response, next) => {
           where: {
             workspaceId_userId: {
               workspaceId: parsed.data.workspaceId,
-              userId: request.user!.id,
-            },
+              userId: request.user!.id
+            }
           },
-          include: { workspace: true },
+          include: { workspace: true }
         })
       : await db.workspaceMember.findFirst({
           where: { userId: request.user!.id },
           include: { workspace: true },
-          orderBy: { joinedAt: "asc" },
+          orderBy: { joinedAt: "asc" }
         });
     if (!membership)
       return response.status(404).json({ error: "Workspace not found" });
@@ -1247,8 +1435,8 @@ app.post("/v1/repositories", async (request, response, next) => {
         name: parsed.data.name,
         description: parsed.data.description,
         language: parsed.data.language,
-        defaultBranch: parsed.data.branch,
-      },
+        defaultBranch: parsed.data.branch
+      }
     });
     return response.status(201).json(repository);
   } catch (error) {
@@ -1264,11 +1452,11 @@ app.patch(
       .object({
         isStarred: z.boolean().optional(),
         description: z.string().max(500).optional(),
-        name: z.string().trim().min(1).max(120).optional(),
+        name: z.string().trim().min(1).max(120).optional()
       })
       .refine(
         (value) => Object.keys(value).length > 0,
-        "at least one field is required",
+        "at least one field is required"
       )
       .safeParse(request.body);
     if (!parsed.success)
@@ -1283,15 +1471,15 @@ app.patch(
             : {
                 stars: parsed.data.isStarred
                   ? { increment: 1 }
-                  : { decrement: 1 },
-              }),
-        },
+                  : { decrement: 1 }
+              })
+        }
       });
       return response.json(repository);
     } catch (error) {
       return next(error);
     }
-  },
+  }
 );
 
 app.delete(
@@ -1300,21 +1488,21 @@ app.delete(
   async (request, response, next) => {
     try {
       await db.project.delete({
-        where: { id: request.project!.id },
+        where: { id: request.project!.id }
       });
       return response.status(204).send();
     } catch (error) {
       return next(error);
     }
-  },
+  }
 );
 
 app.get("/v1/devboxes", async (_request, response, next) => {
   try {
     return response.json({
       devboxes: await db.devbox.findMany({
-        orderBy: { updatedAt: "desc" },
-      }),
+        orderBy: { updatedAt: "desc" }
+      })
     });
   } catch (error) {
     return next(error);
@@ -1332,14 +1520,14 @@ app.post("/v1/devboxes", async (request, response, next) => {
       projectId: z.string().cuid().optional(),
       vCpu: z.number().int().min(1).max(64).default(8),
       ram: z.string().max(40).default("32 GB ECC"),
-      storage: z.string().max(40).default("100 GB NVMe"),
+      storage: z.string().max(40).default("100 GB NVMe")
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
     const workspace = parsed.data.workspaceId
       ? await db.workspace.findUnique({
-          where: { id: parsed.data.workspaceId },
+          where: { id: parsed.data.workspaceId }
         })
       : await db.workspace.findFirst({ orderBy: { createdAt: "asc" } });
     if (!workspace)
@@ -1349,8 +1537,8 @@ app.post("/v1/devboxes", async (request, response, next) => {
         ...parsed.data,
         workspaceId: workspace.id,
         port: 3000 + Math.floor(Math.random() * 5000),
-        url: `https://ws-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`,
-      },
+        url: `https://ws-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`
+      }
     });
     return response.status(201).json(devbox);
   } catch (error) {
@@ -1367,8 +1555,8 @@ app.patch("/v1/devboxes/:devboxId", async (request, response, next) => {
     return response.json(
       await db.devbox.update({
         where: { id: request.params.devboxId },
-        data: parsed.data,
-      }),
+        data: parsed.data
+      })
     );
   } catch (error) {
     return next(error);
@@ -1388,8 +1576,8 @@ app.get("/v1/deployments", async (_request, response, next) => {
   try {
     return response.json({
       deployments: await db.deployment.findMany({
-        orderBy: { createdAt: "desc" },
-      }),
+        orderBy: { createdAt: "desc" }
+      })
     });
   } catch (error) {
     return next(error);
@@ -1404,14 +1592,14 @@ app.post("/v1/deployments", async (request, response, next) => {
         .string()
         .max(240)
         .default("release: deploy latest changes"),
-      author: z.string().max(120).default("devpulse"),
+      author: z.string().max(120).default("devpulse")
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
     const project = parsed.data.projectId
       ? await db.project.findUnique({
-          where: { id: parsed.data.projectId },
+          where: { id: parsed.data.projectId }
         })
       : await db.project.findFirst({ orderBy: { updatedAt: "desc" } });
     if (!project)
@@ -1430,12 +1618,12 @@ app.post("/v1/deployments", async (request, response, next) => {
         commitMessage: parsed.data.commitMessage,
         author: parsed.data.author,
         timestamp: "Just now",
-        duration: "In progress",
-      },
+        duration: "In progress"
+      }
     });
     await db.project.update({
       where: { id: project.id },
-      data: { deployStatus: "building" },
+      data: { deployStatus: "building" }
     });
     return response.status(201).json(deployment);
   } catch (error) {
@@ -1453,14 +1641,14 @@ app.post(
           data: {
             status: "Building",
             duration: "In progress",
-            timestamp: "Just now",
-          },
-        }),
+            timestamp: "Just now"
+          }
+        })
       );
     } catch (error) {
       return next(error);
     }
-  },
+  }
 );
 
 app.get("/v1/environment-variables", async (_request, response, next) => {
@@ -1474,9 +1662,9 @@ app.get("/v1/environment-variables", async (_request, response, next) => {
           key: true,
           value: true,
           scope: true,
-          updatedAt: true,
-        },
-      }),
+          updatedAt: true
+        }
+      })
     });
   } catch (error) {
     return next(error);
@@ -1489,14 +1677,14 @@ app.post("/v1/environment-variables", async (request, response, next) => {
       projectId: z.string().cuid().optional(),
       key: z.string().trim().min(1).max(120),
       value: z.string().max(4000),
-      scope: z.string().trim().max(120).default("Production, Staging"),
+      scope: z.string().trim().max(120).default("Production, Staging")
     })
     .safeParse(request.body);
   if (!parsed.success) return sendValidationError(response, parsed.error);
   try {
     const project = parsed.data.projectId
       ? await db.project.findUnique({
-          where: { id: parsed.data.projectId },
+          where: { id: parsed.data.projectId }
         })
       : await db.project.findFirst({ orderBy: { updatedAt: "desc" } });
     if (!project)
@@ -1506,9 +1694,9 @@ app.post("/v1/environment-variables", async (request, response, next) => {
         data: {
           ...parsed.data,
           projectId: project.id,
-          key: parsed.data.key.toUpperCase(),
-        },
-      }),
+          key: parsed.data.key.toUpperCase()
+        }
+      })
     );
   } catch (error) {
     return next(error);
@@ -1520,13 +1708,13 @@ app.delete(
   async (request, response, next) => {
     try {
       await db.environmentVariable.delete({
-        where: { id: request.params.variableId },
+        where: { id: request.params.variableId }
       });
       return response.status(204).send();
     } catch (error) {
       return next(error);
     }
-  },
+  }
 );
 
 
@@ -1536,14 +1724,14 @@ app.post("/v1/execute", async (request, response, next) => {
   const userId = request.user!.id;
 
   try {
+    const file = await findFileForUser(parsed.data.fileId, userId);
+    if (!file) return response.status(404).json({ error: "File not found" });
+
     const rateLimit = await reserveExecutionSlot(userId);
     if (rateLimit === "limited")
       return response.status(429).json({ error: "RATE_LIMITED" });
     if (rateLimit === "unavailable")
       return response.status(503).json({ error: "RATE_LIMIT_UNAVAILABLE" });
-
-    const file = await findFileForUser(parsed.data.fileId, userId);
-    if (!file) return response.status(404).json({ error: "File not found" });
 
     const cacheKey = `execute:${userId}:${createHash("sha256")
       .update(JSON.stringify(parsed.data))
@@ -1566,7 +1754,7 @@ app.post("/v1/execute", async (request, response, next) => {
     const result = await executeInContainer(
       parsed.data.language,
       parsed.data.code,
-      parsed.data.timeoutMs ?? 10_000,
+      parsed.data.timeoutMs ?? 10_000
     );
     const durationMs = Date.now() - startedAt;
     const execution = await db.codeExecution.create({
@@ -1580,23 +1768,23 @@ app.post("/v1/execute", async (request, response, next) => {
         exitCode: result.exitCode,
         durationMs,
         timedOut: result.timedOut,
-        error: result.error ?? null,
-      },
+        error: result.error ?? null
+      }
     });
     const responseBody = {
       ...result,
       durationMs,
-      executionId: execution.id,
+      executionId: execution.id
     };
     if (redis.isReady)
       await redis.set(cacheKey, JSON.stringify(responseBody), { EX: 60 });
     if (
       result.error &&
-      /ENOENT|not found|cannot connect|docker daemon/i.test(result.error)
+      /Docker could not start the execution container|ENOENT|not found|cannot connect|docker daemon/i.test(result.error)
     ) {
       return response.status(503).json({
         error: "Execution sandbox is unavailable",
-        details: result.error,
+        details: result.error
       });
     }
     return response
@@ -1686,10 +1874,10 @@ async function verifyDatabase(): Promise<void> {
       "AIMessage",
       "AIUsage",
       "CodeExecution",
-      "EditorSession",
+      "EditorSession"
     ];
     const missingTables = requiredTables.filter(
-      (tableName) => !tableNames.includes(tableName),
+      (tableName) => !tableNames.includes(tableName)
     );
 
     if (missingTables.length > 0) {
@@ -1709,12 +1897,12 @@ async function verifyDatabase(): Promise<void> {
       console.error(
         "\n[DB] Cannot connect to database.\n" +
           "Is PostgreSQL running?\n" +
-          "  docker compose up -d postgres\n",
+          "  docker compose up -d postgres\n"
       );
     } else {
       console.error(
         "[DB] Database error:",
-        error instanceof Error ? error.message : String(error),
+        error instanceof Error ? error.message : String(error)
       );
     }
     process.exit(1);
@@ -1734,7 +1922,7 @@ async function ensureMinioBucket(): Promise<void> {
   } catch (error: unknown) {
     console.warn(
       `[MinIO] Could not verify bucket '${objectBucket}':`,
-      error instanceof Error ? error.message : String(error),
+      error instanceof Error ? error.message : String(error)
     );
     console.warn("[MinIO] File uploads may fail until the bucket exists.");
     console.warn("[MinIO] Create manually at: http://localhost:9001");
@@ -1745,9 +1933,10 @@ export { app };
 
 if (process.env.NODE_ENV !== "test" || process.env.API_START_SERVER === "true") {
   async function startServer(): Promise<void> {
-    await verifyDatabase();
     await initKeys();
-    void ensureMinioBucket();
+    await verifyDatabase();
+    await connectRedis();
+    await ensureMinioBucket();
     await new Promise<void>((resolve, reject) => {
       const server = app.listen(port, () => {
         console.log(`Devpulse API listening on :${port}`);

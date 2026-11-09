@@ -33,11 +33,20 @@ interface AccessibleFile {
   project: AccessibleProject;
 }
 
-declare module "express-serve-static-core" {
-  interface Request {
-    user?: AuthUser;
-    project?: AccessibleProject;
-    fileRecord?: AccessibleFile;
+declare global {
+  // Express request augmentation is the supported way to share authenticated data.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface User {
+      id: string;
+      email: string;
+      workspaceId?: string;
+    }
+
+    interface Request {
+      project?: AccessibleProject;
+      fileRecord?: AccessibleFile;
+    }
   }
 }
 
@@ -55,6 +64,7 @@ function isWorkspaceRole(role: string): role is WorkspaceRole {
 }
 
 const publicV1Routes = [
+  /^\/v1\/health$/,
   /^\/v1\/auth\/logout$/,
   /^\/v1\/auth\/[^/]+\/(?:start|callback)$/,
   /^\/v1\/plans(?:\/[^/]+)?$/,
@@ -101,7 +111,7 @@ export class WorkspaceMembershipError extends Error {
   }
 }
 
-export async function assertWorkspaceMember(
+export async function requireWorkspaceMember(
   userId: string,
   workspaceId: string,
   minRole?: WorkspaceRole,
@@ -127,8 +137,14 @@ export const loadProjectForUser: RequestHandler = async (
   next: NextFunction,
 ) => {
   try {
+    const projectId = request.params.projectId;
+    if (typeof projectId !== "string") {
+      response.status(404).json({ error: "Project not found" });
+      return;
+    }
+
     const project = await db.project.findUnique({
-      where: { id: request.params.projectId },
+      where: { id: projectId },
     });
     if (!project) {
       response.status(404).json({ error: "Project not found" });
@@ -136,7 +152,7 @@ export const loadProjectForUser: RequestHandler = async (
     }
 
     try {
-      await assertWorkspaceMember(request.user!.id, project.workspaceId);
+      await requireWorkspaceMember(request.user!.id, project.workspaceId);
     } catch (error) {
       if (error instanceof WorkspaceMembershipError) {
         response.status(404).json({ error: "Project not found" });
@@ -158,8 +174,14 @@ export const loadFileForUser: RequestHandler = async (
   next: NextFunction,
 ) => {
   try {
+    const fileId = request.params.fileId;
+    if (typeof fileId !== "string") {
+      response.status(404).json({ error: "File not found" });
+      return;
+    }
+
     const file = await db.file.findUnique({
-      where: { id: request.params.fileId },
+      where: { id: fileId },
       include: {
         project: true,
         lastEditedBy: { select: { id: true, name: true } },
@@ -171,7 +193,7 @@ export const loadFileForUser: RequestHandler = async (
     }
 
     try {
-      await assertWorkspaceMember(request.user!.id, file.project.workspaceId);
+      await requireWorkspaceMember(request.user!.id, file.project.workspaceId);
     } catch (error) {
       if (error instanceof WorkspaceMembershipError) {
         response.status(404).json({ error: "File not found" });
@@ -201,7 +223,7 @@ export async function findFileForUser(
   if (!file) return null;
 
   try {
-    await assertWorkspaceMember(userId, file.project.workspaceId);
+    await requireWorkspaceMember(userId, file.project.workspaceId);
   } catch (error) {
     if (error instanceof WorkspaceMembershipError) return null;
     throw error;

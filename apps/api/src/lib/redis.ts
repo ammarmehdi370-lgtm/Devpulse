@@ -7,6 +7,7 @@ export const redis = createClient({
 
 redis.on("error", (error) => console.error("Redis error", error));
 
-export const redisConnection: Promise<unknown> = process.env.NODE_ENV === "test"
-  ? Promise.resolve()
-  : redis.connect().catch(() => undefined);
+export async function connectRedis(): Promise<void> {
+  if (!redis.isOpen) await redis.connect();
+  await redis.ping();
+}
