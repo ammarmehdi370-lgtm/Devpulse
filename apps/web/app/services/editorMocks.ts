@@ -1,11 +1,7 @@
-﻿import { and, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices } from "../../src/lib/services";
-import {
-  authenticatedFetch,
-  getAccessToken,
-} from "../../src/lib/auth-store";
 
 export type EditorRunRequest = {
   language: string;
@@ -28,18 +24,6 @@ export type EditorPreviewSaveRequest = {
 export type TerminalReconnectResult = {
   connected: boolean;
   message: string;
-};
-
-export type AssistantPreviewRequest = {
-  prompt: string;
-  activePath?: string;
-  projectName?: string;
-  code?: string;
-};
-
-export type AssistantPreviewReply = {
-  text: string;
-  code?: string;
 };
 
 export type InlineCompletionRequest = {
@@ -363,73 +347,6 @@ export async function reconnectTerminalPreview(): Promise<TerminalReconnectResul
     connected: false,
     message: "Shell service is not connected.",
   };
-}
-
-export async function sendAssistantPreview(
-  request: AssistantPreviewRequest,
-): Promise<AssistantPreviewReply> {
-  const token = getAccessToken();
-
-  try {
-    const response = await authenticatedFetch("/api/ai/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        Authorization: `Bearer ${token}`
-
-      },
-      body: JSON.stringify({
-        messages: [{ role: "user", content: request.prompt }],
-        context: {
-          fileName: request.activePath,
-          language: request.activePath?.split(".").pop(),
-          projectName: request.projectName,
-          selectedCode: request.code,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      return {
-        text: "AI service is not currently configured. Add the environment variables required by the Edge AI runtime.",
-      };
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      return { text: "Could not read AI response stream." };
-    }
-
-    const decoder = new TextDecoder();
-    let fullText = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const event = JSON.parse(line.slice(6)) as { type?: string; delta?: { text?: string } };
-          if (event.type === "content_block_delta") {
-            fullText += event.delta?.text ?? "";
-          }
-        } catch {
-          // Ignore malformed stream data and keep the preview resilient.
-        }
-      }
-    }
-
-    const codeMatch = fullText.match(/```[\w]*\n([\s\S]+?)```/);
-    return {
-      text: fullText,
-      code: codeMatch?.[1],
-    };
-  } catch {
-    return {
-      text: "Unable to reach the local AI preview runtime.",
-    };
-  }
 }
 
 export async function getAIInlineCompletion(

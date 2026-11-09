@@ -7,6 +7,7 @@ export interface RequiredEnv {
   JWT_PRIVATE_KEY_PATH: string;
   JWT_PUBLIC_KEY_PATH: string;
   FRONTEND_URL: string;
+  APP_URL: string;
 }
 
 export interface OptionalEnv {
@@ -32,6 +33,7 @@ const envSchema = z.object({
   JWT_PRIVATE_KEY_PATH: z.string().min(1),
   JWT_PUBLIC_KEY_PATH: z.string().min(1),
   FRONTEND_URL: z.string().url(),
+  APP_URL: z.string().url(),
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
@@ -77,6 +79,7 @@ export function validateEnv(): RequiredEnv & OptionalEnv {
     JWT_PRIVATE_KEY_PATH: env.JWT_PRIVATE_KEY_PATH,
     JWT_PUBLIC_KEY_PATH: env.JWT_PUBLIC_KEY_PATH,
     FRONTEND_URL: env.FRONTEND_URL,
+    APP_URL: env.APP_URL,
     GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET,
     GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,

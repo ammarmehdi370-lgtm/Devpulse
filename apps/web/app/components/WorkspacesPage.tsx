@@ -114,6 +114,9 @@ export const WorkspacesPage: React.FC = () => {
               · Zero-latency clusters ready
             </span>
           </div>
+          <span className="inline-flex w-fit items-center rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+            Simulated
+          </span>
 
           <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
             Welcome to Devpulse, Alex.

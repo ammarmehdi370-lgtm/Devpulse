@@ -15,7 +15,6 @@ import {
 import {
   aiConversations,
   aiMessages,
-  aiUsage,
   channels,
   fileRevisions,
   files,
@@ -24,7 +23,6 @@ import {
   users,
   workspaces,
   workspaceMembers,
-  type AIUsage,
   type AIConversation,
   type AIMessage,
   type Channel,
@@ -41,57 +39,6 @@ import { BrowserFileStorage } from "../lib/storage";
 
 function createId(): string {
   return crypto.randomUUID();
-}
-
-function trackStreamUsage(
-  stream: ReadableStream<Uint8Array>,
-  recordUsage: (tokens: number) => Promise<AIUsage>,
-): ReadableStream<Uint8Array> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let outputTokens = 0;
-
-  const inspectEvent = (rawEvent: string): void => {
-    for (const line of rawEvent.split(/\r?\n/)) {
-      if (!line.startsWith("data: ")) continue;
-      const data = line.slice(6);
-      if (data === "[DONE]") continue;
-      const event = JSON.parse(data) as {
-        type?: string;
-        usage?: { output_tokens?: number };
-      };
-      const reportedTokens = event.usage?.output_tokens;
-      if (event.type === "message_delta" && Number.isInteger(reportedTokens)) {
-        outputTokens = reportedTokens ?? outputTokens;
-      }
-    }
-  };
-
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          buffer += decoder.decode();
-          if (buffer.trim()) inspectEvent(buffer);
-          await recordUsage(outputTokens);
-          controller.close();
-          return;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split(/\r?\n\r?\n/);
-        buffer = events.pop() ?? "";
-        for (const event of events) inspectEvent(event);
-        controller.enqueue(value);
-      } catch (error) {
-        controller.error(error);
-      }
-    },
-    cancel(reason) {
-      return reader.cancel(reason);
-    },
-  });
 }
 
 export class DatabaseService {
@@ -341,28 +288,6 @@ export class DatabaseService {
     });
   }
 
-  async recordAIUsage(userId: string, tokenCount: number): Promise<AIUsage> {
-    const now = new Date();
-    const month = now.getUTCMonth() + 1;
-    const year = now.getUTCFullYear();
-    const [row] = await this.db.insert(aiUsage).values({
-      id: createId(),
-      userId,
-      month,
-      year,
-      requestCount: 1,
-      tokenCount,
-    }).onConflictDoUpdate({
-      target: [aiUsage.userId, aiUsage.month, aiUsage.year],
-      set: {
-        requestCount: sql`${aiUsage.requestCount} + 1`,
-        tokenCount: sql`${aiUsage.tokenCount} + ${tokenCount}`,
-        updatedAt: now,
-      },
-    }).returning();
-    if (!row) throw new Error("AI usage record insert returned no row.");
-    return row;
-  }
 }
 
 export class FileService {
@@ -435,18 +360,6 @@ export class AuthService {
     if (!response.ok) throw new Error(`Magic link request failed (${response.status}).`);
   }
 
-  async refreshAccessToken(endpoint: string): Promise<string> {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      credentials: "include",
-    });
-    if (!response.ok) throw new Error(`Session refresh failed (${response.status}).`);
-    const body = await response.json() as { accessToken?: string };
-    if (!body.accessToken) throw new Error("Session refresh response did not include an access token.");
-    this.setAccessToken(body.accessToken);
-    return body.accessToken;
-  }
-
   startOAuth(provider: "github" | "google", endpoint: string): void {
     if (typeof window === "undefined") throw new Error("OAuth redirects require a browser.");
     const url = new URL(endpoint, window.location.href);
@@ -464,42 +377,6 @@ export class AuthService {
     });
     if (!response.ok) throw new Error(`Sign out failed (${response.status}).`);
     clearAccessToken();
-  }
-}
-
-export class AIService {
-  constructor(
-    private readonly auth: AuthService,
-    private readonly database: DatabaseService,
-    private readonly endpoint: string,
-  ) {}
-
-  async chat(
-    userId: string,
-    messages: Array<{ role: "user" | "assistant"; content: string }>,
-    signal?: AbortSignal,
-  ): Promise<ReadableStream<Uint8Array>> {
-    if (!this.endpoint) {
-      throw new Error("NEXT_PUBLIC_AI_PROXY_URL must point to the deployed AI Worker.");
-    }
-    if (!this.auth.getAccessToken()) throw new Error("An authenticated session is required to use AI.");
-    const response = await authenticatedFetch(this.endpoint, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "text/event-stream",
-      },
-      body: JSON.stringify({ messages }),
-      signal,
-    });
-    if (!response.ok) {
-      const message = await response.text();
-      throw new Error(`AI request failed (${response.status}): ${message}`);
-    }
-    if (!response.body) throw new Error("AI proxy returned no response stream.");
-    return trackStreamUsage(response.body, (tokens) =>
-      this.database.recordAIUsage(userId, tokens),
-    );
   }
 }
 
@@ -540,18 +417,12 @@ export class DevpulseServices {
   readonly database: DatabaseService;
   readonly files: FileService;
   readonly auth = new AuthService();
-  readonly ai: AIService;
   readonly collab: CollabService;
 
   private constructor(db: BrowserDatabase) {
     this.database = new DatabaseService(db);
     const storage = new BrowserFileStorage();
     this.files = new FileService(storage, this.database);
-    this.ai = new AIService(
-      this.auth,
-      this.database,
-      process.env.NEXT_PUBLIC_AI_PROXY_URL ?? "",
-    );
     this.collab = new CollabService();
   }
 

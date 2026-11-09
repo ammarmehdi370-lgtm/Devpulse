@@ -11,6 +11,7 @@ export interface ToastMessage {
   message: string;
   variant: ToastVariant;
   duration?: number;
+  action?: { label: string; onClick: () => void };
 }
 
 const TOAST_STYLES: Record<
@@ -50,6 +51,15 @@ export function ToastContainer({
                 <p className="text-sm font-semibold">{toast.title}</p>
               )}
               <p className="text-sm text-[var(--muted)]">{toast.message}</p>
+              {toast.action && (
+                <button
+                  type="button"
+                  onClick={toast.action.onClick}
+                  className="mt-2 text-sm font-medium text-[var(--accent)] hover:underline"
+                >
+                  {toast.action.label}
+                </button>
+              )}
             </div>
             <button
               type="button"

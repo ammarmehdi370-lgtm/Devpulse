@@ -17,6 +17,22 @@ describe("API foundation", () => {
     );
   });
 
+  it("allows credentialed CORS only from APP_URL and omits COOP/COEP headers", async () => {
+    const allowedOrigin = process.env.APP_URL ?? "http://localhost:3000";
+    const allowed = await request(app)
+      .get("/health")
+      .set("Origin", allowedOrigin);
+    const denied = await request(app)
+      .get("/health")
+      .set("Origin", "https://not-the-app.example");
+
+    expect(allowed.headers["access-control-allow-origin"]).toBe(allowedOrigin);
+    expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(allowed.headers["cross-origin-opener-policy"]).toBeUndefined();
+    expect(allowed.headers["cross-origin-embedder-policy"]).toBeUndefined();
+  });
+
   it("reports configured authentication providers", async () => {
     const response = await request(app).get("/api/auth/providers");
 

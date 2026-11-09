@@ -14,6 +14,7 @@ import ContributorGraph from "./ContributorGraph";
 import { authenticatedFetch as fetch } from "../lib/apiClient";
 import { getServices } from "../../src/lib/services";
 import type { RealtimeService } from "../../src/lib/realtime";
+import { AiStreamError, useAiStream } from "../../src/hooks/useAiStream";
 import { reconnectTerminalPreview } from "../services/editorMocks";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -22,9 +23,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 type SelectionSnapshot = { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number; selectedText: string };
 type AiCommand = "/fix" | "/explain" | "/test" | "/comment" | "/refactor" | "/optimize";
-type AIErrorCode = "AI_NOT_CONFIGURED" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "TOKEN_EXPIRED" | "UNKNOWN";
-type AIErrorEvent = { type: "error"; code: AIErrorCode; message: string };
-type AiStreamEvent = AIErrorEvent | { type: "chunk"; content: string };
+type AIErrorCode = "AI_NOT_CONFIGURED" | "RATE_LIMITED" | "SERVICE_UNAVAILABLE" | "UNAUTHORIZED" | "UNKNOWN";
 type AiMessage = { id: string; role: "user" | "assistant"; text: string; streaming?: boolean; isError?: boolean; errorCode?: AIErrorCode; command?: AiCommand; fileId?: string; selection?: SelectionSnapshot };
 type AiConversationSummary = { id: string; title: string; fileId: string | null; messageCount: number; updatedAt: string; preview?: string };
 type AiDbMessage = { id: string; role: "USER" | "ASSISTANT"; content: string; command?: string | null; hasCode?: boolean; codeLanguage?: string | null; appliedToFileId?: string | null; createdAt: string };
@@ -284,44 +283,6 @@ const extractCode = (text: string) =>
   text.match(/```(?:[\w#+-]+)?\s*([\s\S]*?)```/)?.[1]?.trim() || text;
 const extractCodeLanguage = (text: string) =>
   text.match(/```([\w#+-]+)?\s*[\s\S]*?```/)?.[1] || "text";
-
-const isAIErrorCode = (value: unknown): value is AIErrorCode =>
-  value === "AI_NOT_CONFIGURED"
-  || value === "RATE_LIMITED"
-  || value === "SERVICE_UNAVAILABLE"
-  || value === "TOKEN_EXPIRED"
-  || value === "UNKNOWN";
-
-const normalizeAIErrorCode = (value: unknown): AIErrorCode =>
-  isAIErrorCode(value) ? value : "UNKNOWN";
-
-const parseSseLine = (line: string): AiStreamEvent | null => {
-  if (!line.startsWith("data:")) return null;
-  const payload = line.slice(5).trim();
-  if (!payload || payload === "[DONE]") return null;
-  try {
-    const parsed: unknown = JSON.parse(payload);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const event = parsed as Record<string, unknown>;
-    if (event.type === "error") {
-      return {
-        type: "error",
-        code: normalizeAIErrorCode(event.code),
-        message: typeof event.message === "string" ? event.message : "",
-      };
-    }
-    if (event.type === "chunk" && typeof event.content === "string") {
-      return { type: "chunk", content: event.content };
-    }
-    if (typeof event.text === "string" || typeof event.delta === "string") {
-      const content = typeof event.text === "string" ? event.text : event.delta;
-      if (typeof content === "string") return { type: "chunk", content };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-};
 
 const debounce = <T extends (...args: never[]) => void>(callback: T, delay: number) => {
   let timer: number | undefined;
@@ -644,15 +605,25 @@ const OutputPanel: React.FC<{
 
 type ConflictDetails = { message?: string; lastEditedBy?: string | null; lastEditedAt?: string | null; currentVersion?: number; yourVersion?: number };
 
-const ConflictModal: React.FC<{ file: EditorFile; projectId: string; mine: string; details: ConflictDetails; onKeepMine: () => Promise<void>; onKeepTheirs: () => Promise<void>; onClose: () => void }> = ({ file, projectId, mine, details, onKeepMine, onKeepTheirs, onClose }) => {
+const ConflictModal: React.FC<{ file: EditorFile; projectId: string; mine: string; details: ConflictDetails; onKeepMine: () => Promise<void>; onKeepTheirs: () => Promise<void>; onClose: () => void; onLoadError: (message: string, retry: () => void) => void }> = ({ file, projectId, mine, details, onKeepMine, onKeepTheirs, onClose, onLoadError }) => {
   const [serverContent, setServerContent] = useState<string | null>(null);
   const [serverVersion, setServerVersion] = useState<number | null>(details.currentVersion ?? null);
   const [compare, setCompare] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void fetch(`${API_BASE}/v1/projects/${projectId}/files/${file.apiFileId || file.id}`, { credentials: "include" }).then(async (response) => response.ok ? response.json() as Promise<{ content: string; version: number }> : null).then((latest) => { if (!cancelled && latest) { setServerContent(latest.content); setServerVersion(latest.version); } }).catch(() => undefined);
+    const loadLatest = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/v1/projects/${projectId}/files/${file.apiFileId || file.id}`, { credentials: "include" });
+        if (!response.ok) throw new Error(`Could not load the server version (${response.status}).`);
+        const latest = await response.json() as { content: string; version: number };
+        if (!cancelled) { setServerContent(latest.content); setServerVersion(latest.version); }
+      } catch (error) {
+        if (!cancelled) onLoadError(error instanceof Error ? error.message : "Could not load the server version.", () => void loadLatest());
+      }
+    };
+    void loadLatest();
     return () => { cancelled = true; };
-  }, [file.apiFileId, file.id, projectId]);
+  }, [file.apiFileId, file.id, onLoadError, projectId]);
   const formattedEditedAt = details.lastEditedAt ? new Date(details.lastEditedAt).toLocaleString() : "just now";
   if (compare && serverContent !== null) return <div className="fixed inset-0 z-50 flex flex-col bg-[#0A0A0F]" role="dialog" aria-modal="true" aria-labelledby="compare-title"><div className="flex items-center justify-between border-b border-[#28243c] px-4 py-3"><h2 id="compare-title" className="text-sm font-bold text-white">Compare save conflict: {file.name}</h2><button onClick={() => setCompare(false)} className="text-xs text-slate-400">Back</button></div><div className="flex min-h-0 flex-1"><div className="flex min-w-0 flex-1 flex-col border-r border-[#28243c]"><div className="px-3 py-2 text-xs text-amber-200">Your version</div><div className="min-h-0 flex-1"><MonacoEditor height="100%" language={monacoLanguageForFile(file)} theme="devpulse-dark" value={mine} options={{ readOnly: true }} /></div><button onClick={() => void onKeepMine()} className="m-3 bg-amber-500/20 px-3 py-2 text-xs text-amber-100">Use this version</button></div><div className="flex min-w-0 flex-1 flex-col"><div className="px-3 py-2 text-xs text-cyan-200">Server version</div><div className="min-h-0 flex-1"><MonacoEditor height="100%" language={monacoLanguageForFile(file)} theme="devpulse-dark" value={serverContent} options={{ readOnly: true }} /></div><button onClick={() => void onKeepTheirs()} className="m-3 bg-cyan-400/15 px-3 py-2 text-xs text-cyan-200">Use this version</button></div></div></div>;
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="w-full max-w-lg border border-amber-400/40 bg-[#161624] p-5 shadow-2xl"><h2 id="conflict-title" className="text-sm font-bold text-amber-200">Save Conflict</h2><p className="mt-3 text-xs leading-5 text-slate-300"><strong>{file.name}</strong> was changed by {details.lastEditedBy || "another collaborator"} • {formattedEditedAt}.</p><p className="mt-2 text-xs leading-5 text-slate-400">Your changes and their changes cannot be merged automatically.</p><p className="mt-4 text-xs text-slate-300">Choose what to do:</p><div className="mt-4 flex justify-end gap-2 text-xs"><button onClick={() => void onKeepTheirs()} className="border border-[#332b50] px-3 py-2 text-slate-300">Keep Theirs</button><button disabled={serverContent === null} onClick={() => setCompare(true)} className="border border-[#332b50] px-3 py-2 text-slate-300 disabled:opacity-40">Compare</button><button onClick={() => void onKeepMine()} className="bg-amber-500/20 px-3 py-2 text-amber-100">Keep Mine</button><button onClick={onClose} className="px-3 py-2 text-slate-500">Cancel</button></div>{serverVersion !== null && <div className="mt-3 text-[10px] text-slate-600">Server version: {serverVersion}</div>}</div></div>;
@@ -660,6 +631,20 @@ const ConflictModal: React.FC<{ file: EditorFile; projectId: string; mine: strin
 
 export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ projectId }) => {
   const { user, isEditorProjectOpen, setIsEditorProjectOpen, editorProjectId, isEditorLoading, editorError, loadEditorProject, loadedProjectName, treeFiles, openFiles, activeFileId, setActiveFileId, fileContents, updateFileContent, updateOpenFileMetadata, saveFileContent, saveLocalFileToProject, openFileInEditor, closeFileFromEditor, createNewFile, deleteFile, loadUserLocalFiles, loadSingleLocalFile, isAiDrawerOpen, setIsAiDrawerOpen, applyDiffToActiveFile: applyDiffToActiveFileRemote, setIsCommandPaletteOpen, addToast } = useApp();
+  const showRetryableApiError = useCallback((title: string, error: unknown, retry: () => void) => {
+    const message = error instanceof Error ? error.message : "The request could not be completed.";
+    addToast({
+      variant: "error",
+      title,
+      message,
+      duration: 0,
+      action: { label: "Retry", onClick: retry },
+    });
+  }, [addToast]);
+  const reportConflictLoadError = useCallback((message: string, retry: () => void) => {
+    showRetryableApiError("Server version unavailable", new Error(message), retry);
+  }, [showRetryableApiError]);
+  const { streamChat } = useAiStream();
   const editorRef = useRef<EditorHandle | null>(null);
   const realtimeRef = useRef<RealtimeService | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -714,6 +699,7 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
   const [largeFileOverrides, setLargeFileOverrides] = useState<Record<string, boolean>>({});
   const [isOfflineMode, setIsOfflineMode] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  const [sessionRestoreAttempt, setSessionRestoreAttempt] = useState(0);
   const scrollPositionsRef = useRef<Record<string, number>>({});
   const cursorPositionsRef = useRef<Record<string, SessionCursorPosition>>({});
   const lastEmittedCursorRef = useRef<Record<string, string>>({});
@@ -738,18 +724,26 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     setExecutionHistoryLoading(true);
     try {
       const response = await fetch(`${API_BASE}/v1/files/${fileId}/executions?limit=10`, { credentials: "include" });
-      if (response.ok) setExecutionHistory((await response.json() as { executions: ExecutionSummary[] }).executions);
-    } catch { setExecutionHistory([]); } finally { setExecutionHistoryLoading(false); }
-  }, []);
+      if (!response.ok) throw new Error(`Could not load run history (${response.status}).`);
+      setExecutionHistory((await response.json() as { executions: ExecutionSummary[] }).executions);
+    } catch (error) {
+      setExecutionHistory([]);
+      showRetryableApiError("Run history unavailable", error, () => void loadExecutionHistory(fileId));
+    } finally { setExecutionHistoryLoading(false); }
+  }, [showRetryableApiError]);
   const handleOutputTabChange = (tab: OutputTab) => { setOutputTab(tab); if (tab === "history" && activeFile?.origin === FileOrigin.API) void loadExecutionHistory(activeFile.apiFileId || activeFile.id); };
   const selectHistoricalExecution = async (summary: ExecutionSummary) => {
-    const response = await fetch(`${API_BASE}/v1/executions/${summary.id}`, { credentials: "include" });
-    if (!response.ok) return;
-    const body = await response.json() as { execution: ExecutionOutput & { codeSnapshot: string; createdAt: string } };
-    const execution = { ...body.execution, runAt: body.execution.createdAt };
-    if (activeFile) executionOutputs.current[activeFile.id] = execution;
-    setRunOutput(`Run from ${new Date(execution.createdAt).toLocaleTimeString()}\n\n${execution.stdout || execution.stderr || execution.error || "Process completed with no output."}`);
-    setRunExitCode(execution.exitCode); setElapsedMs(execution.durationMs); setOutputTab("terminal");
+    try {
+      const response = await fetch(`${API_BASE}/v1/executions/${summary.id}`, { credentials: "include" });
+      if (!response.ok) throw new Error(`Could not load this run (${response.status}).`);
+      const body = await response.json() as { execution: ExecutionOutput & { codeSnapshot: string; createdAt: string } };
+      const execution = { ...body.execution, runAt: body.execution.createdAt };
+      if (activeFile) executionOutputs.current[activeFile.id] = execution;
+      setRunOutput(`Run from ${new Date(execution.createdAt).toLocaleTimeString()}\n\n${execution.stdout || execution.stderr || execution.error || "Process completed with no output."}`);
+      setRunExitCode(execution.exitCode); setElapsedMs(execution.durationMs); setOutputTab("terminal");
+    } catch (error) {
+      showRetryableApiError("Run details unavailable", error, () => void selectHistoricalExecution(summary));
+    }
   };
   useEffect(() => {
     if (!activeFile) return;
@@ -770,19 +764,30 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       persistStoredEditorSession(editorProjectId, state);
       return;
     }
-    void fetch(`${API_BASE}/v1/editor/session`, {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: editorProjectId,
-        openFileIds: apiFiles.map((file) => file.apiFileId || file.id),
-        activeFileId: state.activeFile?.origin === FileOrigin.API ? state.activeFile.apiFileId || state.activeFile.id : undefined,
-        scrollPositions: state.scrollPositions,
-        cursorPositions: state.cursorPositions,
-      }),
-    }).catch(() => undefined);
-  }, 3000), [editorProjectId]);
+    const saveApiSession = async () => {
+      const response = await fetch(`${API_BASE}/v1/editor/session`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: editorProjectId,
+          openFileIds: apiFiles.map((file) => file.apiFileId || file.id),
+          activeFileId: state.activeFile?.origin === FileOrigin.API ? state.activeFile.apiFileId || state.activeFile.id : undefined,
+          scrollPositions: state.scrollPositions,
+          cursorPositions: state.cursorPositions,
+        }),
+      });
+      if (!response.ok) throw new Error(`Could not save the editor session (${response.status}).`);
+    };
+    const saveApiSessionWithRetry = async () => {
+      try {
+        await saveApiSession();
+      } catch (error) {
+        showRetryableApiError("Editor session could not be saved", error, () => void saveApiSessionWithRetry());
+      }
+    };
+    void saveApiSessionWithRetry();
+  }, 3000), [editorProjectId, showRetryableApiError]);
   const emitCurrentCursor = useCallback(() => {
     const file = latestSessionRef.current.activeFile;
     if (!file) return;
@@ -880,13 +885,18 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
           setSessionNotice(missing > 0 ? `${missing} of ${session.openFileIds.length} files could not be restored (deleted or moved)` : `Restored your last session (${loadedFiles.length} files, ${active?.name || "file"} active)`);
           window.setTimeout(() => setSessionNotice(null), 3000);
         }
-      } catch {
+      } catch (error) {
         sessionReadyRef.current = true;
+        if (!cancelled) {
+          showRetryableApiError("Editor session could not be restored", error, () => {
+            setSessionRestoreAttempt((attempt) => attempt + 1);
+          });
+        }
       }
     };
     void restoreSession();
     return () => { cancelled = true; };
-  }, [editorProjectId, isEditorLoading, isEditorProjectOpen, treeFiles]);
+  }, [editorProjectId, isEditorLoading, isEditorProjectOpen, sessionRestoreAttempt, showRetryableApiError, treeFiles]);
 
   useEffect(() => { if (sessionReadyRef.current) queueSessionSave(); }, [openFiles, activeFileId, queueSessionSave]);
 
@@ -943,23 +953,35 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     return merged.filter((message) => { const key = `${message.role}:${message.text}`; if (seen.has(key)) return false; seen.add(key); return true; }).slice(-20);
   };
   const persistAiMessage = async (conversationId: string, message: AiMessage, tokensUsed?: number) => {
-    await fetch(`${API_BASE}/v1/ai/conversations/${conversationId}/messages`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: message.role, content: message.text, command: message.command, tokensUsed, hasCode: message.role === "assistant" && message.text.includes("```"), codeLanguage: message.role === "assistant" ? extractCodeLanguage(message.text) : undefined }) }).catch(() => undefined);
+    const response = await fetch(`${API_BASE}/v1/ai/conversations/${conversationId}/messages`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: message.role, content: message.text, command: message.command, tokensUsed, hasCode: message.role === "assistant" && message.text.includes("```"), codeLanguage: message.role === "assistant" ? extractCodeLanguage(message.text) : undefined }) });
+    if (!response.ok) throw new Error(`Could not save AI conversation (${response.status}).`);
+  };
+  const persistAiMessageWithRetry = async (conversationId: string, message: AiMessage, tokensUsed?: number) => {
+    try {
+      await persistAiMessage(conversationId, message, tokensUsed);
+    } catch (error) {
+      showRetryableApiError("AI history could not be saved", error, () => void persistAiMessageWithRetry(conversationId, message, tokensUsed));
+    }
   };
   const syncAiHistory = async (fileId: string, localMessages: AiMessage[]) => {
     try {
       const conversationResponse = await fetch(`${API_BASE}/v1/ai/conversations?fileId=${encodeURIComponent(fileId)}`, { credentials: "include" });
-      if (!conversationResponse.ok) return;
+      if (!conversationResponse.ok) throw new Error(`Could not load AI history (${conversationResponse.status}).`);
       const conversationBody = await conversationResponse.json() as { conversation: AiConversationSummary };
       setConversation(conversationBody.conversation);
       const previousResponse = await fetch(`${API_BASE}/v1/ai/conversations?fileId=${encodeURIComponent(fileId)}&all=true`, { credentials: "include" });
-      if (previousResponse.ok) setPreviousConversations(((await previousResponse.json()) as { conversations: AiConversationSummary[] }).conversations.filter((item) => item.id !== conversationBody.conversation.id));
+      if (!previousResponse.ok) throw new Error(`Could not load previous AI conversations (${previousResponse.status}).`);
+      setPreviousConversations(((await previousResponse.json()) as { conversations: AiConversationSummary[] }).conversations.filter((item) => item.id !== conversationBody.conversation.id));
       const messagesResponse = await fetch(`${API_BASE}/v1/ai/conversations/${conversationBody.conversation.id}/messages?limit=20`, { credentials: "include" });
-      const dbMessages = messagesResponse.ok ? ((await messagesResponse.json()) as { messages: AiDbMessage[] }).messages : [];
+      if (!messagesResponse.ok) throw new Error(`Could not load AI messages (${messagesResponse.status}).`);
+      const dbMessages = ((await messagesResponse.json()) as { messages: AiDbMessage[] }).messages;
       const merged = mergeAiHistory(localMessages, dbMessages);
       setMessages(merged); setHistoryCount(merged.length); cacheAiMessages(fileId, merged);
       const dbKeys = new Set(dbMessages.map((message) => `${message.role === "USER" ? "user" : "assistant"}:${message.content}`));
-      await Promise.all(localMessages.filter((message) => !message.streaming && !dbKeys.has(`${message.role}:${message.text}`)).map((message) => persistAiMessage(conversationBody.conversation.id, message)));
-    } catch { /* local cache remains the usable fallback */ }
+      await Promise.all(localMessages.filter((message) => !message.streaming && !dbKeys.has(`${message.role}:${message.text}`)).map((message) => persistAiMessageWithRetry(conversationBody.conversation.id, message)));
+    } catch (error) {
+      showRetryableApiError("AI history could not be synchronized", error, () => void syncAiHistory(fileId, localMessages));
+    }
   };
   useEffect(() => () => { if (previousFileIdRef.current) localStorage.setItem(`dp-ai-history-${previousFileIdRef.current}`, JSON.stringify(messagesRef.current.slice(-20))); }, []);
   useEffect(() => { const clearContext = () => setContextEnabled(false); window.addEventListener("devpulse-ai-clear-context", clearContext); return () => window.removeEventListener("devpulse-ai-clear-context", clearContext); }, []);
@@ -993,8 +1015,16 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(localEditorSessionKey(editorProjectId));
       }
-      void fetch(`${API_BASE}/v1/editor/session/${editorProjectId}`, { method: "DELETE", credentials: "include" }).catch(() => undefined);
+      void deleteEditorSessionWithRetry(editorProjectId);
       sessionReadyRef.current = false;
+    }
+  };
+  const deleteEditorSessionWithRetry = async (projectId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/v1/editor/session/${projectId}`, { method: "DELETE", credentials: "include" });
+      if (!response.ok) throw new Error(`Could not clear the editor session (${response.status}).`);
+    } catch (error) {
+      showRetryableApiError("Editor session could not be cleared", error, () => void deleteEditorSessionWithRetry(projectId));
     }
   };
 
@@ -1004,16 +1034,16 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     if (activeFile.origin === FileOrigin.NEW) { setSavePromptName(activeFile.name); setSavePromptFolder(activeFile.path.includes("/") ? `${activeFile.path.slice(0, activeFile.path.lastIndexOf("/") + 1)}` : "/"); setNewFilePromptId(activeFile.id); return; }
     setSaveState("saving");
     try { await saveFileContent(activeFile.id); setSaveState("saved"); setRunOutput(`Saved ${activeFile.path} and created a new file revision.`); window.setTimeout(() => setSaveState("idle"), 2000); }
-    catch (error) { const message = error instanceof Error ? error.message : "Could not save file"; setSaveState("error"); if (error instanceof ApiRequestError && error.status === 409) { setConflictedFileIds((previous) => previous.includes(activeFile.id) ? previous : [...previous, activeFile.id]); setConflict({ fileId: activeFile.id, mine: activeContent, details: error.details as ConflictDetails }); } setRunOutput(message); addToast({ variant: "error", title: "Save failed", message, duration: 5000 }); }
+    catch (error) { const message = error instanceof Error ? error.message : "Could not save file"; setSaveState("error"); if (error instanceof ApiRequestError && error.status === 409) { setConflictedFileIds((previous) => previous.includes(activeFile.id) ? previous : [...previous, activeFile.id]); setConflict({ fileId: activeFile.id, mine: activeContent, details: error.details as ConflictDetails }); } setRunOutput(message); addToast({ variant: "error", title: "Save failed", message, duration: 0, action: { label: "Retry", onClick: () => void saveActiveFile() } }); }
   };
-  const promoteFile = async (fileId: string) => { setSaveDialogFileId(null); setSaveState("saving"); try { await saveLocalFileToProject(fileId); setSaveState("saved"); window.setTimeout(() => setSaveState("idle"), 2000); } catch (error) { setSaveState("error"); setRunOutput(error instanceof Error ? error.message : "Save failed"); } };
+  const promoteFile = async (fileId: string) => { setSaveDialogFileId(null); setSaveState("saving"); try { await saveLocalFileToProject(fileId); setSaveState("saved"); window.setTimeout(() => setSaveState("idle"), 2000); } catch (error) { const message = error instanceof Error ? error.message : "Save failed"; setSaveState("error"); setRunOutput(message); addToast({ variant: "error", title: "File not saved", message, duration: 0, action: { label: "Retry", onClick: () => void promoteFile(fileId) } }); } };
   const saveNewFile = async () => {
     if (!newFilePromptId || !savePromptName.trim()) return;
     const file = openFiles.find((candidate) => candidate.id === newFilePromptId);
     if (!file) return;
     const nextPath = `${savePromptFolder.replace(/\/$/, "")}/${savePromptName.trim()}`.replace(/^\//, "");
     setNewFilePromptId(null); setSaveState("saving");
-    try { await saveLocalFileToProject(file.id, nextPath); setSaveState("saved"); window.setTimeout(() => setSaveState("idle"), 2000); } catch (error) { setSaveState("error"); setRunOutput(error instanceof Error ? error.message : "Save failed"); }
+    try { await saveLocalFileToProject(file.id, nextPath); setSaveState("saved"); window.setTimeout(() => setSaveState("idle"), 2000); } catch (error) { const message = error instanceof Error ? error.message : "Save failed"; setSaveState("error"); setRunOutput(message); addToast({ variant: "error", title: "File not saved", message, duration: 0, action: { label: "Retry", onClick: () => void saveNewFile() } }); }
   };
   const setInput = setAiInput;
   const showAiApplyNotice = (message: string) => { setRunOutput(message); setAiApplyNotice(message); window.setTimeout(() => setAiApplyNotice(null), 4000); };
@@ -1041,7 +1071,18 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       showAiApplyNotice(`AI code applied and saved ✓ (${body.linesReplaced} lines)`);
       void loadEditorProject();
       window.setTimeout(() => setSaveState("idle"), 2000);
-    } catch { setSaveState("error"); showAiApplyNotice("AI apply service unavailable — try again"); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI apply service unavailable.";
+      setSaveState("error");
+      showAiApplyNotice(message);
+      addToast({
+        variant: "error",
+        title: "AI changes not applied",
+        message,
+        duration: 0,
+        action: { label: "Retry", onClick: () => void applyAiCode(message, skipCheck) },
+      });
+    }
   };
   const applyDiffToActiveFile = applyAiCode;
   useEffect(() => {
@@ -1067,8 +1108,9 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     try {
       const response = await fetch(`${API_BASE}/v1/execute`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: activeFile.id, language: isLargeFileBlocked ? "plaintext" : languageForFile(activeFile), code: activeContent }) });
       const result = await response.json() as { exitCode?: number; stdout?: string; stderr?: string; error?: string; executionId?: string };
+      if (!response.ok) throw new Error(result.error || `Execution request failed (${response.status}).`);
       const durationMs = Date.now() - startedAt; const exitCode = result.exitCode ?? (response.ok ? 0 : 1); const output: ExecutionOutput = { stdout: result.stdout || "", stderr: result.stderr || "", exitCode, durationMs, timedOut: Boolean((result as { timedOut?: boolean }).timedOut), error: result.error, executionId: result.executionId, runAt: new Date().toISOString() }; executionOutputs.current[activeFile.id] = output; setElapsedMs(durationMs); setRunExitCode(exitCode); setRunOutput(`$ devpulse run ${activeFile.name}\n\n${output.stdout || output.stderr || output.error || "Process completed with no output."}`); if (activeFile.origin === FileOrigin.API) void loadExecutionHistory(activeFile.apiFileId || activeFile.id);
-    } catch (error) { const durationMs = Date.now() - startedAt; const output: ExecutionOutput = { stdout: "", stderr: "", exitCode: 1, durationMs, timedOut: false, error: error instanceof Error ? error.message : "Preview could not run.", runAt: new Date().toISOString() }; executionOutputs.current[activeFile.id] = output; setElapsedMs(durationMs); setRunExitCode(1); setRunOutput("Preview could not run."); }
+    } catch (error) { const durationMs = Date.now() - startedAt; const message = error instanceof Error ? error.message : "Preview could not run."; const output: ExecutionOutput = { stdout: "", stderr: message, exitCode: 1, durationMs, timedOut: false, error: message, runAt: new Date().toISOString() }; executionOutputs.current[activeFile.id] = output; setElapsedMs(durationMs); setRunExitCode(1); setRunOutput(message); addToast({ variant: "error", title: "Execution failed", message, duration: 0, action: { label: "Retry", onClick: () => void handleRun() } }); }
     finally { setIsRunning(false); }
   };
   const recordUnreadableFile = (file: File, path: string, reason: UnreadableFile["reason"]) => { setUnreadableFiles((previous) => [...previous, { name: file.name, path, reason, sizeBytes: file.size, mimeType: file.type || undefined }]); };
@@ -1098,77 +1140,126 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
     setUnreadableFiles([]); setUnreadableExpanded(false); setUnreadableBannerDismissed(false); setImageFiles({}); setImagePreview(null);
     Promise.all(files.map((file) => inspectAndReadLocalFile(file, file.webkitRelativePath || file.name))).then((loaded) => void loadUserLocalFiles(folderName, loaded.filter((file): file is { name: string; path: string; content: string } => Boolean(file)))); event.target.value = "";
   };
-  const clearAiHistory = async () => { if (!activeFileId) return; localStorage.removeItem(`dp-ai-history-${activeFileId}`); setMessages([]); setHistoryCount(0); const oldConversation = conversation; if (oldConversation) await fetch(`${API_BASE}/v1/ai/conversations/${oldConversation.id}`, { method: "DELETE", credentials: "include" }).catch(() => undefined); if (activeFile?.origin === FileOrigin.API) { const response = await fetch(`${API_BASE}/v1/ai/conversations?fileId=${encodeURIComponent(activeFile.apiFileId || activeFile.id)}`, { credentials: "include" }).catch(() => null); if (response?.ok) setConversation(((await response.json()) as { conversation: AiConversationSummary }).conversation); } };
+  const loadConversationForFile = async (fileId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/v1/ai/conversations?fileId=${encodeURIComponent(fileId)}`, { credentials: "include" });
+      if (!response.ok) throw new Error(`Could not load a new AI conversation (${response.status}).`);
+      setConversation(((await response.json()) as { conversation: AiConversationSummary }).conversation);
+    } catch (error) {
+      showRetryableApiError("AI conversation unavailable", error, () => void loadConversationForFile(fileId));
+    }
+  };
+  const clearAiHistory = async () => {
+    if (!activeFileId) return;
+    const oldConversation = conversation;
+    if (oldConversation) {
+      try {
+        const response = await fetch(`${API_BASE}/v1/ai/conversations/${oldConversation.id}`, { method: "DELETE", credentials: "include" });
+        if (!response.ok) throw new Error(`Could not clear AI history (${response.status}).`);
+      } catch (error) {
+        showRetryableApiError("AI history could not be cleared", error, () => void clearAiHistory());
+        return;
+      }
+    }
+    localStorage.removeItem(`dp-ai-history-${activeFileId}`);
+    setMessages([]);
+    setHistoryCount(0);
+    setConversation(null);
+    if (activeFile?.origin === FileOrigin.API) {
+      await loadConversationForFile(activeFile.apiFileId || activeFile.id);
+    }
+  };
   const getSurroundingCode = () => activeContent.split("\n").slice(Math.max(0, cursor.lineNumber - 21), cursor.lineNumber + 20).join("\n");
   const streamAiResponse = async (prompt: string, command?: AiCommand, messageSelection?: SelectionSnapshot | null) => {
     aiAbortRef.current?.abort(); const controller = new AbortController(); aiAbortRef.current = controller; const assistantId = `assistant-${Date.now()}`; let assistantContent = "";
     setMessages((previous) => [...previous, { id: assistantId, role: "assistant", text: "", streaming: true, fileId: activeFile?.id, command, selection: messageSelection || undefined }]); setIsStreaming(true);
     try {
-      const response = await fetch(`${API_BASE}/v1/ai/chat`, { method: "POST", credentials: "include", signal: controller.signal, headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify({ projectId: editorProjectId, fileId: activeFile?.apiFileId || activeFile?.id, conversationId: conversation?.id, command, context: { projectName: loadedProjectName, selectedCode: isLargeFileOpen ? messageSelection?.selectedText || "" : contextEnabled ? messageSelection?.selectedText || "" : "", fileName: contextEnabled ? activeFile?.name : undefined, language: contextEnabled ? activeFile?.language : undefined, surroundingCode: !isLargeFileOpen && contextEnabled ? getSurroundingCode() : "" }, messages: [{ role: "user", content: prompt }] }) });
-      if (response.status === 401) {
-        setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text: "Your session has expired. Please sign in again to continue.", streaming: false, isError: true } : message));
-        setUsage({ status: "unauthenticated" });
-        return;
+      const { text } = await streamChat({
+        projectId: editorProjectId || undefined,
+        fileId: activeFile?.origin === FileOrigin.API
+          ? activeFile.apiFileId || activeFile.id
+          : undefined,
+        conversationId: conversation?.id,
+        command,
+        context: {
+          projectName: loadedProjectName,
+          selectedCode: isLargeFileOpen
+            ? messageSelection?.selectedText || ""
+            : contextEnabled
+              ? messageSelection?.selectedText || ""
+              : "",
+          fileName: contextEnabled ? activeFile?.name : undefined,
+          language: contextEnabled ? activeFile?.language : undefined,
+          surroundingCode:
+            !isLargeFileOpen && contextEnabled ? getSurroundingCode() : "",
+        },
+        messages: [{ role: "user", content: prompt }],
+      }, {
+        signal: controller.signal,
+        onToken: (token) => {
+          assistantContent += token;
+          setMessages((previous) => previous.map((message) =>
+            message.id === assistantId
+              ? { ...message, text: message.text + token }
+              : message,
+          ));
+        },
+      });
+      assistantContent = text;
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") {
+        const code = error instanceof AiStreamError ? error.code : "UNKNOWN";
+        if (code === "UNAUTHORIZED") setUsage({ status: "unauthenticated" });
+        if (code === "AI_NOT_CONFIGURED") setUsage({ status: "unconfigured" });
+        setMessages((previous) => previous.map((message) =>
+          message.id === assistantId
+            ? {
+                ...message,
+                text: code === "AI_NOT_CONFIGURED"
+                  ? ""
+                  : error instanceof Error
+                    ? `AI error: ${error.message}`
+                    : "AI request failed",
+                streaming: false,
+                isError: true,
+                ...(code === "UNKNOWN" ? {} : { errorCode: code }),
+              }
+            : message,
+        ));
       }
-      if (!response.ok) {
-        const errorBody: unknown = await response.json().catch(() => null);
-        const details = typeof errorBody === "object" && errorBody !== null
-          ? errorBody as Record<string, unknown>
-          : {};
-        const errorCode = details.code ?? details.error;
-        const normalizedCode = normalizeAIErrorCode(errorCode);
-        if (normalizedCode === "AI_NOT_CONFIGURED") {
-          setMessages((previous) => previous.map((message) => message.id === assistantId
-            ? { ...message, text: "", streaming: false, isError: true, errorCode: "AI_NOT_CONFIGURED" }
-            : message));
-          return;
-        }
-        const errorMessage = typeof details.message === "string"
-          ? details.message
-          : typeof details.error === "string" ? details.error : `AI request failed (${response.status})`;
-        throw new Error(errorMessage);
-      }
-      if ((response.headers.get("content-type") || "").includes("text/event-stream") && response.body) {
-        const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
-        while (true) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          buffer += decoder.decode(chunk.value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            const event = parseSseLine(line);
-            if (!event) continue;
-            if (event.type === "error") {
-              setMessages((previous) => previous.map((message) => message.id === assistantId
-                ? {
-                    ...message,
-                    text: event.code === "AI_NOT_CONFIGURED" ? "" : `AI error: ${event.message}`,
-                    isError: true,
-                    errorCode: event.code,
-                  }
-                : message));
-              continue;
-            }
-            const text = event.content;
-            if (text) {
-              assistantContent += text;
-              setMessages((previous) => previous.map((message) => message.id === assistantId
-                ? { ...message, text: message.text + text }
-                : message));
-            }
-          }
-        }
-      } else {
-        const result = await response.json() as { content?: { type: string; text?: string }[] }; const text = result.content?.filter((item) => item.type === "text").map((item) => item.text || "").join("\n") || "The AI returned no text."; assistantContent = text;
-        setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text } : message));
-      }
-    } catch (error) { if ((error as Error).name !== "AbortError") setMessages((previous) => previous.map((message) => message.id === assistantId ? { ...message, text: error instanceof Error ? `AI error: ${error.message}` : "AI request failed" } : message)); }
-    finally { setMessages((previous) => { const next = previous.map((message) => message.id === assistantId ? { ...message, text: assistantContent || message.text, streaming: false } : message); if (activeFileId) { cacheAiMessages(activeFileId, next); setHistoryCount(next.length); } return next; }); if (assistantContent && conversation?.id) void persistAiMessage(conversation.id, { id: assistantId, role: "assistant", text: assistantContent, fileId: activeFileId }); setIsStreaming(false); }
+    }
+    finally { setMessages((previous) => { const next = previous.map((message) => message.id === assistantId ? { ...message, text: assistantContent || message.text, streaming: false } : message); if (activeFileId) { cacheAiMessages(activeFileId, next); setHistoryCount(next.length); } return next; }); if (assistantContent && conversation?.id) void persistAiMessageWithRetry(conversation.id, { id: assistantId, role: "assistant", text: assistantContent, fileId: activeFileId }); setIsStreaming(false); }
   };
-  const sendAi = (event: React.FormEvent) => { event.preventDefault(); const rawPrompt = aiInput.trim(); if (!rawPrompt || isStreaming || isLargeFileBlocked || (isLargeFileOpen && !selectionIsSmall) || usageExhausted) return; const commandMatch = AI_COMMANDS.find((command) => rawPrompt.startsWith(command.value)); const prompt = commandMatch ? rawPrompt.slice(commandMatch.value.length).trim() : rawPrompt; const messageSelection = selection; if (commandMatch?.requiresSelection && !messageSelection?.selectedText) setRunOutput("Tip: Select some code first for more precise results"); const message: AiMessage = { id: `user-${Date.now()}`, role: "user", text: prompt, command: commandMatch?.value, fileId: activeFile?.id, selection: messageSelection || undefined }; setMessages((previous) => { const next = [...previous, message]; if (activeFileId) cacheAiMessages(activeFileId, next); setHistoryCount(next.length); return next; }); if (conversation?.id) void persistAiMessage(conversation.id, message); setAiInput(""); void streamAiResponse(prompt, commandMatch?.value, messageSelection); };
-  const loadConversation = async (selected: AiConversationSummary) => { const response = await fetch(`${API_BASE}/v1/ai/conversations/${selected.id}/messages?limit=20`, { credentials: "include" }); if (!response.ok) return; const body = await response.json() as { messages: AiDbMessage[] }; const loaded = body.messages.slice().reverse().map(dbMessageToUi); setConversation(selected); setMessages(loaded); setHistoryCount(loaded.length); if (activeFileId) cacheAiMessages(activeFileId, loaded); };
-  const exportConversation = async () => { if (!conversation) return; const response = await fetch(`${API_BASE}/v1/ai/conversations/${conversation.id}/export`, { credentials: "include" }); if (!response.ok) return; const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `devpulse-ai-${new Date().toISOString().slice(0, 10)}.md`; link.click(); URL.revokeObjectURL(url); };
+  const sendAi = (event: React.FormEvent) => { event.preventDefault(); const rawPrompt = aiInput.trim(); if (!rawPrompt || isStreaming || isLargeFileBlocked || (isLargeFileOpen && !selectionIsSmall) || usageExhausted) return; const commandMatch = AI_COMMANDS.find((command) => rawPrompt.startsWith(command.value)); const prompt = commandMatch ? rawPrompt.slice(commandMatch.value.length).trim() : rawPrompt; const messageSelection = selection; if (commandMatch?.requiresSelection && !messageSelection?.selectedText) setRunOutput("Tip: Select some code first for more precise results"); const message: AiMessage = { id: `user-${Date.now()}`, role: "user", text: prompt, command: commandMatch?.value, fileId: activeFile?.id, selection: messageSelection || undefined }; setMessages((previous) => { const next = [...previous, message]; if (activeFileId) cacheAiMessages(activeFileId, next); setHistoryCount(next.length); return next; }); if (conversation?.id) void persistAiMessageWithRetry(conversation.id, message); setAiInput(""); void streamAiResponse(prompt, commandMatch?.value, messageSelection); };
+  const loadConversation = async (selected: AiConversationSummary) => {
+    try {
+      const response = await fetch(`${API_BASE}/v1/ai/conversations/${selected.id}/messages?limit=20`, { credentials: "include" });
+      if (!response.ok) throw new Error(`Could not load this AI conversation (${response.status}).`);
+      const body = await response.json() as { messages: AiDbMessage[] };
+      const loaded = body.messages.slice().reverse().map(dbMessageToUi);
+      setConversation(selected); setMessages(loaded); setHistoryCount(loaded.length);
+      if (activeFileId) cacheAiMessages(activeFileId, loaded);
+    } catch (error) {
+      showRetryableApiError("AI conversation could not be loaded", error, () => void loadConversation(selected));
+    }
+  };
+  const exportConversation = async () => {
+    if (!conversation) return;
+    const selectedConversation = conversation;
+    try {
+      const response = await fetch(`${API_BASE}/v1/ai/conversations/${selectedConversation.id}/export`, { credentials: "include" });
+      if (!response.ok) throw new Error(`Could not export this AI conversation (${response.status}).`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `devpulse-ai-${new Date().toISOString().slice(0, 10)}.md`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      showRetryableApiError("AI conversation could not be exported", error, () => void exportConversation());
+    }
+  };
   const copyMessage = async (message: AiMessage) => { await navigator.clipboard.writeText(extractCode(message.text)); setCopiedId(message.id); window.setTimeout(() => setCopiedId(null), 1400); };
   const handleContextAction = async (action: "new" | "rename" | "delete" | "copy", file: EditorFile) => {
     setContextMenu(null);
@@ -1179,15 +1270,26 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       const nextPath = window.prompt("Rename file", file.path);
       if (nextPath && nextPath !== file.path) {
         try {
-          const browserServices = await getServices().catch(() => null);
+          const browserServices = process.env.NEXT_PUBLIC_DATA_MODE === "local"
+            ? await getServices().catch(() => null)
+            : null;
           if (browserServices && file.origin !== "new") {
             await browserServices.files.renameFile(file.apiFileId || file.id, nextPath);
           } else {
-            await fetch(`${API_BASE}/v1/files/${file.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: nextPath, expectedVersion: file.apiVersion ?? file.version }) });
+            const response = await fetch(`${API_BASE}/v1/files/${file.id}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: nextPath, expectedVersion: file.apiVersion ?? file.version }) });
+            if (!response.ok) throw new Error(`Could not rename the file (${response.status}).`);
           }
           await loadEditorProject();
-        } catch {
-          setRunOutput("Rename could not be completed in the browser-local project.");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Rename could not be completed.";
+          setRunOutput(message);
+          addToast({
+            variant: "error",
+            title: "Rename failed",
+            message,
+            duration: 0,
+            action: { label: "Retry", onClick: () => void handleContextAction("rename", file) },
+          });
         }
       }
     }
@@ -1200,7 +1302,7 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
   }, [filteredFiles]);
   const closeImagePreview = () => { if (imagePreview) URL.revokeObjectURL(imagePreview.url); setImagePreview(null); };
   const conflictFile = conflict ? openFiles.find((file) => file.id === conflict.fileId) : undefined;
-  const keepMine = async () => { if (!conflictFile || !conflict) return; setSaveState("saving"); try { await saveFileContent(conflictFile.id, conflict.mine, true); setConflictedFileIds((previous) => previous.filter((id) => id !== conflictFile.id)); setConflict(null); setSaveState("saved"); } catch (error) { setSaveState("error"); setRunOutput(error instanceof Error ? error.message : "Force save failed"); } };
+  const keepMine = async () => { if (!conflictFile || !conflict) return; setSaveState("saving"); try { await saveFileContent(conflictFile.id, conflict.mine, true); setConflictedFileIds((previous) => previous.filter((id) => id !== conflictFile.id)); setConflict(null); setSaveState("saved"); } catch (error) { const message = error instanceof Error ? error.message : "Force save failed"; setSaveState("error"); setRunOutput(message); addToast({ variant: "error", title: "Save failed", message, duration: 0, action: { label: "Retry", onClick: () => void keepMine() } }); } };
   const keepTheirs = async () => { setConflict(null); setConflictedFileIds((previous) => conflict ? previous.filter((id) => id !== conflict.fileId) : previous); await loadEditorProject(); setSaveState("idle"); };
   const restoreRevision = async (revision: RevisionSummary, content: string) => {
     if (!activeFile || activeFile.origin !== FileOrigin.API) return;
@@ -1212,7 +1314,18 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
       updateFileContent(activeFile.id, content);
       await loadEditorProject();
       setIsRevisionPanelOpen(false); setSaveState("saved"); setAiApplyNotice(`Restored to v${revision.version} ✓ (now saved as v${body.file?.version ?? activeFile.version + 1})`); window.setTimeout(() => setAiApplyNotice(null), 4000); window.setTimeout(() => setSaveState("idle"), 2000);
-    } catch (reason) { setSaveState("error"); setAiApplyNotice(reason instanceof Error ? reason.message : "Unable to restore revision"); }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Unable to restore revision.";
+      setSaveState("error");
+      setAiApplyNotice(message);
+      addToast({
+        variant: "error",
+        title: "Revision not restored",
+        message,
+        duration: 0,
+        action: { label: "Retry", onClick: () => void restoreRevision(revision, content) },
+      });
+    }
   };
 
   if (isEditorLoading || (!isEditorProjectOpen && !editorError && !isOfflineMode)) return <ProjectLoadingSkeleton />;
@@ -2007,6 +2120,7 @@ export const EditorWorkbench: React.FC<{ projectId?: string | null }> = ({ proje
           onKeepMine={keepMine}
           onKeepTheirs={keepTheirs}
           onClose={() => setConflict(null)}
+          onLoadError={reportConflictLoadError}
         />
       )}
       {saveState === "error" && (

@@ -117,7 +117,7 @@ The editor E2E report documents 24 tests in six spec files:
 Current harness flow:
 
 1. Playwright creates an isolated browser context.
-2. `loginAsDev` calls `/api/auth/dev-bypass`, opens the app, and continues to the editor. It does not rely on the magic-link endpoint.
+2. `loginAsDev` requests and verifies a development magic link through the API. Verification returns a signed access token and sets the HTTP-only refresh cookie before the test continues to the editor.
 3. Fixtures create unique projects/files and mock API responses for deterministic cases.
 4. Tests assert visible UI, API interactions, loading states, editor behavior, and error handling.
 

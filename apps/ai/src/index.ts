@@ -1,9 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import cors from "cors";
 import { config as loadEnv } from "dotenv";
-import express from "express";
+import express, { type RequestHandler } from "express";
 import helmet from "helmet";
-import crypto from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import path from "node:path";
 import Redis from "ioredis";
 import { z } from "zod";
@@ -33,6 +33,7 @@ type ChatContext = {
   language?: string;
   selectedCode?: string;
   surroundingCode?: string;
+  projectName?: string;
   recentErrors?: string[];
 };
 type ChatRequest = {
@@ -41,22 +42,75 @@ type ChatRequest = {
   context?: ChatContext;
   command?: string;
 };
-type CompletionRequest = {
-  code: string;
-  language: string;
-  fileName: string;
-  prefix: string;
-};
+const chatRequestSchema = z.object({
+  model: z.literal("claude-sonnet-4-6").optional(),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1).max(200_000),
+      }),
+    )
+    .min(1)
+    .max(100),
+  context: z
+    .object({
+      fileName: z.string().max(512).optional(),
+      language: z.string().max(40).optional(),
+      selectedCode: z.string().max(200_000).optional(),
+      surroundingCode: z.string().max(200_000).optional(),
+      projectName: z.string().max(120).optional(),
+      recentErrors: z.array(z.string().max(4_000)).max(20).optional(),
+    })
+    .optional(),
+  command: z
+    .enum(["/fix", "/explain", "/test", "/comment", "/refactor", "/optimize"])
+    .optional(),
+});
+const completionRequestSchema = z.object({
+  code: z.string().max(100_000),
+  language: z.string().trim().min(1).max(64),
+  fileName: z.string().trim().min(1).max(512),
+  prefix: z.string().max(100_000),
+});
 
-const app = express();
+const app: express.Express = express();
 const port = env.AI_PORT;
 const defaultModel = env.ANTHROPIC_MODEL;
 let anthropicClient: Anthropic | null = null;
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 redis?.on("error", () => undefined);
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+  }),
+);
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+
+const requireInternalKey: RequestHandler = (request, response, next) => {
+  const expected = process.env.AI_INTERNAL_KEY;
+  const received = request.get("X-Internal-Key");
+  if (!expected) {
+    response.status(503).json({
+      error: "AI_INTERNAL_KEY_NOT_CONFIGURED",
+      message: "The AI service internal key is not configured.",
+    });
+    return;
+  }
+  const expectedBytes = Buffer.from(expected);
+  const receivedBytes = Buffer.from(received ?? "");
+  if (
+    !received ||
+    receivedBytes.length !== expectedBytes.length ||
+    !timingSafeEqual(receivedBytes, expectedBytes)
+  ) {
+    response.status(401).json({ error: "UNAUTHORIZED" });
+    return;
+  }
+  next();
+};
 
 function getAnthropicClient(): Anthropic {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
@@ -119,6 +173,14 @@ function buildSystemPrompt(body: ChatRequest): string {
     parts.push(
       `\nCode context around cursor:\n\`\`\`${body.context.language ?? ""}\n${body.context.surroundingCode}\n\`\`\``,
     );
+  }
+  if (body.context?.surroundingCode) {
+    parts.push(
+      `\nCode context around cursor:\n\`\`\`${body.context.language ?? ""}\n${body.context.surroundingCode}\n\`\`\``,
+    );
+  }
+  if (body.context?.projectName) {
+    parts.push(`\nProject: ${body.context.projectName}`);
   }
   if (body.context?.recentErrors?.length)
     parts.push(`\nRecent errors:\n${body.context.recentErrors.join("\n")}`);
@@ -188,8 +250,17 @@ function handleAnthropicError(
   response.status(502).json({ error: "AI provider request failed" });
 }
 
+app.use("/v1", requireInternalKey);
+
 app.post("/v1/chat", async (request, response) => {
-  const body = request.body as ChatRequest;
+  const parsed = chatRequestSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return response.status(400).json({
+      error: "INVALID_REQUEST",
+      details: parsed.error.flatten(),
+    });
+  }
+  const body = parsed.data satisfies ChatRequest;
   const acceptHeader = request.get("accept") ?? "";
   const wantsEventStream = acceptHeader
     .split(",")
@@ -202,11 +273,8 @@ app.post("/v1/chat", async (request, response) => {
         "AI service is not configured. Ask your admin to set ANTHROPIC_API_KEY.",
     };
     if (wantsEventStream) {
-      response.setHeader("Content-Type", "text/event-stream");
-      response.setHeader("Cache-Control", "no-cache");
-      response.setHeader("Connection", "keep-alive");
-      response.setHeader("X-Accel-Buffering", "no");
-      response.status(200).write(`data: ${JSON.stringify(error)}\n\n`);
+      setSseHeaders(response);
+      response.write(`data: ${JSON.stringify(error)}\n\n`);
       return response.end();
     }
     return response.status(503).json({
@@ -219,10 +287,7 @@ app.post("/v1/chat", async (request, response) => {
 
   if (wantsEventStream) {
     const anthropic = getAnthropicClient();
-    response.setHeader("Content-Type", "text/event-stream");
-    response.setHeader("Cache-Control", "no-cache");
-    response.setHeader("Connection", "keep-alive");
-    response.setHeader("X-Accel-Buffering", "no");
+    setSseHeaders(response);
     response.flushHeaders();
     const stream = anthropic.messages.stream({
       model: body.model ?? defaultModel,
@@ -230,16 +295,24 @@ app.post("/v1/chat", async (request, response) => {
       system: buildSystemPrompt(body),
       messages: body.messages,
     });
-    stream.on("text", (text) =>
-      response.write(
-        `data: ${JSON.stringify({ type: "chunk", content: text })}\n\n`,
-      ),
-    );
+    const abortUpstream = () => {
+      if (!response.writableEnded) stream.controller.abort();
+    };
+    response.once("close", abortUpstream);
+    request.once("aborted", abortUpstream);
+    stream.on("text", (text) => {
+      if (!response.destroyed)
+        response.write(
+          `data: ${JSON.stringify({ type: "token", content: text })}\n\n`,
+        );
+    });
     stream.on("finalMessage", (message) => {
-      response.write(
-        `data: ${JSON.stringify({ type: "done", tokensUsed: message.usage.input_tokens + message.usage.output_tokens, stopReason: message.stop_reason })}\n\n`,
-      );
-      response.end();
+      if (!response.destroyed) {
+        response.write(
+          `data: ${JSON.stringify({ type: "done", tokensUsed: message.usage.input_tokens + message.usage.output_tokens, stopReason: message.stop_reason })}\n\n`,
+        );
+        response.end();
+      }
     });
     stream.on("error", (error) => {
       const isUnauthorized =
@@ -249,16 +322,17 @@ app.post("/v1/chat", async (request, response) => {
         : error instanceof Error
           ? error.message
           : "AI provider request failed";
-      response.write(
-        `data: ${JSON.stringify({
-          type: "error",
-          ...(isUnauthorized ? { code: "AI_NOT_CONFIGURED" } : {}),
-          message: errorMessage,
-        })}\n\n`,
-      );
-      response.end();
+      if (!response.destroyed) {
+        response.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            ...(isUnauthorized ? { code: "AI_NOT_CONFIGURED" } : {}),
+            message: errorMessage,
+          })}\n\n`,
+        );
+        response.end();
+      }
     });
-    request.on("close", () => stream.controller.abort());
     return;
   }
 
@@ -281,17 +355,19 @@ app.post("/v1/chat", async (request, response) => {
 });
 
 app.post("/v1/complete", async (request, response) => {
-  const body = request.body as CompletionRequest;
+  const parsed = completionRequestSchema.safeParse(request.body);
+  if (!parsed.success)
+    return response.status(400).json({
+      error: "INVALID_REQUEST",
+      details: parsed.error.flatten(),
+    });
+  const body = parsed.data;
   if (!anthropicConfigured())
     return response.status(503).json({
       error: "AI_NOT_CONFIGURED",
       message: "AI service is not configured.",
     });
-  if (typeof body.prefix !== "string" || typeof body.code !== "string")
-    return response
-      .status(400)
-      .json({ error: "code and prefix must be strings" });
-  const key = `devpulse:complete:${crypto.createHash("md5").update(`${body.language}${body.prefix}`).digest("hex")}`;
+  const key = `devpulse:complete:${createHash("md5").update(`${body.language}${body.prefix}`).digest("hex")}`;
   try {
     const cached = await redis?.get(key);
     if (cached !== null && cached !== undefined)
@@ -345,6 +421,20 @@ app.get("/v1/models", (_request, response) =>
     ],
   }),
 );
-app.listen(port, () =>
-  console.log(`Devpulse AI service listening on :${port}`),
-);
+
+function setSseHeaders(response: express.Response): void {
+  response.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+}
+
+export { app };
+
+if (process.env.NODE_ENV !== "test") {
+  app.listen(port, () =>
+    console.log(`Devpulse AI service listening on :${port}`),
+  );
+}

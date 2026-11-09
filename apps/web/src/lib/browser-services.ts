@@ -5,15 +5,12 @@ import { AuthService } from "../services/auth.service";
 import { FileService } from "../services/file.service";
 import { MessageService } from "../services/message.service";
 import { RealtimeService } from "./realtime";
-import { AIService } from "../services/ai.service";
-import { getAccessToken } from "./auth-store";
 
 export class BrowserServices {
   readonly store = new BrowserStateStore();
   readonly storage = new BrowserFileStorage();
   readonly auth: AuthService;
   readonly files: FileService;
-  readonly ai: AIService;
 
   private static instancePromise: Promise<BrowserServices> | undefined;
   private initialized = false;
@@ -23,11 +20,6 @@ export class BrowserServices {
   private constructor() {
     this.auth = new AuthService((userId) => this.realtime?.setUserId(userId));
     this.files = new FileService(this.storage);
-    this.ai = new AIService(
-      process.env.NEXT_PUBLIC_AI_PROXY_URL ?? "",
-      getAccessToken,
-      () => this.auth.getCurrentUserId(),
-    );
   }
 
   static getInstance(): Promise<BrowserServices> {

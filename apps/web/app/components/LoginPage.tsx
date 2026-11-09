@@ -1,9 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useApp, type AuthenticatedUser } from "../context/AppContext";
+import { useApp } from "../context/AppContext";
 import {
-  authenticatedFetch,
   clearAccessToken,
   setAccessToken,
 } from "../../src/lib/auth-store";
@@ -203,18 +202,13 @@ export const LoginPage: React.FC = () => {
       });
       const result = await response.json() as {
         accessToken?: string;
-        user?: AuthenticatedUser;
         message?: string;
       };
-      if (!response.ok || !result.accessToken || !result.user?.id) {
+      if (!response.ok || !result.accessToken) {
         throw new Error(result.message ?? "Unable to verify magic link.");
       }
       setAccessToken(result.accessToken);
-      const profileResponse = await authenticatedFetch(`${apiUrl}/v1/me`);
-      if (!profileResponse.ok) throw new Error("Unable to load your account after verification.");
-      const serverUser = await profileResponse.json() as AuthenticatedUser;
-      if (!serverUser.id || !serverUser.email) throw new Error("The account response was invalid.");
-      await loginAndLoad(serverUser);
+      await loginAndLoad();
       await handleLoginSuccess();
     } catch (error) {
       setEmailLoginState({
@@ -241,46 +235,18 @@ export const LoginPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleDevBypass = async (
+  const handleOAuthLogin = async (
     provider: "github" | "google" | "gitlab" | "sso",
   ) => {
     setAuthError("");
-
-    if (process.env.NODE_ENV !== "development") {
-      const startUrl =
-        provider === "github"
-          ? `${apiUrl}/api/auth/github`
-          : provider === "google"
-            ? `${apiUrl}/api/auth/google`
-            : `${apiUrl}/api/auth/${provider}/start`;
-      window.location.assign(startUrl);
-      return;
-    }
-
-    setIsLoading(true);
     setLoginMethod(provider);
-    try {
-      const developmentPath = ["dev", "bypass"].join("-");
-      const response = await fetch(
-        `${apiUrl}/api/auth/${developmentPath}?email=${encodeURIComponent("demo@devpulse.local")}`,
-        { credentials: "include" },
-      );
-      const result = await response.json() as {
-        accessToken?: string;
-        user?: AuthenticatedUser;
-        message?: string;
-      };
-      if (!response.ok || !result.accessToken || !result.user?.id || !result.user.email) {
-        throw new Error(result.message ?? "Development sign in failed.");
-      }
-      setAccessToken(result.accessToken);
-      await loginAndLoad(result.user);
-      await handleLoginSuccess();
-    } catch (error) {
-      clearAccessToken();
-      setAuthError(error instanceof Error ? error.message : "Unable to sign in. Please try again.");
-      setIsLoading(false);
-    }
+    const startUrl =
+      provider === "github"
+        ? `${apiUrl}/api/auth/github`
+        : provider === "google"
+          ? `${apiUrl}/api/auth/google`
+          : `${apiUrl}/api/auth/${provider}/start`;
+    window.location.assign(startUrl);
   };
 
   return (
@@ -320,8 +286,8 @@ export const LoginPage: React.FC = () => {
             {/* Continue with GitHub (Primary Lavendar / Purple Button) */}
             <button
               type="button"
-              onClick={() => void handleDevBypass("github")}
-              disabled={isLoading || isDataLoading || (process.env.NODE_ENV !== "development" && !oauthProviders?.github)}
+              onClick={() => void handleOAuthLogin("github")}
+              disabled={isLoading || isDataLoading || !oauthProviders?.github}
               title={oauthProviders?.github ? undefined : oauthProviders ? "GitHub login is not available" : oauthProviderError ? "Unable to check GitHub login availability" : "Checking GitHub login availability"}
               className="w-full py-3.5 px-4 rounded-xl bg-[var(--accent-readable)] hover:bg-[var(--login-accent-hover)] active:scale-[0.99] text-[var(--accent-fg)] font-semibold text-sm flex items-center justify-center gap-3 transition-all duration-150 shadow-[var(--shadow-card)] disabled:cursor-not-allowed disabled:opacity-45"
             >
@@ -337,8 +303,8 @@ export const LoginPage: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => void handleDevBypass("google")}
-              disabled={isLoading || isDataLoading || (process.env.NODE_ENV !== "development" && !oauthProviders?.google)}
+              onClick={() => void handleOAuthLogin("google")}
+              disabled={isLoading || isDataLoading || !oauthProviders?.google}
               title={oauthProviders?.google ? undefined : oauthProviders ? "Google login is not available" : oauthProviderError ? "Unable to check Google login availability" : "Checking Google login availability"}
               className="w-full py-3 px-4 rounded-xl bg-[var(--login-input-bg)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--body-text)] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45"
             >
@@ -348,8 +314,9 @@ export const LoginPage: React.FC = () => {
 
             {/* Continue with GitLab */}
             <button
-              onClick={() => void handleDevBypass("gitlab")}
-              disabled={isLoading || isDataLoading}
+              onClick={() => void handleOAuthLogin("gitlab")}
+              disabled
+              title="GitLab sign-in is not configured"
               className="w-full py-3 px-4 rounded-xl bg-[var(--login-input-bg)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--body-text)] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
               <svg
@@ -368,8 +335,9 @@ export const LoginPage: React.FC = () => {
 
             {/* Single Sign-On (SSO / SAML) */}
             <button
-              onClick={() => void handleDevBypass("sso")}
-              disabled={isLoading || isDataLoading}
+              onClick={() => void handleOAuthLogin("sso")}
+              disabled
+              title="Single sign-on is not configured"
               className="w-full py-3 px-4 rounded-xl bg-[var(--login-input-bg)] hover:bg-[var(--surface-control-hover)] border border-[var(--login-input-border)] text-[var(--body-text)] font-medium text-sm flex items-center justify-center gap-3 transition-colors duration-150"
             >
               <KeyRound className="w-4 h-4 text-[var(--login-muted)]" />
@@ -565,21 +533,21 @@ export const LoginPage: React.FC = () => {
             <span>© Devpulse Cloud Inc.</span>
             <div className="flex gap-4">
               <button
-                onClick={() => void handleDevBypass("github")}
+                onClick={() => void handleOAuthLogin("github")}
                 className="hover:text-[var(--text-secondary)] transition-colors"
               >
                 Privacy
               </button>
               <span>/</span>
               <button
-                onClick={() => void handleDevBypass("github")}
+                onClick={() => void handleOAuthLogin("github")}
                 className="hover:text-[var(--text-secondary)] transition-colors"
               >
                 Terms
               </button>
               <span>/</span>
               <button
-                onClick={() => void handleDevBypass("github")}
+                onClick={() => void handleOAuthLogin("github")}
                 className="hover:text-[var(--text-secondary)] transition-colors"
               >
                 System

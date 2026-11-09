@@ -119,8 +119,11 @@ export const DeploymentsPage: React.FC = () => {
             </h1>
             <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#0DF5C4]/15 border border-[#0DF5C4]/30 text-[#0DF5C4] text-[11px] font-mono">
               <span className="w-1.5 h-1.5 rounded-full bg-[#0DF5C4] animate-pulse" />
-              Live Traffic Routed
+              Preview metrics
             </div>
+            <span className="inline-flex items-center rounded border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-300">
+              Simulated
+            </span>
           </div>
 
           {/* Action buttons */}

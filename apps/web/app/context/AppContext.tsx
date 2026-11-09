@@ -5,6 +5,7 @@ import { asc, eq } from "drizzle-orm";
 import {
   authenticatedFetch,
   clearAccessToken,
+  getAccessToken,
   logoutSession,
   onSessionExpired,
   setAccessToken,
@@ -12,7 +13,7 @@ import {
 import { getDB } from "../../src/lib/db";
 import * as schema from "../../src/lib/db/schema";
 import { getServices, type BrowserServices } from "../../src/lib/services";
-import { disconnectSocket } from "../../src/lib/socket-client";
+import { connectSocket, disconnectSocket } from "../../src/lib/socket-client";
 import { saveEditorPreview } from "../services/editorMocks";
 import { THEME_PRESETS, type ThemeConfig } from "./themeLibrary";
 import { ToastContainer, type ToastMessage } from "../components/ToastContainer";
@@ -50,6 +51,7 @@ export interface AuthenticatedUser {
   name?: string | null;
   avatarUrl?: string | null;
   role?: string;
+  workspaces?: Array<{ id: string }>;
 }
 export interface Repository {
   id: string;
@@ -142,7 +144,7 @@ interface AppContextType {
   setPage: (page: PageType) => void;
   user: UserProfile;
   login: (serverUser: AuthenticatedUser) => void;
-  loginAndLoad: (serverUser: AuthenticatedUser) => Promise<void>;
+  loginAndLoad: () => Promise<void>;
   servicesLoading: boolean;
   servicesError: string | null;
   retryServices: () => void;
@@ -668,6 +670,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces",
     isAuthenticated: false,
   });
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
 
   const [repositories, setRepositories] =
     useState<Repository[]>(EMPTY_REPOSITORIES);
@@ -735,6 +738,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     let active = true;
+    if (!IS_LOCAL_DATA_MODE) {
+      setServices(null);
+      setServicesLoading(false);
+      setServicesError(null);
+      return () => {
+        active = false;
+      };
+    }
     setServicesLoading(true);
     setServicesError(null);
 
@@ -855,7 +866,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             ? data.avatarUrl
             : null,
           role: "role" in data && typeof data.role === "string" ? data.role : undefined,
+          workspaces: "workspaces" in data && Array.isArray(data.workspaces)
+            ? data.workspaces.filter(
+                (workspace): workspace is { id: string } =>
+                  typeof workspace === "object"
+                  && workspace !== null
+                  && "id" in workspace
+                  && typeof workspace.id === "string",
+              )
+            : [],
         };
+        setSelectedWorkspaceId(serverUser.workspaces?.[0]?.id ?? "");
         const profile = toUserProfile(serverUser);
         setUser(profile);
         initializedUserIdRef.current = serverUser.id;
@@ -893,6 +914,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   useEffect(() => onSessionExpired(() => {
+    setSelectedWorkspaceId("");
     sessionStorage.removeItem("auth:current-user-id");
     sessionStorage.removeItem("dp_user_id");
     localStorage.removeItem("devpulse_user_session");
@@ -953,7 +975,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const logout = async () => {
     const userId = getCurrentUserId();
-    const workspaceId = workspaces[0]?.id;
+    const workspaceId = selectedWorkspaceId;
     if (workspaceId) disconnectSocket(workspaceId);
     if (services && userId) {
       services.realtime.emit("presence:update", {
@@ -963,6 +985,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     }
     services?.realtime.setUserId(null);
+    setSelectedWorkspaceId("");
     clearAccessToken();
     setUser({
       name: "Alex",
@@ -985,6 +1008,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const loadRepositories = async () => {
+    if (!IS_LOCAL_DATA_MODE) {
+      const response = await apiJson<{ repositories: Array<{
+        id: string;
+        name: string;
+        description: string;
+        language: string;
+        stars: number;
+        forks: number;
+        isStarred: boolean;
+        defaultBranch: string;
+        deployStatus: string;
+        devboxReady: boolean;
+        updatedAt: string;
+      }> }>("/v1/repositories");
+      setRepositories(response.repositories.map((project) => ({
+        id: project.id,
+        name: project.name,
+        description: project.description,
+        language: project.language,
+        languageColor: getLanguageColor(project.language),
+        stars: project.stars,
+        forks: project.forks,
+        branch: project.defaultBranch,
+        lastCommit: "Initial commit",
+        updatedAt: project.updatedAt,
+        isStarred: project.isStarred,
+        deployStatus: project.deployStatus as Repository["deployStatus"],
+        devboxReady: project.devboxReady,
+      })));
+      return;
+    }
     if (!services) return;
     const userId = getCurrentUserId();
     if (!userId) return;
@@ -1130,25 +1184,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       addToast({ variant: "success", title: "Repository created", message: "Repository was saved." });
       return;
     } catch (apiError) {
-      console.warn("[Repos] API unavailable, saving locally.", apiError);
+      addToast({
+        variant: "error",
+        title: "Repository not saved",
+        message: apiError instanceof Error ? apiError.message : "Could not save repository.",
+        duration: 0,
+        action: { label: "Retry", onClick: () => void addRepository(repoData) },
+      });
     }
-    const newRepo: Repository = {
-      ...repoData,
-      id: crypto.randomUUID(),
-      stars: 0,
-      forks: 0,
-      updatedAt: "Just now",
-      isStarred: false,
-      deployStatus: "none",
-      devboxReady: false,
-    };
-    setRepositories((previous) => [newRepo, ...previous]);
-    addToast({
-      variant: "warning",
-      title: "Saved locally",
-      message: "Repository saved to this browser. Connect the API to persist.",
-      duration: 6000,
-    });
   };
 
   const deleteRepository = async (id: string) => {
@@ -1174,7 +1217,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         variant: "error",
         title: "Repository not deleted",
         message: error instanceof Error ? error.message : "Could not delete repository.",
-        duration: 6000,
+        duration: 0,
+        action: { label: "Retry", onClick: () => void deleteRepository(id) },
       });
       return;
     }
@@ -1212,8 +1256,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         method: "PATCH",
         body: JSON.stringify({ isStarred: !current?.isStarred }),
       });
-    } catch {
-      /* local fallback */
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Repository not updated",
+        message: error instanceof Error ? error.message : "Could not update repository.",
+        duration: 0,
+        action: { label: "Retry", onClick: () => void toggleStarRepo(id) },
+      });
+      return;
     }
     setRepositories((prev) =>
       prev.map((r) =>
@@ -1250,32 +1301,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       });
       setWorkspaces((previous) => [response, ...previous]);
       return;
-    } catch (apiError) {
-      console.warn("[Workspace] API unavailable, saving locally.", apiError);
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Devbox not started",
+        message: error instanceof Error ? error.message : "Could not start devbox.",
+        duration: 0,
+        action: {
+          label: "Retry",
+          onClick: () => void spinUpDevbox(name, template, repoUrl, specs),
+        },
+      });
     }
-    const newWs: WorkspaceDevbox = {
-      id: `ws-${Date.now()}`,
-      name: name || `devbox-${Math.floor(Math.random() * 900) + 100}`,
-      repo: repoUrl
-        ? repoUrl.split("/").pop()?.replace(".git", "") || "custom-repo"
-        : "devpulse-core",
-      branch: "main",
-      template,
-      status: "Running",
-      uptime: "1m",
-      vCpu: specs?.vCpu || 8,
-      ram: specs?.ram || "32 GB ECC",
-      storage: specs?.storage || "100 GB NVMe",
-      port: 3000 + Math.floor(Math.random() * 5000),
-      url: `https://ws-boot-${Math.floor(Math.random() * 9000) + 1000}.devpulse.dev`,
-    };
-    setWorkspaces((previous) => [newWs, ...previous]);
-    addToast({
-      variant: "warning",
-      title: "Workspace saved locally",
-      message: "Workspace is available in this browser only. Connect the API to persist it.",
-      duration: 6000,
-    });
   };
 
   const toggleWorkspaceStatus = async (id: string) => {
@@ -1286,8 +1323,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
-    } catch {
-      /* local fallback */
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Devbox not updated",
+        message: error instanceof Error ? error.message : "Could not update devbox.",
+        duration: 0,
+        action: { label: "Retry", onClick: () => void toggleWorkspaceStatus(id) },
+      });
+      return;
     }
     setWorkspaces((prev) =>
       prev.map((ws) =>
@@ -1309,7 +1353,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         variant: "error",
         title: "Workspace not deleted",
         message: error instanceof Error ? error.message : "Could not delete workspace.",
-        duration: 6000,
+        duration: 0,
+        action: { label: "Retry", onClick: () => void deleteWorkspace(id) },
       });
       return;
     }
@@ -1371,8 +1416,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     if (id) {
       try {
         await apiJson(`/v1/deployments/${id}/rerun`, { method: "POST" });
-      } catch {
-        /* local fallback */
+      } catch (error) {
+        addToast({
+          variant: "error",
+          title: "Pipeline not rerun",
+          message: error instanceof Error ? error.message : "Could not rerun pipeline.",
+          duration: 0,
+          action: { label: "Retry", onClick: () => void rerunPipeline(id) },
+        });
+        return;
       }
     }
     addLog(
@@ -1398,24 +1450,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setEnvVars((previous) => [variable, ...previous]);
       addToast({ variant: "success", title: "Variable added", message: "Environment variable was saved." });
       return;
-    } catch (apiError) {
-      console.warn("[Env] API unavailable, saving locally.", apiError);
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "Variable not saved",
+        message: error instanceof Error ? error.message : "Could not save environment variable.",
+        duration: 0,
+        action: { label: "Retry", onClick: () => void addEnvVar(key, value, scope) },
+      });
     }
-    const newVar: EnvVariable = {
-      id: `env-${Date.now()}`,
-      key: key.toUpperCase().trim(),
-      value: value.trim(),
-      scope: scope || "Production, Staging",
-      updatedAt: "Just now",
-      isRevealed: false,
-    };
-    setEnvVars((previous) => [newVar, ...previous]);
-    addToast({
-      variant: "warning",
-      title: "Variable saved locally",
-      message: "Variable is saved in this browser only. Connect the API to persist it.",
-      duration: 6000,
-    });
   };
 
   const deleteEnvVar = async (id: string) => {
@@ -1426,7 +1469,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         variant: "error",
         title: "Variable not deleted",
         message: error instanceof Error ? error.message : "Could not delete environment variable.",
-        duration: 6000,
+        duration: 0,
+        action: { label: "Retry", onClick: () => void deleteEnvVar(id) },
       });
       return;
     }
@@ -1482,11 +1526,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   };
 
   const loadInitialAppData = async (): Promise<AppDataErrors> => {
-    if (!services) throw new Error("Browser services are still initializing.");
+    if (IS_LOCAL_DATA_MODE && !services) {
+      throw new Error("Browser services are still initializing.");
+    }
     const userId = getCurrentUserId();
     if (!userId) throw new Error("Cannot load application data without a user.");
 
     const loadWorkspaces = async () => {
+      if (IS_LOCAL_DATA_MODE) {
+        setWorkspaces(INITIAL_WORKSPACES);
+        return;
+      }
       if (user.email === "demo@devpulse.local") {
         setWorkspaces(INITIAL_WORKSPACES);
         return;
@@ -1495,6 +1545,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setWorkspaces(response.devboxes);
     };
     const loadDeployments = async () => {
+      if (IS_LOCAL_DATA_MODE) {
+        setDeployments(INITIAL_DEPLOYMENTS);
+        return;
+      }
       if (user.email === "demo@devpulse.local") {
         setDeployments(INITIAL_DEPLOYMENTS);
         return;
@@ -1503,6 +1557,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setDeployments(response.deployments);
     };
     const loadEnvironmentVariables = async () => {
+      if (IS_LOCAL_DATA_MODE) {
+        setEnvVars(INITIAL_ENV_VARS);
+        return;
+      }
       if (user.email === "demo@devpulse.local") {
         setEnvVars(INITIAL_ENV_VARS);
         return;
@@ -1511,6 +1569,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setEnvVars(response.variables);
     };
     const loadChannels = async () => {
+      if (!IS_LOCAL_DATA_MODE) return;
       const db = await getDB();
       const memberships = await db
         .select()
@@ -1558,11 +1617,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       ? "repositories"
       : "theme";
 
-  const loginAndLoad = async (serverUser: AuthenticatedUser) => {
+  const loginAndLoad = async () => {
     setIsDataLoading(true);
     setDataErrors(EMPTY_DATA_ERRORS);
     try {
+      const profileResponse = await authenticatedFetch(`${API_BASE}/v1/me`);
+      if (!profileResponse.ok) {
+        throw new Error(`Unable to load your account (${profileResponse.status}).`);
+      }
+      const profile: unknown = await profileResponse.json();
+      if (
+        typeof profile !== "object"
+        || profile === null
+        || !("id" in profile)
+        || typeof profile.id !== "string"
+        || !("email" in profile)
+        || typeof profile.email !== "string"
+      ) {
+        throw new Error("The account response was invalid.");
+      }
+      const serverUser: AuthenticatedUser = {
+        id: profile.id,
+        email: profile.email,
+        name: "name" in profile && typeof profile.name === "string" ? profile.name : null,
+        avatarUrl: "avatarUrl" in profile && typeof profile.avatarUrl === "string" ? profile.avatarUrl : null,
+        workspaces: "workspaces" in profile && Array.isArray(profile.workspaces)
+          ? profile.workspaces.filter(
+              (workspace): workspace is { id: string } =>
+                typeof workspace === "object"
+                && workspace !== null
+                && "id" in workspace
+                && typeof workspace.id === "string",
+            )
+          : [],
+      };
       login(serverUser);
+      setSelectedWorkspaceId(serverUser.workspaces?.[0]?.id ?? "");
       initializedUserIdRef.current = serverUser.id;
       sessionStorage.setItem("auth:current-user-id", serverUser.id);
       sessionStorage.setItem("dp_user_id", serverUser.id);
@@ -1586,6 +1676,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setIsDataLoading(false);
     }
   };
+
+  useEffect(() => {
+    const userId = getCurrentUserId();
+    const token = getAccessToken();
+    if (!user.isAuthenticated || !userId || !token || !selectedWorkspaceId) return;
+    connectSocket(selectedWorkspaceId, userId);
+  }, [user.isAuthenticated, selectedWorkspaceId]);
 
   const retryDataLoad = async () => {
     setIsDataLoading(true);
@@ -1612,16 +1709,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     const id = crypto.randomUUID();
     const duration = toast.duration ?? 4000;
     setToasts((previous) => [...previous, { ...toast, id, duration }]);
-    window.setTimeout(() => {
-      setToasts((previous) => previous.filter((current) => current.id !== id));
-    }, duration);
+    if (duration > 0) {
+      window.setTimeout(() => {
+        setToasts((previous) => previous.filter((current) => current.id !== id));
+      }, duration);
+    }
   };
 
   const dismissToast = (id: string) => {
     setToasts((previous) => previous.filter((toast) => toast.id !== id));
   };
   useEffect(() => {
-    if (!services || !isClientStorageHydrated || !user.isAuthenticated) return;
+    if ((IS_LOCAL_DATA_MODE && !services) || !isClientStorageHydrated || !user.isAuthenticated) return;
     const userId = getCurrentUserId();
     if (!userId || initializedUserIdRef.current === userId) return;
 
@@ -1807,7 +1906,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       const session = await apiJson<{
         openFileIds: string[];
         activeFileId: string | null;
-      }>(`/v1/editor/session/${project.id}`).catch(() => null);
+      }>(`/v1/editor/session/${project.id}`).catch((error: unknown) => {
+        addToast({
+          variant: "error",
+          title: "Editor session could not be restored",
+          message: error instanceof Error ? error.message : "The editor session could not be loaded.",
+          duration: 0,
+          action: { label: "Retry", onClick: () => void loadEditorProject(project.id) },
+        });
+        return null;
+      });
       const restoredOpenFiles = session?.openFileIds
         .map((id) => nextFiles.find((file) => file.id === id))
         .filter((file): file is EditorFile => Boolean(file));
@@ -1994,6 +2102,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     const normalizedPath = path || name;
     const fileLanguage = name.endsWith(".py") ? "python" : name.endsWith(".json") ? "json" : "typescript";
 
+    if (!IS_LOCAL_DATA_MODE) {
+      if (!editorProjectId) throw new Error("Open a project before creating a file.");
+      try {
+        const created = await apiJson<{
+          id: string;
+          path: string;
+          content: string;
+          version: number;
+          sizeBytes?: number;
+        }>(`/v1/projects/${editorProjectId}/files`, {
+          method: "POST",
+          body: JSON.stringify({
+            path: normalizedPath,
+            content: initialContent ?? "",
+            language: fileLanguage,
+          }),
+        });
+        const newFile: EditorFile = {
+          ...editorFileFromApi(created),
+          isLargeFile: isLargeEditorContent(created.content),
+          modified: false,
+          isDirty: false,
+        };
+        setTreeFiles((previous) => [...previous, newFile]);
+        setFileContents((previous) => ({ ...previous, [newFile.id]: created.content }));
+        openFileInEditor(newFile);
+      } catch (error) {
+        addToast({
+          variant: "error",
+          title: "File not created",
+          message: error instanceof Error ? error.message : "Could not create file.",
+          duration: 0,
+          action: {
+            label: "Retry",
+            onClick: () => void createNewFile(name, normalizedPath, initialContent),
+          },
+        });
+      }
+      return;
+    }
+
     if (services && editorProjectId) {
       try {
         const created = await services.files.createFile({
@@ -2039,15 +2188,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const deleteFile = async (fileId: string) => {
     const currentFile = [...openFiles, ...treeFiles].find((file) => file.id === fileId);
-    if (services && currentFile) {
-      try {
+    try {
+      if (IS_LOCAL_DATA_MODE && services && currentFile) {
         const targetId = currentFile.apiFileId || fileId;
         await services.files.deleteFile(targetId);
-      } catch {
-        // Keep the UI working even if a file was never persisted.
+      } else if (currentFile?.origin !== "new") {
+        await apiJson<void>(`/v1/files/${currentFile?.apiFileId || fileId}`, {
+          method: "DELETE",
+        });
       }
-    } else {
-      await apiJson<void>(`/v1/files/${fileId}`, { method: "DELETE" }).catch(() => undefined);
+    } catch (error) {
+      addToast({
+        variant: "error",
+        title: "File not deleted",
+        message: error instanceof Error ? error.message : "Could not delete file.",
+        duration: 0,
+        action: { label: "Retry", onClick: () => void deleteFile(fileId) },
+      });
+      return;
     }
     setTreeFiles((prev) => prev.filter((f) => f.id !== fileId));
     closeFileFromEditor(fileId);

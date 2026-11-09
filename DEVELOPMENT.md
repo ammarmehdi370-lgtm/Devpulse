@@ -32,26 +32,30 @@ needed by the browser database.
 For browser-only development without the server-backed services, run
 `pnpm --filter @devpulse/web dev` after installing dependencies.
 
-### AI proxy
+### AI service
 
-The AI proxy is a separately deployed Cloudflare Worker because static export
-cannot serve a Next.js Route Handler. For normal browser development, set
-`NEXT_PUBLIC_AI_PROXY_URL` in `apps/web/.env.local` to the deployed Worker URL.
-This keeps the web app on its one permitted local port.
+The web AI Studio and editor both stream through the authenticated API endpoint
+`POST /v1/ai/chat`; the API applies JWT and quota checks before forwarding
+requests to the internal AI service. Configure the same strong `AI_INTERNAL_KEY`
+for the API and AI service, and set `ANTHROPIC_API_KEY` on the AI service to
+enable responses. Without the Anthropic key the service remains healthy and
+returns a clear `AI_NOT_CONFIGURED` stream event.
 
-If you are actively developing the Worker, you can run Wrangler locally (it
-uses an additional local port, normally `8787`). Create its local secrets file:
+The Cloudflare AI Worker under `apps/ai-worker` is an optional standalone
+deployment for consumers outside the web app. It is not part of the production
+web AI path and does not share the API's authoritative quota accounting.
+
+To develop that optional Worker, run Wrangler locally (normally on port 8787)
+and create its local secrets file:
 
 ```powershell
 Copy-Item apps/ai-worker/.dev.vars.example apps/ai-worker/.dev.vars
 ```
 
 On macOS/Linux, use `cp apps/ai-worker/.dev.vars.example apps/ai-worker/.dev.vars`.
-Then run `pnpm --filter @devpulse/ai-worker dev`. Put the Anthropic key and the
-API's RS256 public JWT key in `apps/ai-worker/.dev.vars`. The provider key
-belongs only in the Worker environment, never in a `NEXT_PUBLIC_*` variable or
-the browser bundle. Browser authentication must provide a valid signed token;
-the local demo identity is not accepted as a production credential.
+Then run `pnpm --filter @devpulse/ai-worker dev`. The Worker needs its own
+Anthropic key and API RS256 public JWT key in `.dev.vars`; neither belongs in a
+`NEXT_PUBLIC_*` variable or the browser bundle.
 
 ### Static hosting and browser resource compatibility
 
@@ -129,10 +133,10 @@ Chrome verification checklist:
 - [ ] Development demo login works with `demo@devpulse.local`.
 - [ ] The repositories page shows four seeded repositories.
 
-On Vercel, set `NEXT_PUBLIC_AI_PROXY_URL` to the deployed Worker URL for the
-web build. Set `ANTHROPIC_API_KEY` and `JWT_PUBLIC_KEY` as secrets on the
-Cloudflare Worker, not as Vercel web-app variables. The Worker and its
-authoritative usage enforcement are separate from static hosting.
+For a static web deployment, set `NEXT_PUBLIC_API_URL` to the deployed API
+origin. Set `AI_INTERNAL_KEY` on the API and AI service, and set
+`ANTHROPIC_API_KEY` only on the AI service. The optional Worker is independently
+configured and is not used by AI Studio or the editor.
 
 ### Server-backed service development
 

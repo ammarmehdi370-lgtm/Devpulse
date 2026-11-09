@@ -144,6 +144,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-devpulse}:${POSTGRES_PASSWORD:-devpulse}@postgres:5432/${POSTGRES_DB:-devpulse}?schema=public
       DIRECT_DATABASE_URL: postgresql://${POSTGRES_USER:-devpulse}:${POSTGRES_PASSWORD:-devpulse}@postgres:5432/${POSTGRES_DB:-devpulse}?schema=public
       REDIS_URL: redis://redis:6379
+      AI_URL: http://ai:4002
+      AI_INTERNAL_KEY: ${AI_INTERNAL_KEY:-devpulse-local-ai-internal-key}
       MINIO_ENDPOINT: http://minio:9000
       MINIO_BUCKET: ${MINIO_BUCKET:-devpulse-files}
       AWS_S3_ENDPOINT: http://minio:9000
@@ -227,6 +229,7 @@ services:
     environment:
       NODE_ENV: development
       AI_PORT: 4002
+      AI_INTERNAL_KEY: ${AI_INTERNAL_KEY:-devpulse-local-ai-internal-key}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
     ports: ["4002:4002"]

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useApp } from "../context/AppContext";
-import { authenticatedFetch } from "../lib/apiClient";
+import { AiStreamError, useAiStream } from "../../src/hooks/useAiStream";
 import {
   Sparkles,
   Send,
@@ -24,8 +24,23 @@ import {
   CornerDownLeft,
 } from "lucide-react";
 
+type StudioMessage = {
+  id: number;
+  sender: string;
+  time: string;
+  isUser: boolean;
+  text: string;
+  model?: string;
+  hasCode?: boolean;
+  codeFilename?: string;
+  codeSnippet?: string;
+  generationStats?: string;
+  isNotConfigured?: boolean;
+};
+
 export const FullScreenAiPage: React.FC = () => {
   const { theme, user, setPage, applyDiffToActiveFile } = useApp();
+  const { streamChat } = useAiStream();
 
   const [selectedModel, setSelectedModel] = useState("Claude Sonnet 4.6");
   const [temperature, setTemperature] = useState(0.2);
@@ -37,39 +52,7 @@ export const FullScreenAiPage: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
 
-  const [chatMessages, setChatMessages] = useState([
-    {
-      id: 1,
-      sender: "Alex R.",
-      time: "11:24 AM",
-      isUser: true,
-      text: "Fix the authentication bug in my login.js file",
-    },
-    {
-      id: 2,
-      sender: "Devpulse Engine",
-      model: "Claude Sonnet 4.6",
-      time: "11:24 AM",
-      isUser: false,
-      text: "Identified the issue in login.js . The token verification promise was not properly awaited before setting the session cookie, resulting in an unhandled race condition where requests were rejected with 401 Unauthorized .",
-      hasCode: true,
-      codeFilename: "JavaScript - login.js",
-      codeSnippet: `export async function handleLogin(req, res) {
-  const { email, password } = req.body;
-  const user = await authenticateUser(email, password);
-  if (!user) throw new AuthError('Invalid credentials');
-
-  // Await signed JWT token generation before session dispatch
-  const sessionToken = await createSessionToken(user.id, { expiresIn: '7d' });
-  res.setHeader('Set-Cookie', serializeCookie('cp_session', sessionToken, {
-    httpOnly: true,
-    secure: true
-  }));
-  return res.status(200).json({ success: true, user: sanitizeUser(user) });
-}`,
-      generationStats: "Generated in 1.4s Ã‚Â· 320 tokens",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<StudioMessage[]>([]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +65,7 @@ export const FullScreenAiPage: React.FC = () => {
       isUser: true,
       text: inputQuery.trim(),
     };
+    const assistantId = userMsg.id + 1;
 
     setChatMessages((previous) => [...previous, userMsg]);
     setInputQuery("");
@@ -93,95 +77,60 @@ export const FullScreenAiPage: React.FC = () => {
         setPage("login");
         return;
       }
-      const messages: Array<{
-        role: string;
-        text?: string;
-        content?: string;
-      }> = [
-        {
-          role: "user",
-          text: `Project: auth-service\nActive file: src/auth/login.js\nBranch: fix/jwt-expiry\nModel preference: ${selectedModel}\nTemperature: ${temperature}\nTop-p: ${topP}\nRequest: ${userMsg.text}`,
-        },
-      ];
-      const response = await authenticatedFetch("/api/ai/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-        },
-        body: JSON.stringify({
-          messages: messages.map((message) => ({
-            role: message.role,
-            content: message.text ?? message.content,
-          })),
-          model: selectedModel,
-          context: {
-            temperature,
-            topP,
-          },
-        }),
-      });
-      if (response.status === 401) {
-        setError("Session expired. Please sign in again.");
-        setPage("login");
-        return;
-      }
-      if (!response.ok) {
-        const result = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(result.error || "AI request failed");
-      }
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("AI service returned no response stream");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let responseText = "";
-      while (true) {
-        const chunk = await reader.read();
-        buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-        for (const event of events) {
-          const line = event.split("\n").find((value) => value.startsWith("data: "));
-          if (!line) continue;
-          const payload = JSON.parse(line.slice(6)) as { type?: string; content?: string; message?: string };
-          if (payload.type === "chunk") responseText += payload.content ?? "";
-          if (payload.type === "error") throw new Error(payload.message || "AI request failed");
-        }
-        if (chunk.done) break;
-      }
-      if (!responseText) responseText = "The AI returned no text.";
-      const aiMsg = {
-        id: Date.now() + 1,
+      const assistantMessage: StudioMessage = {
+        id: assistantId,
         sender: "Devpulse Engine",
         model: selectedModel,
         time: "Just now",
         isUser: false,
-        text: responseText,
+        text: "",
         hasCode: false,
         codeFilename: "AI response",
-        codeSnippet: responseText,
         generationStats: "Generated by AI service",
       };
-      setChatMessages((previous) => [...previous, aiMsg]);
-    } catch (error) {
-      setChatMessages((previous) => [
-        ...previous,
-        {
-          id: Date.now() + 1,
-          sender: "Devpulse Engine",
-          model: selectedModel,
-          time: "Just now",
-          isUser: false,
-          text:
-            error instanceof Error
-              ? `AI error: ${error.message}`
-              : "AI request failed",
-          hasCode: false,
-          codeFilename: "AI error",
-          codeSnippet: "",
-          generationStats: "Request failed",
+      setChatMessages((previous) => [...previous, assistantMessage]);
+      const messages = [...chatMessages, userMsg]
+        .filter((message) => message.text.trim().length > 0)
+        .map((message) => ({
+          role: message.isUser ? "user" as const : "assistant" as const,
+          content: message.text,
+        }));
+      const { text } = await streamChat({
+        messages,
+        model: "claude-sonnet-4-6",
+      }, {
+        onToken: (token) => {
+          setChatMessages((previous) => previous.map((message) =>
+            message.id === assistantId
+              ? { ...message, text: message.text + token }
+              : message,
+          ));
         },
-      ]);
+      });
+      setChatMessages((previous) => previous.map((message) =>
+        message.id === assistantId
+          ? {
+              ...message,
+              text,
+              codeSnippet: text,
+              generationStats: "Streamed from Devpulse AI",
+            }
+          : message,
+      ));
+    } catch (error) {
+      if (error instanceof AiStreamError && error.code === "UNAUTHORIZED") {
+        setError("Session expired. Please sign in again.");
+        setPage("login");
+      } else if (error instanceof AiStreamError && error.code === "AI_NOT_CONFIGURED") {
+        setError("AI is not configured. Ask your administrator to configure ANTHROPIC_API_KEY.");
+        setChatMessages((previous) => previous.map((message) =>
+          message.id === assistantId
+            ? { ...message, isNotConfigured: true }
+            : message,
+        ));
+      } else {
+        setError(error instanceof Error ? error.message : "AI request failed");
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -229,11 +178,7 @@ export const FullScreenAiPage: React.FC = () => {
 
             {isModelDropdownOpen && (
               <div className="absolute left-0 mt-1.5 w-60 bg-[#12121c] border border-[#26263a] rounded-xl shadow-2xl py-1 z-50 text-xs font-mono">
-                {[
-                  "Claude Sonnet 4.6",
-                  "GPT-4o (Omni Fast)",
-                  "CodeLlama 70B (Local MicroVM)",
-                ].map((m) => (
+                {["Claude Sonnet 4.6"].map((m) => (
                   <button
                     key={m}
                     onClick={() => {
@@ -337,8 +282,15 @@ export const FullScreenAiPage: React.FC = () => {
             ) : (
               /* AI Response Container */
               <div className="bg-[#101018] border border-[#222232] rounded-2xl p-6 shadow-2xl space-y-4">
-                <p className="text-xs sm:text-sm text-[#d0d0e4] leading-relaxed">
-                  {msg.text}
+                <p
+                  role={msg.isNotConfigured ? "status" : undefined}
+                  className={msg.isNotConfigured
+                    ? "rounded border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100"
+                    : "text-xs sm:text-sm text-[#d0d0e4] leading-relaxed"}
+                >
+                  {msg.isNotConfigured
+                    ? "AI not configured. Ask your administrator to configure ANTHROPIC_API_KEY."
+                    : msg.text}
                 </p>
 
                 {/* Embedded Syntax Highlighted Code Box */}

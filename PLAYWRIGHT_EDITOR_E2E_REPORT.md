@@ -121,7 +121,7 @@ The failed Playwright attempt did **not** evaluate the tests or the application:
 
 ### Application/API differences from the requested setup
 
-1. There is no `GET /api/auth/dev-bypass` endpoint. The fixtures use the API's development magic-link request and verification endpoints instead. This creates an API session cookie, unlike the client-only development login button.
+1. The fixtures use the API's development magic-link request and verification endpoints. Verification returns a signed access token and sets the HTTP-only refresh cookie; authentication is not minted in the browser.
 2. The app is served at `/`; it does not expose a dedicated `/editor` route or read a `project` query parameter. Tests navigate through the theme screen and select their project by routing the project-list response.
 3. `POST /v1/projects` accepts a project name and optional workspace ID; it does not accept the requested `template: "blank"` field. The fixture creates the project in the default workspace and seeds files separately.
 4. AI code application uses `POST /v1/ai/apply`, which persists the AI application/revision. It does not issue the requested `PATCH /v1/files/:fileId` call for that workflow. The test observes the endpoint the current editor actually calls.
@@ -139,7 +139,7 @@ These are product behavior gaps, not Playwright setup failures. They are deliber
 2. Install the Playwright Chromium binary.
 3. Run `pnpm test:e2e:editor` and triage failures after browser launch. Fix fixture or selector issues separately from application behavior failures.
 4. Implement the usage 401/re-authentication state and confirm the intended large-file AI restriction; rerun the relevant specs.
-5. Confirm whether the product should add `/editor?project=...` routing and a named dev-bypass endpoint, or retain the currently tested root-navigation and magic-link contracts.
+5. Keep the existing root-navigation and magic-link authentication contracts; add project deep-linking separately if needed.
 6. Once the Docker-backed suite passes locally, run the same command in CI with the configured retry and report settings.
 
 ## Completion Assessment

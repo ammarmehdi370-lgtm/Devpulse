@@ -67,11 +67,22 @@ const filePathSchema = z
 const fileLanguageSchema = z.string().trim().min(1).max(32).optional();
 const fileContentSchema = z.string().max(2_000_000);
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+  }),
+);
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL ?? process.env.APP_URL ?? "http://localhost:3000",
-    credentials: true
+    origin: (requestOrigin, callback) =>
+      callback(
+        null,
+        requestOrigin && requestOrigin === process.env.APP_URL
+          ? requestOrigin
+          : false,
+      ),
+    credentials: true,
   })
 );
 app.use(express.json({ limit: "5mb" }));
@@ -217,29 +228,6 @@ app.get("/v1/auth/:provider/start", async (request, response, next) => {
   if (provider === "sso" && process.env.SAML_ENTRYPOINT)
     return response.redirect(process.env.SAML_ENTRYPOINT);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬ DEV BYPASS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
-  // In development mode, when no OAuth credentials are configured, create a
-  // mock session so you can test the full app flow without a real OAuth app.
-  if (process.env.NODE_ENV === "development") {
-    try {
-      const devEmail = `dev-${provider}@localhost.dev`;
-      const devName = `Dev User (${provider})`;
-      const user = await db.user.upsert({
-        where: { email: devEmail },
-        update: { name: devName },
-        create: { email: devEmail, name: devName }
-      });
-      const token = sessionToken(user.id);
-      setSessionCookie(response, token);
-      console.log(`[DEV BYPASS] Auto-logged in as ${devEmail} via ${provider}`);
-      return response.redirect(
-        `${process.env.APP_URL ?? "http://localhost:3000"}?authenticated=1`
-      );
-    } catch (error) {
-      return next(error);
-    }
-  }
-  // Ã¢â€â‚¬Ã¢â€â‚¬ END DEV BYPASS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
   const error = encodeURIComponent(
     `${provider} OAuth is not configured. Add provider credentials to .env.`
@@ -822,16 +810,20 @@ async function userCanAccessProject(userId: string, projectId: string): Promise<
 }
 
 async function checkAIUsage(request: express.Request, response: express.Response, next: express.NextFunction): Promise<void> {
-  const userId = await requireUser(request, response);
-  if (!userId) return;
-  const parsedProjectId = typeof request.body?.projectId === "string" ? request.body.projectId : undefined;
-  const usage = await getOrCreateAIUsage(userId, parsedProjectId);
-  if (usage.requestCount >= usage.limit) {
-    response.status(429).json({ error: "Monthly limit reached", used: usage.requestCount, limit: usage.limit });
-    return;
+  try {
+    const userId = await requireUser(request, response);
+    if (!userId) return;
+    const parsedProjectId = typeof request.body?.projectId === "string" ? request.body.projectId : undefined;
+    const usage = await getOrCreateAIUsage(userId, parsedProjectId);
+    if (usage.requestCount >= usage.limit) {
+      response.status(429).json({ error: "Monthly limit reached", used: usage.requestCount, limit: usage.limit });
+      return;
+    }
+    (request as AuthenticatedRequest).aiUsage = usage;
+    next();
+  } catch (error) {
+    next(error);
   }
-  (request as AuthenticatedRequest).aiUsage = usage;
-  next();
 }
 
 function setSSEHeaders(response: express.Response): void {
@@ -863,7 +855,19 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
       const lastUserMessage = [...parsed.data.messages].reverse().find((message) => message.role === "user");
       if (lastUserMessage) await db.aIMessage.create({ data: { conversationId, role: "USER", content: lastUserMessage.content, command: parsed.data.command } });
     }
-    const upstream = await fetch(`${process.env.AI_URL ?? "http://localhost:4002"}/v1/chat`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "text/event-stream" }, body: JSON.stringify(parsed.data) });
+    const upstreamAbort = new AbortController();
+    const upstream = await fetch(`${process.env.AI_URL ?? "http://localhost:4002"}/v1/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...(process.env.AI_INTERNAL_KEY
+          ? { "X-Internal-Key": process.env.AI_INTERNAL_KEY }
+          : {}),
+      },
+      body: JSON.stringify(parsed.data),
+      signal: upstreamAbort.signal,
+    });
     if (!upstream.ok || !upstream.body) {
       const details = await upstream.text();
       if (upstream.status === 503 && details.includes("AI_NOT_CONFIGURED")) {
@@ -873,6 +877,12 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
     }
     setSSEHeaders(response);
     const reader = upstream.body.getReader();
+    response.once("close", () => {
+      if (!response.writableEnded) {
+        upstreamAbort.abort();
+        void reader.cancel().catch(() => undefined);
+      }
+    });
     const decoder = new TextDecoder();
     let buffer = "";
     let assistantContent = "";
@@ -884,22 +894,29 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
       try {
         const value = JSON.parse(event.slice(6)) as { type?: string; content?: string; tokensUsed?: number; message?: string; code?: string;
         };
-        if (value.type === "chunk") assistantContent += value.content ?? "";
+        if (value.type === "token") assistantContent += value.content ?? "";
         if (value.type === "done") { tokensUsed = value.tokensUsed; upstreamSentDone = true; }
         if (value.type === "error") upstreamHadError = true;
-        response.write(`${event}\n\n`);
-      } catch { response.write(`data: ${JSON.stringify({ type: "error", message: "Invalid AI stream response" })}\n\n`); }
+        if (!response.destroyed) response.write(`${event}\n\n`);
+      } catch {
+        if (!response.destroyed) response.write(`${event}\n\n`);
+      }
     };
-    while (true) {
-      const chunk = await reader.read();
-      buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() ?? "";
-      events.forEach(writeEvent);
-      if (chunk.done) break;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        buffer += decoder.decode(chunk.value ?? new Uint8Array(), { stream: !chunk.done });
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() ?? "";
+        events.forEach(writeEvent);
+        if (chunk.done) break;
+      }
+      if (buffer.trim()) writeEvent(buffer.trim());
+    } catch (error) {
+      if (upstreamAbort.signal.aborted || response.destroyed) return;
+      throw error;
     }
-    if (buffer.trim()) writeEvent(buffer.trim());
-    if (upstreamHadError) {
+    if (upstreamHadError || !upstreamSentDone) {
       response.end();
       return;
     }
@@ -908,10 +925,9 @@ app.post("/v1/ai/chat", checkAIUsage, async (request, response, next) => {
       await db.aIMessage.create({ data: { conversationId, role: "ASSISTANT", content: assistantContent, tokensUsed } });
       await db.aIConversation.update({ where: { id: conversationId }, data: { messageCount: { increment: 2 } } });
     }
-    if (!response.writableEnded && !upstreamSentDone) response.write(`data: ${JSON.stringify({ type: "done", tokensUsed: tokensUsed ?? 0 })}\n\n`);
-    if (!response.writableEnded) response.write("data: [DONE]\n\n");
-    response.end();
+    if (!response.writableEnded) response.end();
   } catch (error) {
+    if (response.destroyed) return;
     if (response.headersSent) { response.write(`data: ${JSON.stringify({ type: "error", message: error instanceof Error ? error.message : "AI request failed" })}\n\n`); response.end(); return; }
     next(error);
   }
